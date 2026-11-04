@@ -30,7 +30,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(fal
 
 // Reveal-on-scroll
 const revealTargets = document.querySelectorAll(
-  ".section-head, .service-card, .who-card, .steps li, .package, .faq details, .contact-copy, .contact-form"
+  ".section-head, .service-card, .who-card, .case, .steps li, .package, .faq details, .contact-copy, .contact-form"
 );
 if ("IntersectionObserver" in window) {
   const io = new IntersectionObserver((entries) => {
