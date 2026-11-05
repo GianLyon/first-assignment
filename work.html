@@ -59,10 +59,11 @@
         </div>
 
         <article class="case">
-          <div class="case-visual" aria-hidden="true">
-            <!-- To use a real photo: add images/amaya.jpg and uncomment the background-image rule for .case-visual in styles.css -->
-            <span class="case-badge">Hotel &amp; luxury suites</span>
-            <div class="case-mark">Amaya</div>
+          <div class="case-visual">
+            <!-- Main photo: add images/amaya/hero.jpg (it appears automatically) -->
+            <img class="case-photo" src="images/amaya/hero.jpg" alt="" onerror="this.remove()" />
+            <span class="case-badge" aria-hidden="true">Hotel &amp; luxury suites</span>
+            <div class="case-mark" aria-hidden="true">Amaya</div>
           </div>
 
           <div class="case-body">
@@ -106,6 +107,45 @@
       </div>
     </section>
 
+
+    <!-- ============ AMAYA PHOTO GALLERY ============ -->
+    <!-- Drop photos into images/amaya/ with the file names below and they appear automatically. -->
+    <section class="section section-flush" id="gallery">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">Gallery</p>
+          <h2>Inside Amaya</h2>
+          <p>A selection of images from our work with Amaya Hotel &amp; Luxury Suites.</p>
+        </div>
+        <div class="gallery">
+          <figure class="gallery-item wide" data-file="images/amaya/suite.jpg">
+            <img src="images/amaya/suite.jpg" alt="Amaya Hotel &amp; Luxury Suites: Luxury suite" loading="lazy" onerror="this.remove()" />
+            <figcaption>Luxury suite</figcaption>
+          </figure>
+          <figure class="gallery-item" data-file="images/amaya/exterior.jpg">
+            <img src="images/amaya/exterior.jpg" alt="Amaya Hotel &amp; Luxury Suites: Exterior" loading="lazy" onerror="this.remove()" />
+            <figcaption>Exterior</figcaption>
+          </figure>
+          <figure class="gallery-item" data-file="images/amaya/pool.jpg">
+            <img src="images/amaya/pool.jpg" alt="Amaya Hotel &amp; Luxury Suites: Pool &amp; outdoor spaces" loading="lazy" onerror="this.remove()" />
+            <figcaption>Pool &amp; outdoor spaces</figcaption>
+          </figure>
+          <figure class="gallery-item wide" data-file="images/amaya/dining.jpg">
+            <img src="images/amaya/dining.jpg" alt="Amaya Hotel &amp; Luxury Suites: Dining" loading="lazy" onerror="this.remove()" />
+            <figcaption>Dining</figcaption>
+          </figure>
+          <figure class="gallery-item" data-file="images/amaya/bathroom.jpg">
+            <img src="images/amaya/bathroom.jpg" alt="Amaya Hotel &amp; Luxury Suites: Bathroom details" loading="lazy" onerror="this.remove()" />
+            <figcaption>Bathroom details</figcaption>
+          </figure>
+          <figure class="gallery-item wide" data-file="images/amaya/lobby.jpg">
+            <img src="images/amaya/lobby.jpg" alt="Amaya Hotel &amp; Luxury Suites: Lobby &amp; lounge" loading="lazy" onerror="this.remove()" />
+            <figcaption>Lobby &amp; lounge</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ CALL TO ACTION ============ -->
     <section class="cta-band">
       <div class="container cta-inner">
@@ -127,6 +167,7 @@
           <span class="logo-text">Hearth <em>&amp;</em> Key</span>
         </a>
         <p class="footer-tag">Marketing that fills rooms and tables.</p>
+        <p class="footer-contact"><a href="tel:+27787094814">+27 78 709 4814</a><br/><a href="https://wa.me/27787094814" target="_blank" rel="noopener">WhatsApp us</a> · <a href="mailto:hello@hearthandkey.com">hello@hearthandkey.com</a></p>
       </div>
       <div>
         <h4>Services</h4>
@@ -135,11 +176,13 @@
           <li><a href="services.html#channel-management">Channel Management</a></li>
           <li><a href="services.html#reservations">Reservation Management</a></li>
           <li><a href="services.html#photography">Photography &amp; Video</a></li>
-          <li><a href="services.html#sales-marketing">Sales &amp; Marketing</a></li>
+          <li><a href="services.html#menu-design">Menu Design</a></li>
           <li><a href="services.html#websites">Website Building &amp; Maintenance</a></li>
-          <li><a href="services.html#crm-email">CRM &amp; Email Marketing</a></li>
           <li><a href="services.html#seo-geo">SEO &amp; GEO</a></li>
           <li><a href="services.html#paid-advertising">Paid Advertising</a></li>
+          <li><a href="services.html#sales-marketing">Sales &amp; Marketing</a></li>
+          <li><a href="services.html#crm-email">CRM &amp; Email Marketing</a></li>
+          <li><a href="services.html#sales-reporting">Sales Reporting</a></li>
         </ul>
       </div>
       <div>

@@ -31,7 +31,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(fal
 
 // Reveal-on-scroll
 const revealTargets = document.querySelectorAll(
-  ".section-head, .service-card, .svc-tile, .who-card, .case, .case-teaser, .steps li, .package, .faq details, .contact-copy, .contact-form"
+  ".section-head, .service-card, .svc-tile, .svc-detail-copy, .svc-detail-visual, .showcase-grid figure, .gallery-item, .who-card, .case, .case-teaser, .steps li, .package, .faq details, .contact-copy, .contact-form"
 );
 if ("IntersectionObserver" in window) {
   const io = new IntersectionObserver((entries) => {
@@ -55,10 +55,17 @@ if ("IntersectionObserver" in window) {
 const form = document.getElementById("contact-form");
 if (form) {
   // "Ask about <package>" buttons link here with ?package=Name
-  const pkg = new URLSearchParams(location.search).get("package");
+  const params = new URLSearchParams(location.search);
+  const pkg = params.get("package");
   const msg = form.querySelector("#message");
   if (pkg && /^[\w ]{1,30}$/.test(pkg) && !msg.value.trim()) {
     msg.value = `I'm interested in the ${pkg} package.`;
+  }
+  // "Ask about <service>" links come here with ?service=<id>: tick that service
+  const svc = params.get("service");
+  if (svc) {
+    const box = [...form.querySelectorAll('input[name="services"]')].find((b) => b.dataset.id === svc);
+    if (box) box.checked = true;
   }
 
   const status = form.querySelector(".form-status");
