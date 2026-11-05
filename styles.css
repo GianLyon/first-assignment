@@ -708,3 +708,7 @@ p { margin: 0 0 1em; }
   .contact-form { padding: 24px 18px; }
   .section-head { margin-bottom: 40px; }
 }
+
+/* Menu mock-up: currency note */
+.m-menu .m-menu-top { display: block; }
+.m-menu .m-menu-cur { display: block; text-align: center; font-family: var(--sans); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted) !important; margin: 0 0 4px; }
