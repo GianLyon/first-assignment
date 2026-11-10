@@ -1,0 +1,387 @@
+// Hearth & Key PMS: staff web app (talks to the JSON API under /api).
+(() => {
+  'use strict';
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const num = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
+  const ugx = (n) => 'UGX ' + num(n);
+  const fdate = (d) => d ? new Date(d.slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+  const fdateLong = (d) => d ? new Date(d.slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) : '';
+  const ftime = (t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  const nights = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 864e5);
+  const guestName = (r) => `${r.first_name || ''} ${r.last_name || ''}`.trim();
+  const DEPT = { rooms: 'Rooms', fnb: 'Food & beverage', amenities: 'Amenities', events: 'Events', other: 'Other' };
+  const METHOD = { cash: 'Cash', card: 'Card', mobile_money: 'Mobile money', bank_transfer: 'Bank transfer', company_account: 'Company account' };
+  const STATUS = { reserved: ['Reserved', 'info'], in_house: ['In-house', 'ink'], checked_out: ['Checked out', ''], cancelled: ['Cancelled', 'bad'], no_show: ['No-show', 'bad'] };
+  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor' };
+  const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
+
+  let ME = null, CAN = {}, SETTINGS = null;
+  const ui = { tab: {}, q: {} };
+
+  /* ---------- API ---------- */
+  async function api(method, path, body) {
+    const res = await fetch('/api' + path, { method, credentials: 'same-origin', headers: body !== undefined || method !== 'GET' ? { 'content-type': 'application/json' } : {}, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && path !== '/auth/login') { ME = null; renderLogin('Your session has ended. Please sign in again.'); throw new Error('Signed out'); }
+    if (!res.ok) { const e = new Error(data.error || 'Request failed'); e.details = data.details; e.status = res.status; throw e; }
+    return data;
+  }
+  const GET = (p) => api('GET', p), POST = (p, b) => api('POST', p, b), PUT = (p, b) => api('PUT', p, b), PATCH = (p, b) => api('PATCH', p, b);
+
+  /* ---------- UI helpers ---------- */
+  function toast(html, bad = false) { const t = document.createElement('div'); t.className = 'toast'; if (bad) t.classList.add('toast-bad'); t.innerHTML = html; $('#toasts').appendChild(t); while ($('#toasts').children.length > 4) $('#toasts').firstChild.remove(); setTimeout(() => t.remove(), 5000); }
+  let modalSubmit = null;
+  function modal(title, body, onSubmit) { $('#modal-title').textContent = title; $('#modal-body').innerHTML = body; modalSubmit = onSubmit || null; $('#modal').hidden = false; const f = $('#modal-body input:not([type=hidden]), #modal-body select, #modal-body textarea'); if (f) f.focus(); }
+  const closeModal = () => { $('#modal').hidden = true; modalSubmit = null; };
+  const pill = (t, c = '') => `<span class="pill ${c}">${esc(t)}</span>`;
+  const statusPill = (s) => pill(...(STATUS[s] || [s, '']));
+  const opts = (list, sel) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const table = (head, rows, empty = 'Nothing to show.') => `<div class="tbl-wrap"><table><thead><tr>${head.map((h) => `<th class="${h.startsWith('#') ? 'num' : ''}">${esc(h.replace(/^#/, ''))}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.join('') : `<tr><td colspan="${head.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table></div>`;
+  const tabs = (key, list, def) => { const cur = ui.tab[key] || def || list[0][0]; return `<div class="tabs" role="tablist">${list.map(([v, l]) => `<button type="button" role="tab" aria-selected="${v === cur}" class="${v === cur ? 'on' : ''}" data-action="tab" data-key="${key}" data-val="${v}">${esc(l)}</button>`).join('')}</div>`; };
+  const cur = (key, def) => ui.tab[key] || def;
+  const formErr = (form, msg) => { let n = form.querySelector('.form-err'); if (!n) { n = document.createElement('p'); n.className = 'note err form-err'; form.prepend(n); } n.textContent = msg; };
+  const cancelBtn = '<button type="button" class="btn btn-ghost" data-action="close-modal">Cancel</button>';
+
+  /* ---------- login ---------- */
+  function renderLogin(msg = '') {
+    closeModal();
+    $('#root').innerHTML = `<div class="login-wrap"><form class="login form" data-form="login">
+      <div class="brand"><span class="mark">H</span><span>Hearth &amp; Key <em>PMS</em></span></div>
+      <h1>Sign in</h1><p class="muted mt0">Use the account your administrator gave you.</p>
+      ${msg ? `<p class="note err">${esc(msg)}</p>` : ''}
+      <label>Username<input name="username" autocomplete="username" required autofocus></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn btn-gold">Sign in</button></form></div>`;
+  }
+
+  /* ---------- shell ---------- */
+  const NAV = [
+    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Finance', [['reports', 'Reports', 'reports.view'], ['accounts', 'Accounts', 'accounts.view']]],
+    ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
+  ];
+  const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
+  const route = () => { const [r, id] = (location.hash.replace('#', '') || 'dashboard').split('/'); return { r, id }; };
+  function shell() {
+    $('#root').innerHTML = `<div class="app">
+      <aside class="side" aria-label="Modules"><div class="brand"><span class="mark">H</span><span>Hearth &amp; Key <em>PMS</em></span></div><nav id="side-nav"></nav></aside>
+      <div class="main"><header class="topbar">
+        <button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show menu">☰</button>
+        <div class="prop"><b id="prop-name"></b><span id="biz-date"></span></div>
+        <div class="top-actions user-menu"><span class="user">${esc(ME.full_name)} · ${esc(ROLE[ME.role])}</span>
+          <button class="btn btn-ghost btn-sm" data-action="change-password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div>
+      </header><main id="view" tabindex="-1"></main></div></div>`;
+  }
+  function renderNav() {
+    const { r } = route();
+    $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
+    $('#prop-name').textContent = SETTINGS.property_name;
+    $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
+  }
+  async function refreshSettings() { const me = await GET('/auth/me'); SETTINGS = me.settings; }
+
+  const VIEWS = {};
+  let renderSeq = 0;
+  async function render() {
+    if (!ME) return;
+    const { r, id } = route();
+    const need = VIEW_PERM[r] || (r === 'res' ? 'reservations.view' : null);
+    const view = VIEWS[r] && (!need || CAN[need]) ? r : 'dashboard';
+    if (view !== r && location.hash && location.hash !== '#dashboard') { history.replaceState(null, '', '#dashboard'); }
+    renderNav(); document.body.classList.remove('nav-open');
+    const seq = ++renderSeq;
+    try {
+      const html = await VIEWS[view](id);
+      if (seq === renderSeq) $('#view').innerHTML = html;
+    } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
+  }
+  const refresh = async () => { await refreshSettings(); await render(); };
+
+  /* ---------- views ---------- */
+  VIEWS.dashboard = async () => {
+    const d = await GET('/dashboard');
+    const occPct = d.rooms.sellable ? Math.round((d.in_house / d.rooms.sellable) * 100) : 0;
+    return `<div class="page-head"><div><h1 class="page">Today at ${esc(d.property_name)}</h1><p class="sub">${fdateLong(d.business_date)}</p></div>
+      <div class="row">${CAN['reservations.manage'] ? '<button class="btn btn-gold" data-action="new-res">+ New reservation</button>' : ''}<a class="btn btn-ghost" href="#board">Room board</a></div></div>
+      <div class="grid g4">
+        <div class="card kpi"><span>In-house</span><b>${d.in_house}</b><small>${occPct}% of ${d.rooms.sellable} sellable rooms</small></div>
+        <div class="card kpi"><span>Arrivals</span><b>${d.arrivals.length}</b><small>still to check in</small></div>
+        <div class="card kpi"><span>Departures</span><b>${d.departures.length}</b><small>still to check out</small></div>
+        <div class="card kpi"><span>Rooms to clean</span><b>${d.rooms.dirty}</b><small>${d.rooms.ooo} out of order</small></div>
+      </div>
+      <div class="grid g2 mt">
+        <div class="card"><h2 class="sec">Arrivals</h2>${table(['Guest', 'Room type', 'Source', ''], d.arrivals.map((a) => `<tr><td><a href="#res/${a.id}">${esc(guestName(a))}</a><br><span class="small muted">${esc(a.code)}</span></td><td>${esc(a.room_type_name)}</td><td>${esc(a.source)}</td><td class="right">${CAN['frontdesk.checkin'] ? `<button class="btn btn-sm btn-gold" data-action="check-in" data-id="${a.id}">Check in</button>` : ''}</td></tr>`), 'No arrivals waiting.')}</div>
+        <div class="card"><h2 class="sec">Departures</h2>${table(['Room', 'Guest', '#Balance', ''], d.departures.map((x) => `<tr><td>${esc(x.room_number)}</td><td><a href="#res/${x.id}">${esc(guestName(x))}</a></td><td class="num">${num(x.balance)}</td><td class="right"><a class="btn btn-sm" href="#res/${x.id}">Open bill</a></td></tr>`), 'No departures waiting.')}</div>
+      </div>
+      <p class="muted small mt">${d.last_audit ? `Last night audit: ${fdate(d.last_audit.business_date)} · ${d.last_audit.room_charges_posted} room charges · ${ugx(d.last_audit.room_revenue)}` : 'No night audit has been run yet.'}</p>`;
+  };
+
+  VIEWS.board = async () => {
+    const d = await GET('/room-board');
+    const floors = [...new Set(d.rooms.map((r) => r.floor || '–'))];
+    const cls = (r) => r.reservation_id ? (r.departure <= d.business_date ? 'dep' : 'occ') : { clean: 'vc', dirty: 'dirty', out_of_order: 'ooo' }[r.hk_status];
+    return `<div class="page-head"><div><h1 class="page">Room board</h1><p class="sub">Click a room to open the guest's bill or update housekeeping.</p></div></div>
+      <div class="legend"><span><i class="lg occ"></i>Occupied</span><span><i class="lg dep"></i>Due out</span><span><i class="lg vc"></i>Vacant clean</span><span><i class="lg dirty"></i>Vacant dirty</span><span><i class="lg ooo"></i>Out of order</span></div>
+      ${floors.map((f) => `<div class="card mt"><h2 class="sec">Floor ${esc(f)}</h2><div class="rack">${d.rooms.filter((r) => (r.floor || '–') === f).map((r) => `
+        <button class="room ${cls(r)}" data-action="room" data-id="${r.id}" data-res="${r.reservation_id || ''}" data-number="${esc(r.number)}" data-hk="${r.hk_status}" data-type="${esc(r.type_code)}">
+          <b>${esc(r.number)}</b><small>${esc(r.type_name)}</small><span class="g">${r.reservation_id ? esc(guestName(r)) : HK[r.hk_status]}</span>${r.reservation_id ? `<small>Until ${fdate(r.departure)}${r.hk_status === 'dirty' ? ' · service' : ''}</small>` : ''}</button>`).join('')}</div></div>`).join('')}`;
+  };
+
+  VIEWS.reservations = async () => {
+    const v = cur('res', 'active'), q = ui.q.res || '';
+    const list = await GET(`/reservations?view=${v}&q=${encodeURIComponent(q)}`);
+    return `<div class="page-head"><div><h1 class="page">Reservations</h1><p class="sub">Search by guest name, phone or booking code.</p></div>
+      <div class="row"><form data-form="res-search" class="row"><input class="search" type="search" name="q" value="${esc(q)}" placeholder="Search…" aria-label="Search reservations"></form>${CAN['reservations.manage'] ? '<button class="btn btn-gold" data-action="new-res">+ New reservation</button>' : ''}</div></div>
+      ${tabs('res', [['active', 'All active'], ['arrivals', 'Arrivals'], ['inhouse', 'In-house'], ['departures', 'Departures'], ['upcoming', 'Upcoming'], ['past', 'Past & cancelled']], 'active')}
+      <div class="card">${table(['Guest', 'Room', 'Arrive', 'Depart', 'Source', 'Status', '#Balance'], list.map((r) => `<tr>
+        <td><a href="#res/${r.id}"><b>${esc(guestName(r))}</b></a><br><span class="small muted">${esc(r.code)} · ${esc(r.room_type_name)}${r.phone ? ' · ' + esc(r.phone) : ''}</span></td>
+        <td>${esc(r.room_number || '–')}</td><td class="nowrap">${fdate(r.arrival)}</td><td class="nowrap">${fdate(r.departure)}</td><td>${esc(r.source)}</td><td>${statusPill(r.status)}</td><td class="num">${num(r.balance)}</td></tr>`), 'No reservations found.')}</div>`;
+  };
+
+  VIEWS.res = async (id) => {
+    const f = await GET(`/reservations/${id}`);
+    const r = f.reservation, t = f.totals, bd = SETTINGS.business_date;
+    const acts = [];
+    if (r.status === 'reserved' && CAN['frontdesk.checkin'] && r.arrival <= bd) acts.push(`<button class="btn btn-gold" data-action="check-in" data-id="${r.id}">Check in</button>`);
+    if (r.status === 'in_house' && CAN['frontdesk.checkout']) acts.push(`<button class="btn" data-action="check-out" data-id="${r.id}" data-bal="${t.balance}">Check out</button>`);
+    if (r.status === 'in_house' && CAN['folio.post']) acts.push(`<button class="btn btn-ghost" data-action="post-charge" data-id="${r.id}">Post charge</button>`);
+    if (['reserved', 'in_house', 'checked_out'].includes(r.status) && CAN['payments.post'] && (r.status !== 'checked_out' || t.balance > 0)) acts.push(`<button class="btn btn-ghost" data-action="take-payment" data-id="${r.id}" data-bal="${t.balance}" data-company="${esc(r.company_name || '')}">Take payment</button>`);
+    if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="edit-res" data-id="${r.id}">Edit stay</button>`);
+    if (r.status === 'reserved' && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="cancel-res" data-id="${r.id}">Cancel booking</button>`);
+    acts.push('<button class="btn btn-ghost" data-action="print">Print invoice</button>');
+    const voidBtn = (kind, x) => !x.voided && CAN['folio.void'] ? `<button class="link small" data-action="void" data-kind="${kind}" data-id="${x.id}">Void</button>` : (x.voided ? `<span class="small muted" title="${esc(x.void_reason)}">void</span>` : '');
+    return `<div class="page-head no-print"><div><p class="sub"><a href="#reservations">← Reservations</a></p><h1 class="page">${esc(guestName(r))}</h1><p class="sub">${esc(r.code)} · ${statusPill(r.status)}</p></div><div class="row">${acts.join('')}</div></div>
+      <div class="card"><div class="inv-head"><div><div class="only-print"><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Guest invoice · printed ${fdateLong(bd)}</p></div>
+        <dl class="kv"><dt>Guest</dt><dd>${esc(guestName(r))}</dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
+        <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${ugx(r.rate)} / night</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}</dd></dl></div>
+        ${r.notes ? `<p class="note">${esc(r.notes)}</p>` : ''}
+        <h2 class="sec mt">Charges</h2>
+        ${table(['Date', 'Description', 'Department', '#Amount', ''], f.charges.map((c) => `<tr class="${c.voided ? 'void' : ''}"><td class="nowrap">${fdate(c.business_date)}</td><td>${esc(c.description)}</td><td>${DEPT[c.department]}</td><td class="num">${num(c.amount)}</td><td class="right no-print">${voidBtn('charge', c)}</td></tr>`), 'No charges yet.')}
+        <h2 class="sec mt">Payments</h2>
+        ${table(['Date', 'Method', 'Reference', '#Amount', ''], f.payments.map((p) => `<tr class="${p.voided ? 'void' : ''}"><td class="nowrap">${fdate(p.business_date)}</td><td>${METHOD[p.method]}</td><td>${esc(p.reference || '')}</td><td class="num">${num(p.amount)}</td><td class="right no-print">${voidBtn('payment', p)}</td></tr>`), 'No payments yet.')}
+        ${table(['Summary', '#UGX'], [`<tr><td>Total charges</td><td class="num">${num(t.charges)}</td></tr>`, `<tr><td>Total paid</td><td class="num">${num(t.payments)}</td></tr>`, `<tr class="total"><td>${t.balance < 0 ? 'Credit due to guest' : 'Balance due'}</td><td class="num">${num(Math.abs(t.balance))}</td></tr>`])}
+        <p class="small muted">Prices include VAT at ${num(SETTINGS.vat_rate)}%.</p></div>`;
+  };
+
+  VIEWS.availability = async () => {
+    const from = ui.q.availFrom || SETTINGS.business_date;
+    const grid = await GET(`/availability?from=${from}&days=14`);
+    const days = grid[0]?.nights.map((n) => n.night) || [];
+    return `<div class="page-head"><div><h1 class="page">Availability</h1><p class="sub">Rooms still free each night, after bookings and out-of-order rooms.</p></div>
+      <form data-form="avail" class="row"><label class="row small">From <input class="search" type="date" name="from" value="${from}"></label><button class="btn btn-ghost">Show</button></form></div>
+      <div class="card avail">${table(['Room type', 'Rate', ...days.map(fdate)], grid.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${num(t.base_rate)}</td>${t.nights.map((n) => `<td class="${n.free <= 0 ? 'free0' : n.free === 1 ? 'free1' : ''}">${n.free}</td>`).join('')}</tr>`))}</div>`;
+  };
+
+  VIEWS.audit = async () => {
+    const { preview: p, history } = await GET('/night-audit');
+    const blocked = p.pending_departures.length > 0;
+    return `<div class="page-head"><div><h1 class="page">Night audit</h1><p class="sub">Closes ${fdateLong(p.business_date)}: posts tonight's room charges, marks no-shows and moves to the next business day.</p></div></div>
+      <div class="grid g3">
+        <div class="card kpi"><span>Room charges to post</span><b>${p.room_charges}</b><small>${ugx(p.room_revenue)}</small></div>
+        <div class="card kpi"><span>Will become no-shows</span><b>${p.no_shows.length}</b><small>${p.no_shows.map((x) => esc(guestName(x))).join(', ') || 'none'}</small></div>
+        <div class="card kpi"><span>Guests still due out</span><b>${p.pending_departures.length}</b><small>${blocked ? 'must check out or extend first' : 'all clear'}</small></div>
+      </div>
+      ${blocked ? `<div class="card mt"><h2 class="sec">Check out or extend these guests first</h2>${table(['Room', 'Guest', ''], p.pending_departures.map((x) => `<tr><td>${esc(x.room)}</td><td>${esc(guestName(x))}</td><td class="right"><a class="btn btn-sm" href="#res/${x.id}">Open</a></td></tr>`))}</div>` : ''}
+      <div class="row mt"><button class="btn btn-gold" data-action="run-audit" ${blocked ? 'disabled' : ''}>Run night audit for ${fdate(p.business_date)}</button></div>
+      <div class="card mt"><h2 class="sec">History</h2>${table(['Date', 'Run by', 'Run at', '#Room charges', '#Room revenue', '#No-shows'], history.map((h) => `<tr><td>${fdate(h.business_date)}</td><td>${esc(h.run_by_name || '')}</td><td>${ftime(h.run_at)}</td><td class="num">${h.room_charges_posted}</td><td class="num">${num(h.room_revenue)}</td><td class="num">${h.no_shows}</td></tr>`), 'No audits yet.')}</div>`;
+  };
+
+  VIEWS.reports = async () => {
+    const date = ui.q.repDate || addDays(SETTINGS.business_date, -1);
+    const d = await GET(`/reports/daily?date=${date}`);
+    return `<div class="page-head"><div><h1 class="page">Daily manager's report</h1><p class="sub">${fdateLong(d.date)}${d.audited ? '' : ' · not yet closed by the night audit'}</p></div>
+      <div class="row no-print"><form data-form="rep" class="row"><input class="search" type="date" name="date" value="${d.date}" aria-label="Report date"><button class="btn btn-ghost">Show</button></form><button class="btn btn-ghost" data-action="print">Print</button></div></div>
+      <div class="grid g4">${[['Occupancy', Math.round(d.occupancy * 100) + '%', `${d.occupied_rooms} of ${d.sellable_rooms} rooms`], ['ADR', num(d.adr), 'UGX average rate'], ['RevPAR', num(d.revpar), 'UGX per available room'], ['Revenue', num(d.revenue_total), `incl. VAT ${num(d.vat_included)}`]].map(([l, v, s]) => `<div class="card kpi"><span>${l}</span><b>${v}</b><small>${s}</small></div>`).join('')}</div>
+      <div class="grid g2 mt">
+        <div class="card"><h2 class="sec">Revenue by department</h2>${table(['Department', '#UGX'], Object.entries(d.revenue).map(([k, v]) => `<tr><td>${DEPT[k]}</td><td class="num">${num(v)}</td></tr>`).concat([`<tr class="total"><td>Total</td><td class="num">${num(d.revenue_total)}</td></tr>`]))}</div>
+        <div class="card"><h2 class="sec">Collections</h2>${table(['Method', '#UGX'], Object.entries(d.payments).map(([k, v]) => `<tr><td>${METHOD[k]}</td><td class="num">${num(v)}</td></tr>`).concat([`<tr class="total"><td>Total</td><td class="num">${num(Object.values(d.payments).reduce((a, b) => a + b, 0))}</td></tr>`]))}</div>
+      </div>`;
+  };
+
+  VIEWS.accounts = async () => {
+    const t = cur('acc', 'tb');
+    let body;
+    if (t === 'tb') {
+      const tb = await GET('/accounts/trial-balance');
+      const ok = tb.total_debit === tb.total_credit;
+      body = `<div class="card">${table(['Code', 'Account', 'Type', '#Debit', '#Credit'], tb.lines.filter((l) => l.debit || l.credit).map((l) => `<tr><td>${l.code}</td><td>${esc(l.name)}</td><td>${esc(l.type)}</td><td class="num">${l.debit ? num(l.debit) : ''}</td><td class="num">${l.credit ? num(l.credit) : ''}</td></tr>`).concat([`<tr class="total"><td colspan="3">Totals ${ok ? pill('Balanced', 'ok') : pill('Out of balance', 'bad')}</td><td class="num">${num(tb.total_debit)}</td><td class="num">${num(tb.total_credit)}</td></tr>`]), 'No postings yet.')}</div>`;
+    } else {
+      const j = await GET('/accounts/journal?limit=100');
+      body = `<div class="card">${table(['Date', 'Description', 'Account', '#Debit', '#Credit'], j.flatMap((e) => e.lines.map((l, i) => `<tr><td class="nowrap">${i ? '' : fdate(e.business_date)}</td><td>${i ? '' : esc(e.description) + `<br><span class="small muted">${esc(e.created_by_name || 'System')}</span>`}</td><td>${l.account} ${esc(l.name)}</td><td class="num">${l.debit ? num(l.debit) : ''}</td><td class="num">${l.credit ? num(l.credit) : ''}</td></tr>`)), 'No postings yet.')}</div>`;
+    }
+    return `<div class="page-head"><div><h1 class="page">Accounts</h1><p class="sub">Every charge, payment and void is posted automatically as a balanced double entry.</p></div></div>${tabs('acc', [['tb', 'Trial balance'], ['journal', 'Journal']], 'tb')}${body}`;
+  };
+
+  VIEWS.settings = async () => {
+    const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]);
+    return `<div class="page-head"><div><h1 class="page">Settings</h1><p class="sub">Property details, room types and rooms.</p></div></div>
+      <div class="card"><h2 class="sec">Property</h2><form class="form" data-form="settings"><div class="two"><label>Property name<input name="property_name" value="${esc(SETTINGS.property_name)}" required></label><label>VAT rate (%)<input name="vat_rate" type="number" step="0.01" min="0" max="99" value="${SETTINGS.vat_rate}" required></label></div><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Room types</h2><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div>
+        ${table(['Code', 'Name', '#Rate (UGX)', '#Max guests', 'Active', ''], types.map((t) => `<tr><td>${esc(t.code)}</td><td>${esc(t.name)}</td><td class="num">${num(t.base_rate)}</td><td class="num">${t.max_occupancy}</td><td>${t.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Rooms</h2><button class="btn btn-sm btn-gold" data-action="room-edit">+ Room</button></div>
+        ${table(['Room', 'Type', 'Floor', 'Housekeeping', 'Active', ''], rooms.map((r) => `<tr><td><b>${esc(r.number)}</b></td><td>${esc(r.type_name)}</td><td>${esc(r.floor || '')}</td><td>${HK[r.hk_status]}</td><td>${r.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-edit" data-id="${r.id}">Edit</button></td></tr>`))}</div>`;
+  };
+
+  VIEWS.users = async () => {
+    const users = await GET('/users');
+    return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
+      <div class="card">${table(['Name', 'Username', 'Role', 'Status', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
+      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
+  };
+
+  VIEWS.log = async () => {
+    const rows = await GET('/audit-log?limit=200');
+    return `<div class="page-head"><div><h1 class="page">Audit log</h1><p class="sub">Who did what, and when. Entries cannot be edited.</p></div></div>
+      <div class="card">${table(['When', 'User', 'Action', 'Record', 'Details'], rows.map((a) => `<tr><td class="nowrap">${ftime(a.at)}</td><td>${esc(a.full_name || '–')}</td><td>${esc(a.action)}</td><td>${esc(a.entity || '')} ${esc(a.entity_id || '')}</td><td class="small muted">${esc(JSON.stringify(a.details)).slice(0, 160)}</td></tr>`))}</div>`;
+  };
+
+  /* ---------- forms & actions ---------- */
+  async function newReservation() {
+    const types = (await GET('/room-types')).filter((t) => t.active);
+    const bd = SETTINGS.business_date;
+    modal('New reservation', `<form class="form" data-form="new-res">
+      <div class="two"><label>First name<input name="first_name" required maxlength="80"></label><label>Last name<input name="last_name" maxlength="80"></label></div>
+      <div class="two"><label>Phone<input name="phone" maxlength="40" placeholder="+256 …"></label><label>Email<input name="email" type="email" maxlength="120"></label></div>
+      <div class="two"><label>Arrival<input type="date" name="arrival" value="${bd}" min="${bd}" required></label><label>Departure<input type="date" name="departure" value="${addDays(bd, 1)}" min="${addDays(bd, 1)}" required></label></div>
+      <div class="two"><label>Room type<select name="room_type_id">${opts(types.map((t) => [t.id, `${t.name} · ${num(t.base_rate)}`]))}</select></label><label>Nightly rate (blank = standard)<input name="rate" type="number" min="0" step="1"></label></div>
+      <div class="two"><label>Adults<input name="adults" type="number" min="1" value="2"></label><label>Source<select name="source">${opts(['Direct', 'Walk-in', 'Phone', 'Website', 'Booking.com', 'Expedia', 'Airbnb', 'Corporate', 'Travel agent'].map((s) => [s, s]))}</select></label></div>
+      <label>Company (if billing a company)<input name="company_name" maxlength="120"></label>
+      <label>Notes<textarea name="notes" rows="2" maxlength="1000"></textarea></label>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Save reservation</button></div></form>`,
+      async (f) => {
+        const r = await POST('/reservations', { guest: { first_name: f.first_name, last_name: f.last_name, phone: f.phone, email: f.email }, arrival: f.arrival, departure: f.departure, room_type_id: Number(f.room_type_id), rate: f.rate === '' ? null : Number(f.rate), adults: Number(f.adults), source: f.source, company_name: f.company_name, notes: f.notes });
+        location.hash = `#res/${r.id}`; return `Reservation ${esc(r.code)} saved.`;
+      });
+  }
+  async function checkInForm(id) {
+    const [f, rooms] = await Promise.all([GET(`/reservations/${id}`), GET('/room-board')]);
+    const r = f.reservation;
+    const free = rooms.rooms.filter((x) => !x.reservation_id && x.hk_status !== 'out_of_order');
+    const sameType = free.filter((x) => x.type_code === r.room_type_code), others = free.filter((x) => x.type_code !== r.room_type_code);
+    const label = (x) => `${x.number} · ${x.type_name}${x.hk_status === 'dirty' ? ' (not cleaned)' : ''}`;
+    const best = sameType.find((x) => x.hk_status === 'clean') || sameType[0] || free[0];
+    modal(`Check in · ${guestName(r)}`, `<form class="form" data-form="check-in">
+      <dl class="kv"><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)}</dd><dt>Booked</dt><dd>${esc(r.room_type_name)} · ${ugx(r.rate)}/night</dd></dl>
+      <label>Room<select name="room_id" required>${sameType.length ? `<optgroup label="${esc(r.room_type_name)}">${opts(sameType.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}${others.length ? `<optgroup label="Other types (upgrade/move)">${opts(others.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}</select></label>
+      <div class="two"><label>ID type<select name="id_type">${opts([['', '–'], ['National ID', 'National ID'], ['Passport', 'Passport'], ['Driving permit', 'Driving permit']], r.id_type || '')}</select></label><label>ID number<input name="id_number" value="${esc(r.id_number || '')}" maxlength="60"></label></div>
+      <label class="row"><input type="checkbox" name="allow_dirty" value="1"> Allow a room that has not been cleaned yet</label>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold" ${free.length ? '' : 'disabled'}>Check in</button></div></form>`,
+      async (v) => { const res = await POST(`/reservations/${id}/check-in`, { room_id: Number(v.room_id), allow_dirty: !!v.allow_dirty, guest: { id_type: v.id_type || null, id_number: v.id_number || null } }); return `Checked in to room ${esc(res.room)}.`; });
+  }
+  function paymentForm(id, bal, company) {
+    modal('Take payment', `<form class="form" data-form="pay">
+      <div class="two"><label>Amount (UGX)<input name="amount" type="number" min="1" step="1" value="${Math.max(0, bal)}" required></label><label>Method<select name="method">${opts(Object.entries(METHOD), 'cash')}</select></label></div>
+      <div class="two"><label>Reference (receipt / transaction no.)<input name="reference" maxlength="80"></label><label>Company (for company account)<input name="company_name" value="${esc(company || '')}" maxlength="120"></label></div>
+      <p class="note">“Company account” moves the balance to the company's account to invoice later.</p>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Record payment</button></div></form>`,
+      async (v) => { await POST(`/reservations/${id}/payments`, { amount: Number(v.amount), method: v.method, reference: v.reference, company_name: v.company_name }); return `${ugx(v.amount)} recorded.`; });
+  }
+
+  const A = {
+    'close-modal': closeModal,
+    'toggle-nav': () => document.body.classList.toggle('nav-open'),
+    tab: (d) => { ui.tab[d.key] = d.val; render(); },
+    print: () => window.print(),
+    logout: async () => { await POST('/auth/logout'); ME = null; renderLogin(); },
+    'change-password': () => modal('Change password', `<form class="form" data-form="pw"><label>Current password<input type="password" name="current_password" required autocomplete="current-password"></label><label>New password (8+ characters)<input type="password" name="new_password" minlength="8" required autocomplete="new-password"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Change</button></div></form>`,
+      async (v) => { await POST('/auth/change-password', v); return 'Password changed.'; }),
+    'new-res': () => newReservation(),
+    'check-in': (d) => checkInForm(d.id),
+    'check-out': async (d) => {
+      if (Number(d.bal) > 0) { toast(`Balance of ${ugx(d.bal)} is still due. Take payment first.`, true); return; }
+      if (!confirm('Check this guest out?')) return;
+      await POST(`/reservations/${d.id}/check-out`); toast('Checked out. Room sent to housekeeping.'); refresh();
+    },
+    'post-charge': (d) => modal('Post charge', `<form class="form" data-form="charge"><label>Description<input name="description" required maxlength="200" placeholder="e.g. Dinner, Laundry, Minibar"></label>
+      <div class="two"><label>Department<select name="department">${opts(Object.entries(DEPT), 'fnb')}</select></label><label>Amount (UGX, VAT included)<input name="amount" type="number" min="1" step="1" required></label></div>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Post to bill</button></div></form>`,
+      async (v) => { await POST(`/reservations/${d.id}/charges`, { description: v.description, department: v.department, amount: Number(v.amount) }); return 'Charge posted.'; }),
+    'take-payment': (d) => paymentForm(d.id, Number(d.bal), d.company),
+    'edit-res': async (d) => {
+      const [{ reservation: r }, types] = await Promise.all([GET(`/reservations/${d.id}`), GET('/room-types')]);
+      const inHouse = r.status === 'in_house';
+      modal('Edit stay', `<form class="form" data-form="edit-res"><div class="two"><label>Arrival<input type="date" name="arrival" value="${r.arrival}" ${inHouse ? 'disabled' : ''} required></label><label>Departure<input type="date" name="departure" value="${r.departure}" required></label></div>
+        <div class="two"><label>Room type<select name="room_type_id" ${inHouse ? 'disabled' : ''}>${opts(types.map((t) => [t.id, t.name]), r.room_type_id)}</select></label><label>Nightly rate<input name="rate" type="number" min="0" value="${r.rate}" ${inHouse ? 'disabled' : ''}></label></div>
+        <label>Company<input name="company_name" value="${esc(r.company_name || '')}"></label><label>Notes<textarea name="notes" rows="2">${esc(r.notes || '')}</textarea></label>
+        ${inHouse ? '<p class="note">Guest is in-house: only the departure date, company and notes can change.</p>' : ''}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const body = { departure: v.departure, notes: v.notes, company_name: v.company_name }; if (!inHouse) Object.assign(body, { arrival: v.arrival, room_type_id: Number(v.room_type_id), rate: Number(v.rate) }); await PUT(`/reservations/${d.id}`, body); return 'Stay updated.'; });
+    },
+    'cancel-res': (d) => modal('Cancel booking', `<form class="form" data-form="cancel"><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Cancel booking</button></div></form>`,
+      async (v) => { await POST(`/reservations/${d.id}/cancel`, v); return 'Booking cancelled.'; }),
+    void: (d) => modal(`Void ${d.kind}`, `<form class="form" data-form="void"><p class="note">The original entry stays on record and a reversing entry is posted to the accounts.</p><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Void</button></div></form>`,
+      async (v) => { await POST(`/${d.kind === 'charge' ? 'charges' : 'payments'}/${d.id}/void`, v); return `${d.kind === 'charge' ? 'Charge' : 'Payment'} voided.`; }),
+    room: (d) => {
+      if (d.res) { location.hash = `#res/${d.res}`; return; }
+      const hkBtns = CAN['housekeeping.update'] ? ['clean', 'dirty', 'out_of_order'].filter((h) => h !== d.hk).map((h) => `<button class="btn btn-ghost" data-action="hk" data-id="${d.id}" data-hk="${h}">Mark ${HK[h].toLowerCase()}</button>`).join('') : '';
+      modal(`Room ${d.number}`, `<p>Status: <b>${HK[d.hk]}</b>. Vacant.</p><div class="row">${hkBtns || '<span class="muted">No actions available.</span>'}</div>`);
+    },
+    hk: async (d) => { await PATCH(`/rooms/${d.id}/housekeeping`, { hk_status: d.hk }); closeModal(); toast('Room updated.'); render(); },
+    'run-audit': async () => {
+      if (!confirm(`Run the night audit for ${fdateLong(SETTINGS.business_date)}? This cannot be undone.`)) return;
+      const r = await POST('/night-audit'); toast(`Night audit complete: ${r.room_charges_posted} room charges (${ugx(r.room_revenue)}), ${r.no_shows} no-show(s). Business date is now ${fdate(r.new_business_date)}.`); refresh();
+    },
+    'room-type': async (d) => {
+      const t = d.id ? (await GET('/room-types')).find((x) => String(x.id) === d.id) : null;
+      modal(t ? `Edit ${t.name}` : 'New room type', `<form class="form" data-form="rt"><div class="two"><label>Code<input name="code" value="${esc(t?.code || '')}" ${t ? 'disabled' : 'required'} maxlength="10"></label><label>Name<input name="name" value="${esc(t?.name || '')}" required></label></div>
+        <div class="two"><label>Standard rate (UGX)<input name="base_rate" type="number" min="0" value="${t?.base_rate ?? ''}" required></label><label>Max guests<input name="max_occupancy" type="number" min="1" value="${t?.max_occupancy ?? 2}"></label></div>
+        ${t ? `<label class="row"><input type="checkbox" name="active" value="1" ${t.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const body = { name: v.name, base_rate: Number(v.base_rate), max_occupancy: Number(v.max_occupancy), code: v.code }; if (t) { body.active = !!v.active; await PUT(`/room-types/${t.id}`, body); } else await POST('/room-types', body); return 'Room type saved.'; });
+    },
+    'room-edit': async (d) => {
+      const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]); const r = d.id ? rooms.find((x) => String(x.id) === d.id) : null;
+      modal(r ? `Edit room ${r.number}` : 'New room', `<form class="form" data-form="room"><div class="two"><label>Room number<input name="number" value="${esc(r?.number || '')}" ${r ? 'disabled' : 'required'} maxlength="10"></label><label>Floor<input name="floor" value="${esc(r?.floor || '')}" maxlength="10"></label></div>
+        <label>Room type<select name="room_type_id">${opts(types.map((t) => [t.id, t.name]), r?.room_type_id)}</select></label>${r ? `<label>Notes<input name="notes" value="${esc(r.notes || '')}"></label><label class="row"><input type="checkbox" name="active" value="1" ${r.active ? 'checked' : ''}> Active (in service)</label>` : ''}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (r) await PUT(`/rooms/${r.id}`, { room_type_id: Number(v.room_type_id), floor: v.floor, notes: v.notes, active: !!v.active }); else await POST('/rooms', { number: v.number, floor: v.floor, room_type_id: Number(v.room_type_id) }); return 'Room saved.'; });
+    },
+    'user-edit': async (d) => {
+      const u = d.id ? (await GET('/users')).find((x) => String(x.id) === d.id) : null;
+      modal(u ? `Edit ${u.full_name}` : 'New user', `<form class="form" data-form="user"><div class="two"><label>Full name<input name="full_name" value="${esc(u?.full_name || '')}" required></label><label>Username<input name="username" value="${esc(u?.username || '')}" ${u ? 'disabled' : 'required'} pattern="[a-z0-9._\\-]{3,40}" title="3–40 lowercase letters, numbers, dots, dashes or underscores"></label></div>
+        <div class="two"><label>Role<select name="role">${opts(Object.entries(ROLE), u?.role || 'front_office')}</select></label><label>${u ? 'Reset password (optional)' : 'Password (8+ characters)'}<input name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label></div>
+        ${u ? `<label class="row"><input type="checkbox" name="active" value="1" ${u.active ? 'checked' : ''}> Account active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (u) await PUT(`/users/${u.id}`, { full_name: v.full_name, role: v.role, active: !!v.active, password: v.password || undefined }); else await POST('/users', v); return 'User saved.'; });
+    },
+  };
+
+  const FORMS = {
+    login: async (v) => { try { const r = await POST('/auth/login', v); ME = r.user; await boot(); } catch (e) { renderLogin(e.message); } },
+    'res-search': (v) => { ui.q.res = v.q; render(); },
+    avail: (v) => { ui.q.availFrom = v.from; render(); },
+    rep: (v) => { ui.q.repDate = v.date; render(); },
+    settings: async (v) => { await PUT('/settings', { property_name: v.property_name, vat_rate: Number(v.vat_rate) }); toast('Settings saved.'); refresh(); },
+  };
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-action]'); if (!el) return;
+    const fn = A[el.dataset.action]; if (!fn) return;
+    e.preventDefault();
+    try { await fn(el.dataset, e); } catch (err) { if (err.message !== 'Signed out') toast(esc(err.message), true); }
+  });
+  document.addEventListener('submit', async (e) => {
+    const form = e.target.closest('form[data-form]'); if (!form) return;
+    e.preventDefault();
+    const v = Object.fromEntries(new FormData(form));
+    const btn = form.querySelector('button:not([type=button])'); if (btn) btn.disabled = true;
+    try {
+      if (FORMS[form.dataset.form]) await FORMS[form.dataset.form](v);
+      else if (modalSubmit) { const msg = await modalSubmit(v); closeModal(); if (msg) toast(msg); await refresh(); }
+    } catch (err) { if (err.message !== 'Signed out') formErr(form, err.message); } finally { if (btn && document.contains(btn)) btn.disabled = false; }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+  $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
+  window.addEventListener('hashchange', () => { closeModal(); render().then(() => $('#view')?.focus({ preventScroll: true })); window.scrollTo(0, 0); });
+
+  async function boot() {
+    try {
+      const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings;
+      CAN = (await GET('/meta')).can;
+      shell(); await render();
+    } catch (e) { if (e.message !== 'Signed out') renderLogin(); }
+  }
+  // initial load: show login if not signed in
+  fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => (r.ok ? boot() : renderLogin()));
+})();
