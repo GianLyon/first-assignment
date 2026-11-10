@@ -31,7 +31,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(fal
 
 // Reveal-on-scroll
 const revealTargets = document.querySelectorAll(
-  ".section-head, .service-card, .svc-tile, .svc-detail-copy, .svc-detail-visual, .showcase-grid figure, .gallery-item, .who-card, .case, .case-teaser, .steps li, .package, .faq details, .contact-copy, .contact-form"
+  ".section-head, .service-card, .svc-tile, .module-card, .builtin-card, .flow li, .svc-detail-copy, .svc-detail-visual, .showcase-grid figure, .gallery-item, .who-card, .case, .case-teaser, .steps li, .package, .faq details, .contact-copy, .contact-form"
 );
 if ("IntersectionObserver" in window) {
   const io = new IntersectionObserver((entries) => {
