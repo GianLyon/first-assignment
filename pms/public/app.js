@@ -14,7 +14,7 @@
   const DEPT = { rooms: 'Rooms', fnb: 'Food & beverage', amenities: 'Amenities', events: 'Events', other: 'Other' };
   const METHOD = { cash: 'Cash', card: 'Card', mobile_money: 'Mobile money', bank_transfer: 'Bank transfer', company_account: 'Company account' };
   const STATUS = { reserved: ['Reserved', 'info'], in_house: ['In-house', 'ink'], checked_out: ['Checked out', ''], cancelled: ['Cancelled', 'bad'], no_show: ['No-show', 'bad'] };
-  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor' };
+  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar' };
   const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
 
   let ME = null, CAN = {}, SETTINGS = null;
@@ -59,6 +59,7 @@
   /* ---------- shell ---------- */
   const NAV = [
     ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['accounts', 'Accounts', 'accounts.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
@@ -87,9 +88,12 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || (r === 'res' ? 'reservations.view' : null);
-    const view = VIEWS[r] && (!need || CAN[need]) ? r : 'dashboard';
-    if (view !== r && location.hash && location.hash !== '#dashboard') { history.replaceState(null, '', '#dashboard'); }
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use' }[r] || null;
+    const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
+    const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
+    if (view !== r) history.replaceState(null, '', '#' + view);
+    clearInterval(ui.timer);
+    if (view === 'kitchen') ui.timer = setInterval(() => { if (route().r === 'kitchen' && $('#modal').hidden) render(); }, 15000);
     renderNav(); document.body.classList.remove('nav-open');
     const seq = ++renderSeq;
     try {
@@ -228,7 +232,7 @@
     const users = await GET('/users');
     return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
       <div class="card">${table(['Name', 'Username', 'Role', 'Status', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
-      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
+      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen only']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
   };
 
   VIEWS.log = async () => {
@@ -236,6 +240,127 @@
     return `<div class="page-head"><div><h1 class="page">Audit log</h1><p class="sub">Who did what, and when. Entries cannot be edited.</p></div></div>
       <div class="card">${table(['When', 'User', 'Action', 'Record', 'Details'], rows.map((a) => `<tr><td class="nowrap">${ftime(a.at)}</td><td>${esc(a.full_name || '–')}</td><td>${esc(a.action)}</td><td>${esc(a.entity || '')} ${esc(a.entity_id || '')}</td><td class="small muted">${esc(JSON.stringify(a.details)).slice(0, 160)}</td></tr>`))}</div>`;
   };
+
+
+  /* ================= FOOD & BEVERAGE ================= */
+  const PMETHOD = { cash: 'Cash', card: 'Card', mobile_money: 'Mobile money', room: 'Charge to room' };
+  const since = (t) => { const m = Math.max(0, Math.round((Date.now() - new Date(t)) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  let POS = null; // cached menu & floor setup
+  const posSetup = async (force) => (POS && !force ? POS : (POS = await GET('/pos/setup')));
+
+  VIEWS.pos = async () => {
+    const [shift, setup] = await Promise.all([GET('/pos/shift'), posSetup(true)]);
+    if (!shift) {
+      return `<div class="page-head"><div><h1 class="page">Point of sale</h1><p class="sub">Open your shift to start taking orders.</p></div></div>
+        <div class="card"><form class="form" data-form="open-shift"><div class="two">
+          <label>Outlet<select name="outlet_id">${opts(setup.outlets.filter((o) => o.active).map((o) => [o.id, o.name]))}</select></label>
+          <label>Opening cash float (UGX)<input name="opening_float" type="number" min="0" step="1" value="0" required></label></div>
+          <div class="actions"><button class="btn btn-gold">Open shift</button></div></form></div>`;
+    }
+    const outletId = ui.posOutlet && setup.outlets.some((o) => o.id === ui.posOutlet) ? ui.posOutlet : shift.outlet_id;
+    const outlet = setup.outlets.find((o) => o.id === outletId);
+    const floor = await GET(`/pos/floor?outlet_id=${outletId}`);
+    return `<div class="page-head"><div><h1 class="page">${esc(outlet.name)}</h1><p class="sub">Shift opened ${ftime(shift.opened_at)} · float ${ugx(shift.opening_float)} · cash taken ${ugx(shift.takings.cash)}</p></div>
+        <div class="row"><button class="btn btn-gold" data-action="quick-check">+ Bill without table</button><button class="btn btn-ghost" data-action="room-service">Room service</button><button class="btn btn-ghost" data-action="close-shift">Close shift</button></div></div>
+      <div class="tabs">${setup.outlets.filter((o) => o.active).map((o) => `<button class="${o.id === outletId ? 'on' : ''}" data-action="pos-outlet" data-id="${o.id}">${esc(o.name)}</button>`).join('')}</div>
+      ${floor.tables.length ? `<div class="card"><h2 class="sec">Tables</h2><div class="rack">${floor.tables.map((t) => t.check_id
+        ? `<a class="room occ" href="#check/${t.check_id}"><b>${esc(t.name)}</b><small>${esc(t.code)} · ${t.covers} guest(s)</small><span class="g">${ugx(t.total)}</span><small>${since(t.opened_at)} · ${esc(t.opened_by_name || '')}</small></a>`
+        : `<button class="room vc" data-action="new-check" data-table="${t.id}" data-name="${esc(t.name)}"><b>${esc(t.name)}</b><small>${t.seats} seats</small><span class="g">Free</span></button>`).join('')}</div></div>` : ''}
+      <div class="card mt"><h2 class="sec">Other open bills</h2>${table(['Bill', 'For', 'Open', '#Total', ''], floor.other.map((c) => `<tr><td>${esc(c.code)}</td><td>${c.room_number ? `Room ${esc(c.room_number)} · ${esc(c.last_name)}` : 'Walk-in / takeaway'}</td><td>${since(c.opened_at)}</td><td class="num">${num(c.total)}</td><td class="right"><a class="btn btn-sm" href="#check/${c.check_id}">Open</a></td></tr>`), 'None.')}</div>`;
+  };
+
+  VIEWS.check = async (id) => {
+    const [d, setup] = await Promise.all([GET(`/pos/checks/${id}`), posSetup()]);
+    const c = d.check, open = c.status === 'open';
+    const cats = setup.categories.filter((x) => x.active);
+    const cat = cats.find((x) => x.id === ui.posCat) || cats[0];
+    const items = setup.items.filter((i) => i.active && i.category_id === cat?.id);
+    const pending = d.lines.filter((l) => l.status === 'pending').length;
+    const who = c.table_name ? `Table ${esc(c.table_name)}` : c.room_number ? `Room ${esc(c.room_number)} · ${esc(c.last_name)}` : 'Walk-in';
+    const lineRow = (l) => `<div class="cart-line ${l.status === 'voided' ? 'void-line' : ''}"><span>${esc(l.name)}${l.note ? `<br><small class="muted">${esc(l.note)}</small>` : ''}<br><small class="muted">${{ pending: 'not sent', sent: l.station === 'bar' ? 'sent to bar' : 'sent to kitchen', voided: 'void: ' + esc(l.void_reason || '') }[l.status]}</small></span>
+      ${open && l.status === 'pending' ? `<span class="qty"><button class="link small" data-action="line-note" data-id="${l.id}" data-note="${esc(l.note || '')}">note</button> <button data-action="line-qty" data-id="${l.id}" data-qty="${l.qty - 1}" aria-label="Less">−</button>${l.qty}<button data-action="line-qty" data-id="${l.id}" data-qty="${l.qty + 1}" aria-label="More">+</button></span>`
+        : `<span class="qty">${l.qty}${open && l.status === 'sent' && CAN['pos.void'] ? ` <button class="link small" data-action="line-void" data-id="${l.id}">void</button>` : ''}</span>`}
+      <b>${num(l.unit_price * l.qty)}</b></div>`;
+    return `<div class="page-head"><div><p class="sub"><a href="#pos">← Floor</a></p><h1 class="page">${who}</h1><p class="sub">${esc(c.code)} · ${esc(c.outlet_name)} · ${c.covers} guest(s) · ${open ? 'open ' + since(c.opened_at) : statusPillPos(c.status)}</p></div>
+        ${open ? `<div class="row">${c.table_id ? `<button class="btn btn-ghost" data-action="move-check" data-id="${c.id}">Move table</button>` : ''}<button class="btn btn-ghost" data-action="void-check" data-id="${c.id}">Void bill</button></div>` : ''}</div>
+      <div class="pos">
+        <div>${open ? `<div class="tabs">${cats.map((x) => `<button class="${x.id === cat?.id ? 'on' : ''}" data-action="pos-cat" data-id="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+          <div class="items">${items.map((i) => `<button class="item" data-action="add-item" data-check="${c.id}" data-id="${i.id}"><b>${esc(i.name)}</b><span>${num(i.price)}</span></button>`).join('') || '<p class="muted">No items in this category.</p>'}</div>
+          <p class="small muted mt">Tap “note” on an item in the bill to add instructions for the kitchen or bar (e.g. “no onions”).</p>` : `<div class="card">${table(['Paid by', 'Reference', '#Amount'], d.payments.map((p) => `<tr><td>${PMETHOD[p.method]}${p.room_number ? ' · room ' + esc(p.room_number) : ''}</td><td>${esc(p.reference || '')}</td><td class="num">${num(p.amount)}</td></tr>`), 'No payments.')}</div>`}</div>
+        <div class="card cart"><h2 class="sec">Bill ${esc(c.code)}</h2>
+          ${d.lines.length ? d.lines.map(lineRow).join('') : '<p class="empty">Tap items to add them.</p>'}
+          <div class="cart-total"><span>Total</span><span>${ugx(d.total)}</span></div>
+          ${open ? `<div class="pay-btns"><button class="btn" data-action="send-check" data-id="${c.id}" ${pending ? '' : 'disabled'}>Send ${pending ? `(${pending})` : ''}</button><button class="btn btn-gold" data-action="pay-check" data-id="${c.id}" data-total="${d.total}" data-res="${c.reservation_id || ''}" ${d.total ? '' : 'disabled'}>Pay</button></div>
+          <p class="note mt">“Send” prints the order to the kitchen or bar screen. Paying sends anything not yet sent.</p>` : '<div class="row"><button class="btn btn-ghost" data-action="print">Print receipt</button></div>'}
+        </div></div>`;
+  };
+  const statusPillPos = (s) => pill({ settled: 'Paid', voided: 'Void', open: 'Open' }[s] || s, { settled: 'ok', voided: 'bad' }[s] || '');
+
+  VIEWS.kitchen = async () => {
+    const station = cur('station', 'kitchen');
+    const list = await GET(`/pos/tickets?station=${station}`);
+    return `<div class="page-head"><div><h1 class="page">${station === 'bar' ? 'Bar' : 'Kitchen'} tickets</h1><p class="sub">Refreshes every 15 seconds. Oldest first.</p></div></div>
+      ${tabs('station', [['kitchen', 'Kitchen'], ['bar', 'Bar']], 'kitchen')}
+      <div class="tickets">${list.map((t) => `<div class="card ticket t-${t.status}"><div class="row between"><b>${t.table_name ? 'Table ' + esc(t.table_name) : t.room_number ? 'Room ' + esc(t.room_number) : 'Walk-in'}</b><span class="small muted">${esc(t.code)} · ${esc(t.outlet_name)}</span></div>
+        <p class="small muted mt0">${since(t.created_at)} ago · ${t.status}</p>
+        <ul class="ticket-items">${t.items.map((i) => `<li class="${i.voided ? 'void-line' : ''}"><b>${i.qty}×</b> ${esc(i.name)}${i.note ? `<br><em>${esc(i.note)}</em>` : ''}${i.voided ? ' <span class="pill bad">VOID</span>' : ''}</li>`).join('')}</ul>
+        ${t.status === 'new' ? `<button class="btn btn-gold" data-action="ticket" data-id="${t.id}" data-status="ready">Ready</button>` : t.status === 'ready' ? `<button class="btn" data-action="ticket" data-id="${t.id}" data-status="served">Served</button>` : '<span class="pill ok">Served</span>'}</div>`).join('') || '<div class="card"><p class="empty">No tickets right now.</p></div>'}</div>`;
+  };
+
+  VIEWS.menu = async () => {
+    const setup = await posSetup(true);
+    const catName = (id) => setup.categories.find((c) => c.id === id)?.name || '';
+    const t = cur('menu', 'items');
+    const body = {
+      items: () => `<div class="row between mb"><span class="muted">Prices include VAT.</span><button class="btn btn-gold btn-sm" data-action="item-edit">+ Menu item</button></div>${table(['Item', 'Category', '#Price', 'On sale', ''], setup.items.map((i) => `<tr><td><b>${esc(i.name)}</b></td><td>${esc(catName(i.category_id))}</td><td class="num">${num(i.price)}</td><td>${i.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="item-edit" data-id="${i.id}">Edit</button></td></tr>`))}`,
+      categories: () => `<div class="row between mb"><span class="muted">The station decides whether tickets go to the kitchen or the bar.</span><button class="btn btn-gold btn-sm" data-action="cat-edit">+ Category</button></div>${table(['Category', 'Station', '#Order', 'Active', ''], setup.categories.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${c.station === 'bar' ? 'Bar' : 'Kitchen'}</td><td class="num">${c.sort}</td><td>${c.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="cat-edit" data-id="${c.id}">Edit</button></td></tr>`))}`,
+      tables: () => `<div class="row between mb"><span></span><button class="btn btn-gold btn-sm" data-action="table-edit">+ Table</button></div>${table(['Table', 'Outlet', '#Seats', 'Active', ''], setup.tables.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(setup.outlets.find((o) => o.id === x.outlet_id)?.name)}</td><td class="num">${x.seats}</td><td>${x.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="table-edit" data-id="${x.id}">Edit</button></td></tr>`))}`,
+      outlets: () => `<div class="row between mb"><span></span><button class="btn btn-gold btn-sm" data-action="outlet-edit">+ Outlet</button></div>${table(['Outlet', 'Type', 'Active', ''], setup.outlets.map((o) => `<tr><td><b>${esc(o.name)}</b></td><td>${esc(o.kind.replace('_', ' '))}</td><td>${o.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="outlet-edit" data-id="${o.id}">Edit</button></td></tr>`))}`,
+    }[t]();
+    return `<div class="page-head"><div><h1 class="page">Menu &amp; tables</h1><p class="sub">Menu items, categories, tables and outlets for the point of sale.</p></div></div>
+      ${tabs('menu', [['items', 'Menu items'], ['categories', 'Categories'], ['tables', 'Tables'], ['outlets', 'Outlets']], 'items')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.possales = async () => {
+    const date = ui.q.posDate || SETTINGS.business_date;
+    const d = await GET(`/pos/reports/sales?date=${date}`);
+    return `<div class="page-head"><div><h1 class="page">Food &amp; beverage sales</h1><p class="sub">${fdateLong(d.date)}</p></div>
+      <div class="row no-print"><form data-form="possales" class="row"><input class="search" type="date" name="date" value="${d.date}" aria-label="Date"><button class="btn btn-ghost">Show</button></form><button class="btn btn-ghost" data-action="print">Print</button></div></div>
+      <div class="grid g4">${[['Total sales', num(d.total)], ['Cash', num(d.by_method.cash)], ['Card + mobile money', num(d.by_method.card + d.by_method.mobile_money)], ['Charged to rooms', num(d.by_method.room)]].map(([l, v]) => `<div class="card kpi"><span>${l}</span><b>${v}</b><small>UGX</small></div>`).join('')}</div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">By outlet</h2>${table(['Outlet', '#Bills', '#Guests', '#Sales'], d.by_outlet.map((o) => `<tr><td>${esc(o.outlet)}</td><td class="num">${o.bills}</td><td class="num">${o.covers}</td><td class="num">${num(o.amount)}</td></tr>`), 'No sales.')}</div>
+        <div class="card"><h2 class="sec">Best sellers</h2>${table(['Item', '#Qty', '#Sales'], d.items.slice(0, 12).map((i) => `<tr><td>${esc(i.name)}</td><td class="num">${i.qty}</td><td class="num">${num(i.amount)}</td></tr>`), 'No sales.')}</div></div>
+      <div class="card mt"><h2 class="sec">Cashier shifts</h2>${table(['Cashier', 'Outlet', 'Opened', 'Closed', '#Expected cash', '#Counted', '#Variance'], d.shifts.map((s) => `<tr><td>${esc(s.full_name)}</td><td>${esc(s.outlet_name)}</td><td>${ftime(s.opened_at)}</td><td>${s.closed_at ? ftime(s.closed_at) : pill('Open', 'warn')}</td><td class="num">${num(s.expected_cash)}</td><td class="num">${s.closed_at ? num(s.counted_cash) : ''}</td><td class="num ${s.variance < 0 ? 'err' : ''}">${s.closed_at ? num(s.variance) : ''}</td></tr>`), 'No shifts.')}</div>
+      <div class="card mt"><h2 class="sec">Voided items</h2>${table(['Bill', 'Item', '#Qty', '#Value', 'Reason', 'By'], d.voids.map((v) => `<tr><td>${esc(v.code)}</td><td>${esc(v.name)}</td><td class="num">${v.qty}</td><td class="num">${num(v.amount)}</td><td>${esc(v.void_reason || '')}</td><td>${esc(v.voided_by || '')}</td></tr>`), 'No voids.')}</div>`;
+  };
+
+  async function payForm(id, total, resId) {
+    const rooms = await GET('/pos/rooms');
+    const roomOpts = rooms.map((r) => [r.reservation_id, `Room ${r.room_number} · ${guestName(r)}`]);
+    const row = (n, method, amount) => `<div class="two tender"><label>Payment ${n}<select name="m${n}">${opts([['', '–'], ...Object.entries(PMETHOD)], method)}</select></label><label>Amount<input name="a${n}" type="number" min="0" step="1" value="${amount}" data-calc="tender"></label></div>`;
+    modal(`Pay ${ugx(total)}`, `<form class="form" data-form="pay-check">
+      ${row(1, resId ? 'room' : 'cash', total)}${row(2, '', '')}${row(3, '', '')}
+      <label>Room (for charge to room)<select name="res">${opts([['', '–'], ...roomOpts], resId)}</select></label>
+      <div class="two"><label>Reference (card / mobile money)<input name="reference" maxlength="80"></label><label>Cash received (to work out change)<input name="tendered" type="number" min="0" step="1" data-calc="tender"></label></div>
+      <p class="note" id="pay-calc" data-total="${total}">Remaining: UGX 0</p>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Complete payment</button></div></form>`,
+      async (v) => {
+        const payments = [1, 2, 3].map((n) => ({ method: v['m' + n], amount: Number(v['a' + n]) })).filter((p) => p.method && p.amount > 0)
+          .map((p) => ({ ...p, reservation_id: p.method === 'room' ? Number(v.res) || null : undefined, reference: p.method === 'card' || p.method === 'mobile_money' ? v.reference : undefined }));
+        if (payments.some((p) => p.method === 'room' && !p.reservation_id)) throw new Error('Choose the guest room to charge.');
+        await POST(`/pos/checks/${id}/settle`, { payments });
+        return 'Bill paid.';
+      });
+    updatePayCalc();
+  }
+  function updatePayCalc() {
+    const f = $('#modal-body form[data-form=pay-check]'); const out = $('#pay-calc'); if (!f || !out) return;
+    const v = Object.fromEntries(new FormData(f)); const total = Number(out.dataset.total);
+    const paid = [1, 2, 3].reduce((a, n) => a + (v['m' + n] ? Number(v['a' + n]) || 0 : 0), 0);
+    const cash = [1, 2, 3].reduce((a, n) => a + (v['m' + n] === 'cash' ? Number(v['a' + n]) || 0 : 0), 0);
+    const tendered = Number(v.tendered) || 0;
+    out.textContent = `Remaining: ${ugx(total - paid)}` + (tendered && cash ? ` · Change to give: ${ugx(Math.max(0, tendered - cash))}` : '');
+    out.classList.toggle('err', total !== paid);
+  }
 
   /* ---------- forms & actions ---------- */
   async function newReservation() {
@@ -280,6 +405,72 @@
   }
 
   const A = {
+
+    'pos-outlet': (d) => { ui.posOutlet = Number(d.id); render(); },
+    'pos-cat': (d) => { ui.posCat = Number(d.id); render(); },
+    'new-check': (d) => modal(`Open ${d.name}`, `<form class="form" data-form="new-check"><label>Number of guests<input name="covers" type="number" min="1" value="2" required></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Open bill</button></div></form>`,
+      async (v) => { const c = await POST('/pos/checks', { outlet_id: ui.posOutlet || undefined, table_id: Number(d.table), covers: Number(v.covers) }); location.hash = `#check/${c.id}`; return null; }),
+    'quick-check': async () => { const c = await POST('/pos/checks', { outlet_id: ui.posOutlet || undefined, covers: 1 }); location.hash = `#check/${c.id}`; },
+    'room-service': async () => {
+      const [rooms, setup] = await Promise.all([GET('/pos/rooms'), posSetup()]);
+      const rsOutlet = setup.outlets.find((o) => o.kind === 'room_service' && o.active);
+      modal('Room service', `<form class="form" data-form="room-service"><label>Guest room<select name="res" required>${opts(rooms.map((r) => [r.reservation_id, `Room ${r.room_number} · ${guestName(r)}`]))}</select></label>${rooms.length ? '' : '<p class="note">No guests are in-house.</p>'}<div class="actions">${cancelBtn}<button class="btn btn-gold" ${rooms.length ? '' : 'disabled'}>Open bill</button></div></form>`,
+        async (v) => { const c = await POST('/pos/checks', { outlet_id: (rsOutlet || {}).id || ui.posOutlet || undefined, reservation_id: Number(v.res) }); location.hash = `#check/${c.id}`; return null; });
+    },
+    'close-shift': async () => {
+      const s = await GET('/pos/shift');
+      modal('Close shift', `<form class="form" data-form="close-shift"><dl class="kv"><dt>Opening float</dt><dd>${ugx(s.opening_float)}</dd><dt>Cash sales</dt><dd>${ugx(s.takings.cash)}</dd><dt>Card</dt><dd>${ugx(s.takings.card)}</dd><dt>Mobile money</dt><dd>${ugx(s.takings.mobile_money)}</dd><dt>Charged to rooms</dt><dd>${ugx(s.takings.room)}</dd></dl>
+        <label>Cash counted in the drawer (UGX)<input name="counted_cash" type="number" min="0" step="1" required></label><label>Notes<input name="notes" maxlength="500"></label>
+        <p class="note">Count the cash before you look at the expected amount. The difference is recorded on the shift report.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Close shift</button></div></form>`,
+        async (v) => { const r = await POST('/pos/shift/close', { counted_cash: Number(v.counted_cash), notes: v.notes }); return `Shift closed. Expected ${ugx(r.expected_cash)}, counted ${ugx(r.counted_cash)}, difference ${ugx(r.variance)}.`; });
+    },
+    'add-item': async (d, e) => {
+      let note = null;
+      if (e.shiftKey) { note = prompt('Note for the kitchen/bar (e.g. no onions):'); if (note === null) return; }
+      await POST(`/pos/checks/${d.check}/lines`, { item_id: Number(d.id), qty: 1, note }); render();
+    },
+    'line-note': (d) => modal('Note for the kitchen / bar', `<form class="form" data-form="line-note"><label>Note<input name="note" value="${esc(d.note)}" maxlength="200" placeholder="e.g. no onions, well done"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Save note</button></div></form>`,
+      async (v) => { await PATCH(`/pos/lines/${d.id}`, { note: v.note }); return null; }),
+    'line-qty': async (d) => { await PATCH(`/pos/lines/${d.id}`, { qty: Number(d.qty) }); render(); },
+    'line-void': (d) => modal('Void item', `<form class="form" data-form="line-void"><p class="note">This item was already sent to the kitchen or bar. The void is recorded with your name.</p><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Void item</button></div></form>`,
+      async (v) => { await PATCH(`/pos/lines/${d.id}`, { qty: 0, reason: v.reason }); return 'Item voided.'; }),
+    'send-check': async (d) => { const r = await POST(`/pos/checks/${d.id}/send`); toast(`Sent to ${r.tickets.map((t) => t.station).join(' and ')}.`); render(); },
+    'pay-check': (d) => payForm(d.id, Number(d.total), d.res ? Number(d.res) : ''),
+    'move-check': async (d) => {
+      const [c, setup] = await Promise.all([GET(`/pos/checks/${d.id}`), posSetup()]);
+      const floor = await GET(`/pos/floor?outlet_id=${c.check.outlet_id}`);
+      modal('Move to table', `<form class="form" data-form="move"><label>Table<select name="table_id">${opts(floor.tables.filter((t) => !t.check_id).map((t) => [t.id, `${t.name} (${t.seats} seats)`]))}</select></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Move</button></div></form>`,
+        async (v) => { await POST(`/pos/checks/${d.id}/move`, { table_id: Number(v.table_id) }); return 'Bill moved.'; });
+    },
+    'void-check': (d) => modal('Void bill', `<form class="form" data-form="void-check"><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Void bill</button></div></form>`,
+      async (v) => { await POST(`/pos/checks/${d.id}/void`, v); location.hash = '#pos'; return 'Bill voided.'; }),
+    ticket: async (d) => { await POST(`/pos/tickets/${d.id}/status`, { status: d.status }); render(); },
+    'item-edit': async (d) => {
+      const setup = await posSetup(true); const i = d.id ? setup.items.find((x) => String(x.id) === d.id) : null;
+      modal(i ? `Edit ${i.name}` : 'New menu item', `<form class="form" data-form="item"><label>Name<input name="name" value="${esc(i?.name || '')}" required maxlength="120"></label>
+        <div class="two"><label>Category<select name="category_id">${opts(setup.categories.map((c) => [c.id, c.name]), i?.category_id)}</select></label><label>Price (UGX, VAT included)<input name="price" type="number" min="0" step="1" value="${i?.price ?? ''}" required></label></div>
+        ${i ? `<label class="row"><input type="checkbox" name="active" value="1" ${i.active ? 'checked' : ''}> On sale</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const body = { name: v.name, category_id: Number(v.category_id), price: Number(v.price), active: i ? !!v.active : true }; if (i) await PUT(`/pos/items/${i.id}`, body); else await POST('/pos/items', body); POS = null; return 'Menu saved.'; });
+    },
+    'cat-edit': async (d) => {
+      const setup = await posSetup(true); const c = d.id ? setup.categories.find((x) => String(x.id) === d.id) : null;
+      modal(c ? `Edit ${c.name}` : 'New category', `<form class="form" data-form="cat"><label>Name<input name="name" value="${esc(c?.name || '')}" required></label>
+        <div class="two"><label>Tickets go to<select name="station">${opts([['kitchen', 'Kitchen'], ['bar', 'Bar']], c?.station)}</select></label><label>Display order<input name="sort" type="number" value="${c?.sort ?? 0}"></label></div>
+        ${c ? `<label class="row"><input type="checkbox" name="active" value="1" ${c.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const body = { name: v.name, station: v.station, sort: Number(v.sort), active: c ? !!v.active : true }; if (c) await PUT(`/pos/categories/${c.id}`, body); else await POST('/pos/categories', body); POS = null; return 'Category saved.'; });
+    },
+    'table-edit': async (d) => {
+      const setup = await posSetup(true); const t = d.id ? setup.tables.find((x) => String(x.id) === d.id) : null;
+      modal(t ? `Edit table ${t.name}` : 'New table', `<form class="form" data-form="table"><div class="two"><label>Table name<input name="name" value="${esc(t?.name || '')}" required maxlength="20"></label><label>Seats<input name="seats" type="number" min="1" value="${t?.seats ?? 4}"></label></div>
+        ${t ? `<label class="row"><input type="checkbox" name="active" value="1" ${t.active ? 'checked' : ''}> In use</label>` : `<label>Outlet<select name="outlet_id">${opts(setup.outlets.map((o) => [o.id, o.name]))}</select></label>`}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (t) await PUT(`/pos/tables/${t.id}`, { name: v.name, seats: Number(v.seats), active: !!v.active }); else await POST('/pos/tables', { name: v.name, seats: Number(v.seats), outlet_id: Number(v.outlet_id) }); POS = null; return 'Table saved.'; });
+    },
+    'outlet-edit': async (d) => {
+      const setup = await posSetup(true); const o = d.id ? setup.outlets.find((x) => String(x.id) === d.id) : null;
+      modal(o ? `Edit ${o.name}` : 'New outlet', `<form class="form" data-form="outlet"><label>Name<input name="name" value="${esc(o?.name || '')}" required></label>
+        ${o ? `<label class="row"><input type="checkbox" name="active" value="1" ${o.active ? 'checked' : ''}> Active</label>` : `<label>Type<select name="kind">${opts([['restaurant', 'Restaurant'], ['bar', 'Bar'], ['room_service', 'Room service'], ['other', 'Other']])}</select></label>`}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (o) await PUT(`/pos/outlets/${o.id}`, { name: v.name, active: !!v.active }); else await POST('/pos/outlets', { name: v.name, kind: v.kind }); POS = null; return 'Outlet saved.'; });
+    },
     'close-modal': closeModal,
     'toggle-nav': () => document.body.classList.toggle('nav-open'),
     tab: (d) => { ui.tab[d.key] = d.val; render(); },
@@ -351,6 +542,8 @@
     'res-search': (v) => { ui.q.res = v.q; render(); },
     avail: (v) => { ui.q.availFrom = v.from; render(); },
     rep: (v) => { ui.q.repDate = v.date; render(); },
+    possales: (v) => { ui.q.posDate = v.date; render(); },
+    'open-shift': async (v) => { await POST('/pos/shift/open', { outlet_id: Number(v.outlet_id), opening_float: Number(v.opening_float) }); ui.posOutlet = Number(v.outlet_id); toast('Shift opened.'); render(); },
     settings: async (v) => { await PUT('/settings', { property_name: v.property_name, vat_rate: Number(v.vat_rate) }); toast('Settings saved.'); refresh(); },
   };
 
@@ -371,6 +564,8 @@
       else if (modalSubmit) { const msg = await modalSubmit(v); closeModal(); if (msg) toast(msg); await refresh(); }
     } catch (err) { if (err.message !== 'Signed out') formErr(form, err.message); } finally { if (btn && document.contains(btn)) btn.disabled = false; }
   });
+  document.addEventListener('input', (e) => { if (e.target.dataset.calc === 'tender' || e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
+  document.addEventListener('change', (e) => { if (e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
   window.addEventListener('hashchange', () => { closeModal(); render().then(() => $('#view')?.focus({ preventScroll: true })); window.scrollTo(0, 0); });

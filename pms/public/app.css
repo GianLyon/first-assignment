@@ -205,3 +205,12 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
 .toast.toast-bad { background: var(--bad); }
 .form label.row { display: flex; font-weight: 500; }
 .form label.row input { width: auto; }
+/* ---------- food & beverage ---------- */
+a.room { text-decoration: none; color: inherit; }
+.void-line, .void-line b { text-decoration: line-through; color: var(--muted); }
+.tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.ticket { border-top: 5px solid var(--gold); }
+.ticket.t-ready { border-top-color: var(--ok); } .ticket.t-served { opacity: .55; border-top-color: var(--line); }
+.ticket-items { list-style: none; padding: 0; margin: 8px 0 14px; display: grid; gap: 6px; font-size: 1rem; }
+.ticket-items em { color: var(--bad); font-size: .85rem; }
+.tender { align-items: end; }

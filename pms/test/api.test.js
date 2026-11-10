@@ -2,50 +2,17 @@
 // Uses TEST_DATABASE_URL (default: local hk_pms_test). The test schema is wiped and rebuilt on every run.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPool, migrate } from '../src/db.js';
-import { createApp } from '../src/app.js';
-import { seedProperty } from '../src/seed.js';
-
-const DB = process.env.TEST_DATABASE_URL || 'postgres://hk:hk_dev_pw@localhost:5432/hk_pms_test';
-const DAY0 = '2026-11-10';
-let pool, server, base;
-
-function client() {
-  let cookie = '';
-  const call = async (method, path, body, { raw = false, headers = {} } = {}) => {
-    const res = await fetch(base + path, {
-      method, headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...headers },
-      body: body !== undefined ? (raw ? body : JSON.stringify(body)) : undefined,
-    });
-    const set = res.headers.get('set-cookie'); if (set) cookie = set.split(';')[0];
-    const data = await res.json().catch(() => null);
-    return { status: res.status, data };
-  };
-  return {
-    get: (p) => call('GET', p), post: (p, b = {}, o) => call('POST', p, b, o), put: (p, b) => call('PUT', p, b), patch: (p, b) => call('PATCH', p, b),
-    login: async (u, pw) => { const r = await call('POST', '/api/auth/login', { username: u, password: pw }); assert.equal(r.status, 200, JSON.stringify(r.data)); return r; },
-  };
-}
-const ok = (r, status = 200) => { assert.equal(r.status, status, JSON.stringify(r.data)); return r.data; };
-const roomId = async (c, number) => (await c.get('/api/rooms')).data.find((r) => r.number === number).id;
-const typeId = async (c, code) => (await c.get('/api/room-types')).data.find((t) => t.code === code).id;
-const book = (c, type_id, arrival, departure, first = 'Test', extra = {}) =>
-  c.post('/api/reservations', { room_type_id: type_id, arrival, departure, guest: { first_name: first, last_name: 'Guest', phone: '+256700000000' }, ...extra });
+import { startTestServer, stopTestServer, client, ok, roomId, typeId, book, DAY0, ctx } from './helpers.js';
 
 let admin;
 before(async () => {
-  pool = createPool(DB);
-  await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  await migrate(pool);
-  await seedProperty(pool, { propertyName: 'Test Hotel', adminPassword: 'admin-pass-123', businessDate: DAY0 });
-  server = createApp(pool).listen(0);
-  base = `http://127.0.0.1:${server.address().port}`;
+  await startTestServer();
   admin = client(); await admin.login('admin', 'admin-pass-123');
   for (const [username, role] of [['frontdesk', 'front_office'], ['housekeep', 'housekeeping'], ['manager1', 'manager'], ['nightaudit', 'night_auditor']]) {
     ok(await admin.post('/api/users', { username, full_name: username.toUpperCase(), role, password: 'password-123' }));
   }
 });
-after(async () => { server?.close(); await pool?.end(); });
+after(stopTestServer);
 
 test('authentication and request guards', async () => {
   const anon = client();
@@ -190,7 +157,7 @@ test('the books always balance and unbalanced entries are rejected by the databa
   const vat = tb.lines.find((l) => l.code === '2100');
   assert.ok(vat.credit > 0);
   await assert.rejects(async () => {
-    const c = await pool.connect();
+    const c = await ctx.pool.connect();
     try {
       await c.query('BEGIN');
       const { rows: [e] } = await c.query("INSERT INTO journal_entries (business_date, description) VALUES ('2026-11-12', 'bad') RETURNING id");

@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HttpError, loadUser } from './auth.js';
+import { HttpError, loadUser, requireUser } from './auth.js';
+import { posRouter } from './routes/pos.js';
 import { apiRouter } from './routes/api.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -28,6 +29,7 @@ export function createApp(pool) {
   });
   app.use('/api', express.json({ limit: '100kb' }));
   app.use('/api', loadUser(pool));
+  app.use('/api/pos', requireUser, posRouter(pool));
   app.use('/api', apiRouter(pool));
   app.use('/api', (_req, _res) => { throw new HttpError(404, 'Not found.'); });
 

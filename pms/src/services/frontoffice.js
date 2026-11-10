@@ -188,7 +188,7 @@ export async function postCharge(db, user, id, body) {
   const description = text(body.description, 'Description', { required: true, max: 200 });
   return insertCharge(db, user, r, s, { department, amount, description });
 }
-async function insertCharge(db, user, r, s, { department, amount, description, date = s.business_date }) {
+export async function insertCharge(db, user, r, s, { department, amount, description, date = s.business_date }) {
   const entryId = await postJournal(db, { date, description: `${r.code}: ${description}`, refType: 'charge', refId: r.id, userId: user?.id, lines: chargeLines(department, amount, s.vat_rate) });
   const { rows: [c] } = await db.query(
     `INSERT INTO folio_charges (reservation_id, business_date, description, department, amount, posted_by, journal_entry_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
@@ -247,6 +247,8 @@ export async function checkOut(db, user, id) {
   const r = await getReservationForUpdate(db, id);
   if (r.status !== 'in_house') throw new HttpError(409, 'This guest is not in-house.');
   const s = await getSettings(db);
+  const { rows: openRs } = await db.query("SELECT code FROM pos_checks WHERE reservation_id=$1 AND status='open'", [r.id]);
+  if (openRs.length) throw new HttpError(409, `This guest has an open room-service bill (${openRs.map((x) => x.code).join(', ')}). Settle it first.`);
   const bal = await balanceOf(db, r.id);
   if (bal > 0) throw new HttpError(409, `Outstanding balance of UGX ${bal.toLocaleString('en-US')}. Take payment or transfer it to a company account first.`);
   // Early departure: the stay now ends today (if at least one night has passed).
@@ -283,7 +285,10 @@ export async function nightAuditPreview(db) {
   const noShows = (await db.query(
     `SELECT r.id, r.code, g.first_name, g.last_name FROM reservations r JOIN guests g ON g.id=r.guest_id WHERE r.status='reserved' AND r.arrival <= $1`, [s.business_date])).rows;
   const inHouse = (await db.query("SELECT count(*)::int AS n, COALESCE(sum(rate),0) AS revenue FROM reservations WHERE status='in_house' AND departure > $1", [s.business_date])).rows[0];
-  return { business_date: s.business_date, pending_departures: pendingDepartures, no_shows: noShows, room_charges: inHouse.n, room_revenue: Number(inHouse.revenue) };
+  const openChecks = (await db.query(
+    `SELECT c.id, c.code, o.name AS outlet, t.name AS table_name FROM pos_checks c JOIN outlets o ON o.id=c.outlet_id LEFT JOIN dining_tables t ON t.id=c.table_id
+     WHERE c.status='open' ORDER BY c.id`)).rows;
+  return { business_date: s.business_date, pending_departures: pendingDepartures, no_shows: noShows, room_charges: inHouse.n, room_revenue: Number(inHouse.revenue), open_checks: openChecks };
 }
 
 export async function runNightAudit(db, user) {
@@ -294,6 +299,9 @@ export async function runNightAudit(db, user) {
   const preview = await nightAuditPreview(db);
   if (preview.pending_departures.length) {
     throw new HttpError(409, 'Some guests were due to leave today. Check them out or extend their stay before the night audit.', { pending_departures: preview.pending_departures });
+  }
+  if (preview.open_checks.length) {
+    throw new HttpError(409, 'Some restaurant or bar bills are still open. Settle or void them before the night audit.', { open_checks: preview.open_checks });
   }
   const { rows: stays } = await db.query("SELECT * FROM reservations WHERE status='in_house' AND departure > $1 FOR UPDATE", [date]);
   let revenue = 0;

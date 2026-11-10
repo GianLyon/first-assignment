@@ -190,7 +190,13 @@ export function apiRouter(pool) {
     const date = DATE_RE.test(req.query.date || '') ? req.query.date : (await pool.query("SELECT to_char($1::date - 1, 'YYYY-MM-DD') AS d", [s.business_date])).rows[0].d;
     const q = async (sql) => (await pool.query(sql, [date])).rows;
     const byDept = await q('SELECT department, SUM(amount)::bigint AS amount, count(*)::int AS n FROM folio_charges WHERE business_date=$1 AND NOT voided GROUP BY department');
-    const pays = await q('SELECT method, SUM(amount)::bigint AS amount FROM payments WHERE business_date=$1 AND NOT voided GROUP BY method');
+    const pays = await q(`SELECT method, SUM(amount)::bigint AS amount FROM (
+        SELECT method, amount FROM payments WHERE business_date=$1 AND NOT voided
+        UNION ALL SELECT method, amount FROM pos_payments WHERE business_date=$1 AND method <> 'room') x GROUP BY method`);
+    // Restaurant/bar sales paid on the spot (sales charged to rooms are already in folio charges)
+    const posDirect = Number((await q("SELECT COALESCE(SUM(amount),0) AS a FROM pos_payments WHERE business_date=$1 AND method <> 'room'"))[0].a);
+    const fnbIdx = byDept.findIndex((d) => d.department === 'fnb');
+    if (fnbIdx >= 0) byDept[fnbIdx].amount = Number(byDept[fnbIdx].amount) + posDirect; else if (posDirect) byDept.push({ department: 'fnb', amount: posDirect, n: 0 });
     const audit = (await q('SELECT * FROM night_audits WHERE business_date=$1'))[0] || null;
     const sellable = (await pool.query("SELECT count(*)::int AS n FROM rooms WHERE active AND hk_status <> 'out_of_order'")).rows[0].n;
     const occupied = audit ? audit.room_charges_posted : (byDept.find((d) => d.department === 'rooms')?.n || 0);

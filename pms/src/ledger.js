@@ -40,3 +40,10 @@ export function paymentLines(method, amount) {
   return [{ account: ACCOUNTS[method], debit: amount }, { account: ACCOUNTS.guestLedger, credit: amount }];
 }
 export const reverse = (lines) => lines.map((l) => ({ account: l.account, debit: l.credit || 0, credit: l.debit || 0 }));
+
+/** Direct sale paid at the point of sale: Dr each tender; Cr revenue (net) and VAT payable. */
+export function saleLines(department, tenders, vatRate) {
+  const gross = tenders.reduce((a, t) => a + t.amount, 0);
+  const vat = vatPortion(gross, vatRate);
+  return [...tenders.map((t) => ({ account: ACCOUNTS[t.method], debit: t.amount })), { account: REVENUE[department], credit: gross - vat }, { account: ACCOUNTS.vat, credit: vat }];
+}

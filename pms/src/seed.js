@@ -1,6 +1,7 @@
 // First-time setup for a new property:  npm run seed
 // Environment options: PROPERTY_NAME, ADMIN_USERNAME, ADMIN_PASSWORD, BUSINESS_DATE (YYYY-MM-DD).
-// Creates the property settings, an admin account and a starter set of room types and rooms.
+// Creates the property settings, an admin account, a starter set of room types and rooms,
+// and a starter restaurant/bar setup (outlets, menu, tables). Parts that already exist are left alone.
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { createPool, migrate, tx } from './db.js';
@@ -28,6 +29,34 @@ export async function seedProperty(pool, opts = {}) {
   });
 }
 
+/** Starter restaurant & bar setup. Only runs when no outlets exist yet. */
+export async function seedPos(pool) {
+  return tx(pool, async (db) => {
+    const { rows } = await db.query('SELECT 1 FROM outlets LIMIT 1');
+    if (rows[0]) return { skipped: true };
+    const outlets = {};
+    for (const [name, kind] of [['Restaurant', 'restaurant'], ['Bar', 'bar'], ['Room Service', 'room_service']]) {
+      outlets[name] = (await db.query('INSERT INTO outlets (name, kind) VALUES ($1,$2) RETURNING id', [name, kind])).rows[0].id;
+    }
+    const menu = [
+      ['Breakfast', 'kitchen', [['Full breakfast', 35000], ['Rolex (chapati & egg roll)', 15000], ['Katogo (matoke & offals)', 25000]]],
+      ['Mains', 'kitchen', [['Chicken luwombo', 45000], ['Whole grilled tilapia & chips', 55000], ['Beef fillet steak', 75000], ['Vegetable curry & rice', 35000], ['Goat stew with matoke', 40000]]],
+      ['Desserts', 'kitchen', [['Tropical fruit platter', 15000], ['Chocolate cake', 18000]]],
+      ['Soft drinks', 'bar', [['Soda', 4000], ['Bottled water', 3000], ['Fresh passion juice', 10000], ['Ugandan coffee', 8000]]],
+      ['Beer & wine', 'bar', [['Local lager (500ml)', 8000], ['Glass of house wine', 25000], ['Bottle of house wine', 110000]]],
+      ['Spirits & cocktails', 'bar', [['Cocktail of the day', 30000], ['Waragi & tonic', 15000]]],
+    ];
+    let sort = 0;
+    for (const [cat, station, items] of menu) {
+      const { rows: [c] } = await db.query('INSERT INTO menu_categories (name, station, sort) VALUES ($1,$2,$3) RETURNING id', [cat, station, sort += 10]);
+      for (const [name, price] of items) await db.query('INSERT INTO menu_items (category_id, name, price) VALUES ($1,$2,$3)', [c.id, name, price]);
+    }
+    for (let i = 1; i <= 10; i++) await db.query('INSERT INTO dining_tables (outlet_id, name, seats) VALUES ($1,$2,$3)', [outlets.Restaurant, `T${i}`, i <= 6 ? 4 : 2]);
+    for (let i = 1; i <= 6; i++) await db.query('INSERT INTO dining_tables (outlet_id, name, seats) VALUES ($1,$2,2)', [outlets.Bar, `B${i}`]);
+    return { skipped: false };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
@@ -35,7 +64,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     propertyName: process.env.PROPERTY_NAME, adminUsername: process.env.ADMIN_USERNAME,
     adminPassword: process.env.ADMIN_PASSWORD, businessDate: process.env.BUSINESS_DATE,
   });
-  if (r.skipped) console.log('Property already set up. Nothing changed.');
+  const p = await seedPos(pool);
+  if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
+  if (r.skipped) console.log('Property settings already exist and were left unchanged.');
   else console.log(`Property created. Business date ${r.businessDate}.\nSign in as "${r.username}"${r.generated ? ` with password: ${r.password}\n(Change it after your first sign-in.)` : ' with the password you provided.'}`);
   await pool.end();
 }
