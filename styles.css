@@ -422,6 +422,7 @@ p { margin: 0 0 1em; }
 .cta-band h2 { color: var(--cream); font-size: clamp(1.8rem, 3vw, 2.4rem); margin-bottom: .3em; }
 .cta-band p { margin: 0; max-width: 620px; }
 .cta-band .btn { flex: none; }
+.row-ctas { display: flex; gap: 10px; flex-wrap: wrap; }
 .section-contact { padding-top: 88px; }
 
 .footer-contact { margin-top: 12px; line-height: 1.8; }

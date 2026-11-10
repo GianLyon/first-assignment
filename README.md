@@ -9,6 +9,7 @@ No build step: open `index.html` in a browser, or host the folder on Netlify, Ve
 - `work.html`: Amaya Hotel & Luxury Suites case study and photo gallery (see `images/amaya/README.md` for photo file names)
 - `how-we-work.html`: four-step process and FAQ
 - `pms.html`: Hearth & Key PMS, the all-in-one hotel management system (front office, booking engine, POS, inventory, HR, accounting, assets, events)
+- `pms-demo/`: clickable demo of the PMS (runs in the browser with sample data for a fictional hotel; saved in the visitor's browser only). Open `pms-demo/index.html`.
 - `packages.html`: Essentials / Growth / Signature
 - `contact.html`: free-audit request form
 
