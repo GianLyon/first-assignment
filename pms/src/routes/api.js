@@ -1,4 +1,5 @@
 import express from 'express';
+import { generateDue } from '../services/reports.js';
 import { tx } from '../db.js';
 import {
   HttpError, requireUser, requirePerm, can, ROLES, PERMISSIONS, ALL_PERMISSIONS, hashPassword, verifyPassword, createSession, sessionCookie, clearCookie,
@@ -167,7 +168,12 @@ export function apiRouter(pool) {
   r.get('/night-audit', requirePerm('audit.run'), async (_req, res) => {
     res.json({ preview: await fo.nightAuditPreview(pool), history: (await pool.query('SELECT a.*, u.full_name AS run_by_name FROM night_audits a LEFT JOIN users u ON u.id=a.run_by ORDER BY business_date DESC LIMIT 30')).rows });
   });
-  r.post('/night-audit', requirePerm('audit.run'), inTx((db, req) => fo.runNightAudit(db, req.user)));
+  r.post('/night-audit', requirePerm('audit.run'), async (req, res) => {
+    const result = await tx(pool, (db) => fo.runNightAudit(db, req.user));
+    // the day is closed: produce the scheduled reports for it (a failure here never undoes the audit)
+    try { result.reports_queued = (await tx(pool, (db) => generateDue(db))).created; } catch (e) { console.error('Scheduled reports failed:', e.message); result.reports_queued = 0; }
+    res.json(result);
+  });
 
   /* ---------- accounting & reports ---------- */
   r.get('/accounts/trial-balance', requirePerm('accounts.view'), async (_req, res) => {

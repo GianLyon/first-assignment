@@ -65,6 +65,7 @@
     ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
+    ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
@@ -81,7 +82,7 @@
   }
   function renderNav() {
     const { r } = route();
-    $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
+    $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
     $('#prop-name').textContent = SETTINGS.property_name;
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
   }
@@ -92,7 +93,7 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self', event: 'events.view', eventedit: 'events.manage', beo: 'events.view', asset: 'assets.manage' }[r] || null;
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self', event: 'events.view', eventedit: 'events.manage', beo: 'events.view', asset: 'assets.manage', reportrun: 'reports.view' }[r] || null;
     const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
@@ -1121,6 +1122,126 @@
       toast(id ? 'Event saved.' : `Event ${esc(e.code)} created.`); location.hash = `#event/${e.id}`;
     },
   };
+
+  /* ---------- Phase 8: scheduled reports & group dashboard ---------- */
+  const MAIL_ST = { queued: ['Waiting', 'info'], sent: ['Sent', 'ok'], test: ['Test mode', 'warn'], failed: ['Failed', 'bad'] };
+  const pctF = (v) => `${(Math.round((Number(v) || 0) * 1000) / 10).toFixed(1)}%`;
+  const reportBody = (d) => `<div class="grid g4">${d.kpis.map(([l, v, n]) => `<div class="card kpi"><span>${esc(l)}</span><b>${esc(v)}</b>${n ? `<small>${esc(n)}</small>` : ''}</div>`).join('')}</div>
+    <div class="grid g2 mt">${d.sections.map((s) => `<div class="card"><h2 class="sec">${esc(s.title)}</h2>${table(s.head.map((h) => h || ' '), s.rows.map((r) => `<tr>${r.map((c, i) => `<td class="${s.head[i]?.startsWith('#') ? 'num' : ''}">${esc(c)}</td>`).join('')}</tr>`), s.empty || 'Nothing to show.')}</div>`).join('')}</div>`;
+
+  VIEWS.schedules = async () => {
+    const setup = await GET('/reporting/setup'); ui.repSetup = setup;
+    const sch = CAN['reports.schedule'];
+    const t = cur('rs', 'run');
+    const head = `<div class="page-head"><div><h1 class="page">Department reports</h1><p class="sub">Run any report for any period, and have reports emailed automatically after each night audit.</p></div></div>
+      ${sch && setup.email.mode === 'test' ? '<p class="note">Email is in <b>test mode</b>: reports are produced and kept under <b>Emails</b>, but not sent. To send real email, set <code>EMAIL_TRANSPORT=smtp</code>, <code>SMTP_URL</code> and <code>EMAIL_FROM</code> on the server.</p>' : ''}
+      ${tabs('rs', [['run', 'Run a report'], ['history', 'History'], ...(sch ? [['subs', 'Schedules'], ['outbox', 'Emails']] : [])], 'run')}`;
+    const repOpts = Object.entries(setup.reports);
+    if (t === 'history') {
+      const runs = await GET('/reporting/runs');
+      return head + `<div class="card">${table(['Report', 'Period', 'How', '#Emails', 'Produced'], runs.map((r) => `<tr><td><a href="#reportrun/${r.id}">${esc(setup.reports[r.report] || r.report)}</a></td><td>${r.f === r.t ? fdate(r.f) : `${fdate(r.f)} → ${fdate(r.t)}`}</td>
+        <td>${r.frequency === 'manual' ? `By ${esc(r.by_name || '')}` : esc(setup.frequencies[r.frequency] || r.frequency)}</td><td class="num">${r.emails}</td><td>${ftime(r.created_at)}</td></tr>`), 'No reports produced yet.')}</div>`;
+    }
+    if (t === 'subs' && sch) {
+      return head + `<div class="card"><div class="row between"><h2 class="sec">Who gets what</h2><button class="btn btn-sm" data-action="sub-edit">+ Add schedule</button></div>
+        <p class="small muted">Daily reports cover the day just closed by the night audit. Weekly reports go out after Sunday's audit (Monday to Sunday); monthly after the last day of the month.</p>
+        ${table(['Report', 'How often', 'Recipients', 'Status', ''], setup.subscriptions.map((s) => `<tr><td>${esc(setup.reports[s.report])}</td><td>${esc(setup.frequencies[s.frequency])}</td><td>${s.recipients.map(esc).join('<br>')}</td>
+          <td>${s.active ? pill('On', 'ok') : pill('Paused')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="sub-edit" data-id="${s.id}">Edit</button></td></tr>`), 'No schedules yet. Add one to start receiving reports by email.')}</div>`;
+    }
+    if (t === 'outbox' && sch) {
+      const box = await GET('/reporting/outbox');
+      return head + `<div class="card"><div class="row between"><h2 class="sec">Emails</h2><button class="btn btn-sm" data-action="mail-send">Send waiting emails now</button></div>
+        ${table(['To', 'Subject', 'Status', 'Queued', ''], box.map((m) => `<tr><td>${esc(m.to_address)}</td><td><a href="#" data-action="mail-view" data-id="${m.id}">${esc(m.subject)}</a></td>
+          <td>${pill(...MAIL_ST[m.status])}${m.last_error ? `<br><span class="small err">${esc(m.last_error)}</span>` : ''}${m.attempts > 1 ? `<br><span class="small muted">${m.attempts} attempts</span>` : ''}</td><td>${ftime(m.created_at)}</td>
+          <td class="right">${m.status === 'failed' ? `<button class="btn btn-sm" data-action="mail-retry" data-id="${m.id}">Retry</button>` : ''}</td></tr>`), 'No emails yet.')}</div>`;
+    }
+    const y = addDays(SETTINGS.business_date, -1);
+    return head + `<div class="card"><form class="form" data-form="rep-run"><div class="three"><label>Report<select name="report">${opts(repOpts, ui.q.repRun || repOpts[0]?.[0])}</select></label>
+      <label>From<input type="date" name="from" value="${y}" max="${SETTINGS.business_date}" required></label><label>To<input type="date" name="to" value="${y}" max="${SETTINGS.business_date}" required></label></div>
+      ${sch ? '<label>Also email to (optional)<input name="recipients" placeholder="owner@hotel.com, gm@hotel.com"></label>' : ''}
+      <div class="actions"><button class="btn btn-gold">Run report</button></div></form></div>
+      <div class="grid g4 mt">${repOpts.map(([k, l]) => `<div class="card"><b>${esc(l)}</b><p class="small muted mt0">${esc(REP_HELP[k] || '')}</p></div>`).join('')}</div>`;
+  };
+  const REP_HELP = {
+    manager: 'Occupancy, ADR, RevPAR, revenue by department, money collected, tomorrow and key balances.',
+    front_office: 'Arrivals, departures, no-shows, new bookings by source and the next 7 nights.',
+    fnb: 'Sales and covers by outlet, top items, voids and food & drink cost %.',
+    stores: 'Stock value, deliveries, issues, items to re-order and what is waiting for approval.',
+    finance: 'Revenue, expenses, result, overdue invoices, cash/bank and VAT.',
+    hr: 'Staff by department, sign-ins, leave and payroll status.',
+    events: 'Amenity sales, events held and revenue, the next 14 days of events.',
+    maintenance: 'Open and overdue jobs, work done and cost, rooms out of order, services due.',
+  };
+
+  VIEWS.reportrun = async (id) => {
+    const run = await GET(`/reporting/runs/${id}`);
+    const d = run.data;
+    return `<div class="page-head"><div><h1 class="page">${esc(d.report_name)} report</h1><p class="sub">${esc(d.property)} · ${esc(d.period)}</p></div>
+      <div class="row no-print"><a class="btn btn-ghost" href="#schedules">Back</a><button class="btn btn-gold" data-action="print">Print</button></div></div>${reportBody(d)}
+      <p class="small muted mt">Produced ${ftime(d.generated_at)} from the live system.</p>`;
+  };
+
+  VIEWS.group = async () => {
+    const q = `${ui.q.grpFrom ? `from=${ui.q.grpFrom}&to=${ui.q.grpTo}` : ''}`;
+    const g = await GET(`/reporting/group?${q}`);
+    const t = g.total, admin = CAN['settings.manage'];
+    let setupCard = '';
+    if (admin) {
+      const [props, setup] = await Promise.all([GET('/reporting/group/properties'), GET('/reporting/setup')]);
+      ui.grpProps = props;
+      setupCard = `<div class="grid g2 mt"><div class="card"><div class="row between"><h2 class="sec">Linked properties</h2><button class="btn btn-sm" data-action="grp-edit">+ Link a property</button></div>
+        ${table(['Property', 'Address', 'Last check', ''], props.map((p) => `<tr><td>${esc(p.name)}${p.active ? '' : ' ' + pill('Off')}</td><td class="small">${esc(p.base_url)}</td><td>${p.last_status ? (p.last_status === 'ok' ? pill('OK', 'ok') : `<span class="small err">${esc(p.last_status)}</span>`) : ''}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="grp-edit" data-id="${p.id}">Edit</button></td></tr>`), 'No other properties linked yet.')}</div>
+        <div class="card"><h2 class="sec">This property's group access key</h2><p class="small muted">A group office uses this key to read this property's totals (occupancy, revenue, cash). It never gives access to guest details or to sign in.</p>
+          <p>${setup.group_token_hint ? `Active key ending in <code class="mono">…${esc(setup.group_token_hint)}</code>` : 'No key issued.'}</p>
+          <div class="row"><button class="btn" data-action="grp-token">${setup.group_token_hint ? 'Replace key' : 'Create key'}</button>${setup.group_token_hint ? '<button class="btn btn-ghost" data-action="grp-revoke">Revoke</button>' : ''}</div></div></div>`;
+    }
+    const money = (v) => num(v);
+    return `<div class="page-head"><div><h1 class="page">Group dashboard</h1><p class="sub">All your properties side by side. ${fdate(g.from)} → ${fdate(g.to)}</p></div></div>
+      <div class="card"><form class="form row" data-form="range" data-key="grp"><label>From<input type="date" name="from" value="${g.from}" required></label><label>To<input type="date" name="to" value="${g.to}" required></label><button class="btn btn-ghost">Show</button></form></div>
+      <div class="grid g4 mt"><div class="card kpi"><span>Group occupancy</span><b>${pctF(t.occupancy)}</b><small>${num(t.occupied)} of ${num(t.available)} room nights</small></div><div class="card kpi"><span>Revenue</span><b>${money(t.revenue_total)}</b><small>UGX excl. VAT</small></div>
+        <div class="card kpi"><span>ADR / RevPAR</span><b>${money(t.adr)}</b><small>RevPAR ${money(t.revpar)}</small></div><div class="card kpi"><span>Cash &amp; bank</span><b>${money(t.cash)}</b><small>${t.properties} of ${g.properties.length} properties reporting</small></div></div>
+      <div class="card mt">${table(['Property', '#Occupancy', '#ADR', '#RevPAR', '#Rooms', '#F&B', '#Other', '#Revenue', '#Expenses', '#Collected', '#Cash & bank', '#Receivable', '#Urgent jobs'],
+        [...g.properties.map((p) => p.status !== 'ok' ? `<tr><td>${esc(p.name)}</td><td colspan="12" class="err small">${esc(p.status)}</td></tr>`
+          : `<tr><td>${esc(p.name)}${p.self ? ' ' + pill('This property') : ''}<br><span class="small muted">Business date ${fdate(p.business_date)}</span></td><td class="num">${pctF(p.occupancy)}</td><td class="num">${money(p.adr)}</td><td class="num">${money(p.revpar)}</td>
+            <td class="num">${money(p.revenue.rooms)}</td><td class="num">${money(p.revenue.fnb)}</td><td class="num">${money(p.revenue.amenities + p.revenue.events + p.revenue.other)}</td><td class="num">${money(p.revenue_total)}</td><td class="num">${money(p.expenses)}</td>
+            <td class="num">${money(p.collected)}</td><td class="num">${money(p.cash)}</td><td class="num">${money(p.receivable)}</td><td class="num">${p.urgent_jobs}</td></tr>`),
+        `<tr class="total"><td>Group total</td><td class="num">${pctF(t.occupancy)}</td><td class="num">${money(t.adr)}</td><td class="num">${money(t.revpar)}</td><td class="num">${money(t.revenue.rooms)}</td><td class="num">${money(t.revenue.fnb)}</td>
+          <td class="num">${money(t.revenue.amenities + t.revenue.events + t.revenue.other)}</td><td class="num">${money(t.revenue_total)}</td><td class="num">${money(t.expenses)}</td><td class="num">${money(t.collected)}</td><td class="num">${money(t.cash)}</td><td class="num">${money(t.receivable)}</td><td class="num">${t.urgent_jobs}</td></tr>`])}
+        <p class="small muted">Revenue and expenses exclude VAT. Each property is read live with its group access key. A property that cannot be reached is left out of the totals.</p></div>${setupCard}`;
+  };
+
+  Object.assign(OPS_A, {
+    'sub-edit': (d) => {
+      const s = d.id ? ui.repSetup.subscriptions.find((x) => x.id === Number(d.id)) : null;
+      modal(s ? 'Edit schedule' : 'New schedule', `<form class="form" data-form="ops-modal"><div class="two"><label>Report<select name="report">${opts(Object.entries(ui.repSetup.reports), s?.report)}</select></label>
+        <label>How often<select name="frequency">${opts(Object.entries(ui.repSetup.frequencies), s?.frequency || 'daily')}</select></label></div>
+        <label>Send to (email addresses, separated by commas)<textarea name="recipients" rows="2" required>${esc(s?.recipients.join(', ') || '')}</textarea></label>
+        ${s ? `<label class="row"><input type="checkbox" name="active" value="1" ${s.active ? 'checked' : ''}> Sending</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { const body = { ...v, active: s ? !!v.active : true }; if (s) await PUT(`/reporting/subscriptions/${s.id}`, body); else await POST('/reporting/subscriptions', body); return 'Schedule saved.'; });
+    },
+    'mail-send': async () => { const r = await POST('/reporting/outbox/send'); toast(`${r.sent} sent${r.failed ? `, ${r.failed} failed (will retry)` : ''}.`); render(); },
+    'mail-retry': async (d) => { await POST(`/reporting/outbox/${d.id}/retry`); toast('Queued again.'); render(); },
+    'mail-view': async (d) => { const m = await GET(`/reporting/outbox/${d.id}`); modal(m.subject, `<p class="small muted">To ${esc(m.to_address)}</p><pre class="mail-text">${esc(m.text_body)}</pre><div class="actions"><button class="btn btn-gold" data-action="close-modal">Close</button></div>`); },
+    'grp-edit': (d) => {
+      const p = d.id ? ui.grpProps.find((x) => x.id === Number(d.id)) : null;
+      modal(p ? `Edit ${p.name}` : 'Link a property', `<form class="form" data-form="ops-modal"><label>Property name<input name="name" value="${esc(p?.name || '')}" required></label>
+        <label>Address of its Azeli PMS<input name="base_url" value="${esc(p?.base_url || '')}" placeholder="https://pms.otherhotel.com" required></label>
+        <label>Group access key${p ? ' (leave empty to keep the current one)' : ''}<input name="token" ${p ? '' : 'required'} placeholder="azg_…" autocomplete="off"></label>
+        <p class="small muted">Ask the other property's administrator to create a key under Group dashboard, then paste it here.</p>
+        ${p ? `<label class="row"><input type="checkbox" name="active" value="1" ${p.active ? 'checked' : ''}> Show on the dashboard</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { const body = { ...v, active: p ? !!v.active : true }; if (p) await PUT(`/reporting/group/properties/${p.id}`, body); else await POST('/reporting/group/properties', body); return 'Property linked.'; });
+    },
+    'grp-token': async () => {
+      if (!confirm('Create a new group access key? Any existing key stops working.')) return;
+      const { token } = await POST('/reporting/group/token');
+      modal('Group access key', `<p>Give this key to your group office. <b>It is shown only once.</b></p><p><code class="mono">${esc(token)}</code></p><p>Property address to give with it:<br><code class="mono">${esc(location.origin)}</code></p><div class="actions"><button class="btn btn-gold" data-action="close-modal">Done</button></div>`);
+      render();
+    },
+    'grp-revoke': async () => { if (!confirm('Revoke the key? The group office will no longer see this property.')) return; await POST('/reporting/group/token/revoke'); toast('Key revoked.'); render(); },
+  });
+  Object.assign(OPS_FORMS, {
+    'rep-run': async (v) => { ui.q.repRun = v.report; const r = await POST('/reporting/run', v); if (r.emailed) toast(`Report emailed to ${r.emailed} address(es).`); location.hash = `#reportrun/${r.id}`; },
+  });
 
   const A = {
 

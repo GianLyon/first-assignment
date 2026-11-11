@@ -248,3 +248,4 @@ fieldset { border: 0; padding: 0; margin: 0; }
 .login-brand .mark { width: 48px; height: 48px; border-radius: 11px; }
 .login-brand span { font-size: 2rem; line-height: 1; }
 .login-brand small { display: block; margin-top: 5px; font-family: var(--sans, Inter, sans-serif); font-size: .62rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--gold-dark, #a8853f); }
+.mail-text { white-space: pre-wrap; font-size: .82rem; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; }

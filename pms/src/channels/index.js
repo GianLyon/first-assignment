@@ -33,7 +33,7 @@ export const adapters = {
       const body = JSON.stringify(message);
       const res = await fetch(validateEndpoint(channel.endpoint_url), {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hk-event': message.event, 'x-azeli-signature': sign(channel.secret, body) },
+        headers: { 'content-type': 'application/json', 'x-azeli-event': message.event, 'x-azeli-signature': sign(channel.secret, body) },
         body, signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`Channel responded ${res.status} ${res.statusText}`.trim());

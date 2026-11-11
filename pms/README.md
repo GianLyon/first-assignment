@@ -1,7 +1,7 @@
 # Azeli PMS (Azeli Property Management Software)
 
 The hotel property management system offered to Azeli Technologies marketing partners.
-Built so far: Phase 1 (foundation and front office), Phase 2 (restaurant / POS), Phase 3 (inventory, purchasing and requisitions), Phase 4 (booking engine and channel manager), Phase 5 (accounting & finance), Phase 6 (HR & payroll) and Phase 7 (events & banqueting, assets & maintenance, amenity sales). It is a real system with a database, staff accounts and accounting. It is not a demo.
+Built so far: Phase 1 (foundation and front office), Phase 2 (restaurant / POS), Phase 3 (inventory, purchasing and requisitions), Phase 4 (booking engine and channel manager), Phase 5 (accounting & finance), Phase 6 (HR & payroll), Phase 7 (events & banqueting, assets & maintenance, amenity sales) and Phase 8 (automated department reports by email and a multi-property group dashboard). It is a real system with a database, staff accounts and accounting. It is not a demo.
 The clickable sales demo lives separately in `../pms-demo/`.
 
 ## What it does
@@ -46,6 +46,9 @@ The clickable sales demo lives separately in `../pms-demo/`.
 | Events & banqueting | Function rooms with capacity and half/full-day hire, packages priced per guest. Events move enquiry → tentative → confirmed → completed. Tentative and confirmed events hold the room (no overlapping bookings; capacity checked). Quote = package × guests + room hire + extras. Deposits are held as a liability and confirm the booking. Printable banquet event order (BEO) with instructions for kitchen, service, bar, housekeeping, technical and front office. Complete & bill applies deposits; the balance is paid on the spot or invoiced to the client's company account. Cancelling needs the deposit refunded or kept as forfeited-deposit income |
 | Assets | Fixed asset register (cost, residual value, useful life, location, serial, supplier). New assets post to Property, plant & equipment from cash/bank or as an opening balance. Monthly straight-line depreciation posted once per month. Disposal or sale books the gain or loss. Book value and service history per asset |
 | Maintenance | Any staff member reports a fault (room, asset or place, with priority). Reporting can take a vacant room out of order; when the job is done the room goes back to housekeeping as dirty. Assets with a fault show as under repair. Technicians assign, update, cost and close jobs. Assets with a service interval get preventive jobs created when due |
+| **Department reports** (Phase 8) | Eight reports built from live data: general manager, front office, F&B, stores & purchasing, finance, HR, events & amenities, maintenance. Run any of them on screen for any period (print-ready), or schedule them daily, weekly (Mon–Sun) or monthly to any email addresses. Each report only shows to staff who can already see that area |
+| Report emails | Produced automatically once the night audit closes the period (never twice). Sent through your SMTP provider with retries and back-off; failures are listed and can be retried. Without email settings the system runs in test mode and keeps the emails for viewing |
+| Group dashboard | Every property runs its own Azeli PMS; an administrator issues a group access key, and the group office links each property by address and key. The dashboard shows occupancy, ADR, RevPAR, revenue by department, expenses, collections, cash, receivables and urgent maintenance per property and as a group total. The key reads totals only, never guest details, and can be revoked at any time |
 | Channel manager | Channels with their own room/rate codes and commission. Every change to availability, prices or restrictions is queued and pushed automatically (every 20 s by default) as a signed message; full re-sync on demand. Bookings, changes and cancellations from channels arrive at `/api/channels/<code>/inbound`, are signature-checked, never duplicated, and are accepted even when sold out (flagged as overbooked on the dashboard). Every message is logged |
 
 Money is stored in whole Ugandan shillings. Each property gets its own database.
@@ -66,6 +69,10 @@ npm start                            # http://localhost:3000
 `npm run seed` creates the property, an `admin` account, a starter set of room types and rooms (edit them under **Settings**) a starter restaurant, bar and room-service menu with tables (edit them under **Menu & tables**), and starter stores, stock items, suppliers and recipes (edit them under **Items & recipes**). Then record what is already on your shelves under **Purchasing → Opening stock**. Running it on an existing property only adds parts that are missing, so it is safe after upgrading. It does nothing if the property already exists. Without `ADMIN_PASSWORD` it generates one and prints it once.
 
 Database migrations run automatically on start (`npm run migrate` runs them on their own).
+
+**Report emails.** Set `EMAIL_TRANSPORT=smtp`, `SMTP_URL` (e.g. `smtps://user:pass@smtp.provider.com:465`) and `EMAIL_FROM` to send scheduled reports (any SMTP provider works: Google Workspace, Microsoft 365, Zoho, Mailgun, Brevo…). Without them, reports are still produced and kept under **Department reports → Emails** in test mode. The server checks for due reports and sends queued email every minute (`REPORT_CHECK_SECONDS`).
+
+**Several properties.** Each property runs its own Azeli PMS and database. On each one an administrator opens **Group dashboard** and creates a group access key; on the head-office installation, link each property with its address and key.
 
 ## Connecting a real channel (Booking.com, Expedia, Airbnb…)
 
@@ -109,4 +116,4 @@ The test suite wipes and rebuilds the **test** database. It covers sign-in and l
 | **5. Accounting & finance** (done) | Company accounts and invoicing, supplier bills and payments, expenses, transfers, chart of accounts, manual journals, closing the books, bank reconciliation, P&L, balance sheet, ledger, VAT summary, OTA commission, online payment (provider-neutral). Still to come: a live payment provider and URA EFRIS e-invoicing, both needing accounts with those services |
 | **6. HR & payroll** (done) | Employees, rosters, attendance, leave, staff advances, payroll with PAYE/NSSF posted to the accounts, payslips and statutory schedules, staff self-service |
 | **7. Events, assets & amenities** (done) | Function rooms, packages, event bookings with deposits, BEOs and billing; asset register with depreciation and disposals; maintenance work orders and preventive schedules; spa/transfer/tour/laundry sales with charge to room |
-| 8. Automated reporting | Scheduled department reports by email, multi-property dashboards |
+| **8. Automated reporting & group** (done) | Department reports on screen and by scheduled email, email outbox with retries, multi-property group dashboard with revocable access keys |
