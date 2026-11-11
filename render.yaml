@@ -1,4 +1,4 @@
-# Render Blueprint: deploys the Azeli Technologies website and Azeli PMS (with its database) in one go.
+# Render Blueprint: deploys Azeli PMS with its private database. (The website is on Vercel: vercel.json.)
 # In Render: New → Blueprint → pick this repository. Values marked "sync: false" are asked for on screen.
 services:
   # Azeli PMS (one installation per property; add another block + database for each new property)
@@ -35,19 +35,7 @@ services:
       - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitechnologies.com>
         sync: false
 
-  # Azeli Technologies website (static, free)
-  - type: web
-    name: azeli-website
-    runtime: static
-    buildCommand: ./scripts/build-site.sh
-    staticPublishPath: ./dist-site
-    headers:
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: Referrer-Policy
-        value: strict-origin-when-cross-origin
+  # The Azeli Technologies website is hosted on Vercel (see vercel.json), not here.
 
 databases:
   - name: azeli-pms-db
