@@ -28,12 +28,18 @@ Render has no African region; Frankfurt is the closest (≈150–200 ms from Kam
 
 ---
 
-## Step 1: Choose and buy the domain (Cloudflare)
-1. Create an account at **dash.cloudflare.com**.
-2. **Domain Registration → Register Domains**, search for your name. Good options, in order: `azelitechnologies.com`, `azelitech.com`, `azeli.co`.
-3. Buy it (turn on auto-renew). The domain's DNS is now managed in Cloudflare.
+## Step 1: Domain ✅ done
+**azelitech.com** is registered at Cloudflare (renews October 2027) and its DNS is managed there.
 
-Below, `example.com` stands for the domain you bought.
+Addresses used below:
+| Address | What |
+|---|---|
+| `https://azelitech.com` (and `www.`) | Azeli Technologies website (Vercel) |
+| `https://amaya.azelitech.com` | Amaya's Azeli PMS (Render); each new hotel gets its own, e.g. `hotel2.azelitech.com` |
+| `hello@azelitech.com` | Shown on the website (a Google group: reaches several people) |
+| `reports@azelitech.com` | Sender of the PMS's reports and guest emails (Brevo) |
+
+Do **not** switch on Cloudflare *Email Routing*: Google Workspace receives your email, and the two cannot both do it.
 
 ## Step 2: Team mailboxes (Google Workspace)
 1. Go to **workspace.google.com → Get started**, choose *Business Starter*, and use your new domain.
@@ -53,13 +59,13 @@ Below, `example.com` stands for the domain you bought.
 ### SPF and DMARC (one-time, so mail is trusted)
 In Cloudflare DNS add, or edit if one exists:
 - TXT, Name `@`: `v=spf1 include:_spf.google.com include:spf.brevo.com ~all` (only **one** SPF record may exist).
-- TXT, Name `_dmarc`: `v=DMARC1; p=none; rua=mailto:you@example.com` (tighten to `p=quarantine` after a few weeks of clean reports).
+- TXT, Name `_dmarc`: `v=DMARC1; p=none; rua=mailto:you@azelitech.com` (tighten to `p=quarantine` after a few weeks of clean reports).
 
 ## Step 4: Website (Vercel)
 1. Create an account at **vercel.com** and sign in **with GitHub**, allowing access to the `first-assignment` repository. Choose the **Pro** plan (business use).
 2. **Add New → Project**, import the repository. Vercel reads `vercel.json`: it builds the site with `scripts/build-site.sh` and publishes only the website's files (never the PMS code). Leave *Framework* as **Other** and the root directory as the repository root. Press **Deploy**.
 3. Under **Settings → Git**, set the *Production Branch* to the branch you deploy from (e.g. `main`).
-4. **Settings → Domains**: add `example.com` and `www.example.com` (choose one to redirect to the other). Vercel shows the DNS records to create; add them in Cloudflare (Step 6).
+4. **Settings → Domains**: add `azelitech.com` and `www.example.com` (choose one to redirect to the other). Vercel shows the DNS records to create; add them in Cloudflare (Step 6).
 
 ## Step 5: Azeli PMS (Render)
 1. Create an account at **render.com** and sign in **with GitHub**, allowing access to the repository.
@@ -71,13 +77,13 @@ In Cloudflare DNS add, or edit if one exists:
    | `ADMIN_PASSWORD` | a long password for the first sign-in (change it afterwards) |
    | `PUBLIC_URL` | `https://amaya.example.com` |
    | `SMTP_URL` | the Brevo line from Step 3 |
-   | `EMAIL_FROM` | `Amaya Hotel & Luxury Suites <reports@example.com>` |
+   | `EMAIL_FROM` | `Amaya Hotel & Luxury Suites <reports@azelitech.com>` |
 4. **Apply**. The first deploy takes a few minutes. The PMS creates its database tables and sets up the property on its own.
 5. `azeli-pms` → **Settings → Custom Domains**: add `amaya.example.com` (one sub-address per hotel). Render shows a DNS record for it.
 
 ## Step 6: Point your addresses (Cloudflare DNS)
 In Cloudflare → your domain → **DNS → Records**, add exactly the records Vercel and Render showed you:
-- website: for `example.com` and `www` (usually an `A` record to Vercel's address and a `CNAME` to Vercel)
+- website: for `azelitech.com` and `www` (usually an `A` record to Vercel's address and a `CNAME` to Vercel)
 - PMS: a `CNAME` for `amaya` pointing to your `….onrender.com` address
 
 Set each of these to **DNS only (grey cloud)**, not proxied. Vercel and Render issue the HTTPS certificates themselves, and the PMS needs to see visitors' own addresses for its sign-in protection. Within a few minutes both show the domain as verified.

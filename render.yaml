@@ -26,13 +26,13 @@ services:
         sync: false
       - key: ADMIN_PASSWORD     # first sign-in as "admin"; change it after signing in
         sync: false
-      - key: PUBLIC_URL         # e.g. https://pms.azelitechnologies.com
+      - key: PUBLIC_URL         # e.g. https://amaya.azelitech.com
         sync: false
       - key: EMAIL_TRANSPORT
         value: smtp
       - key: SMTP_URL           # from Brevo: smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587
         sync: false
-      - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitechnologies.com>
+      - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitech.com>
         sync: false
 
   # The Azeli Technologies website is hosted on Vercel (see vercel.json), not here.

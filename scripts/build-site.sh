@@ -9,5 +9,14 @@ find dist-site -name "README*" -delete
 cat > dist-site/robots.txt <<'TXT'
 User-agent: *
 Allow: /
+Sitemap: https://azelitech.com/sitemap.xml
 TXT
+{
+  echo '<?xml version="1.0" encoding="UTF-8"?>'
+  echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+  for page in "" services.html pms.html work.html how-we-work.html packages.html contact.html; do
+    echo "  <url><loc>https://azelitech.com/$page</loc></url>"
+  done
+  echo '</urlset>'
+} > dist-site/sitemap.xml
 echo "Website built in dist-site/ ($(find dist-site -type f | wc -l | tr -d ' ') files)"

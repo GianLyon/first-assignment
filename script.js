@@ -5,7 +5,7 @@
 // to receive submissions by email. While empty, the form opens the visitor's
 // email app with the details pre-filled, sent to CONTACT_EMAIL.
 const FORM_ENDPOINT = "";
-const CONTACT_EMAIL = "hello@azelitechnologies.com";
+const CONTACT_EMAIL = "hello@azelitech.com";
 
 // Footer year
 const year = document.getElementById("year");
