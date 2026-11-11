@@ -72,7 +72,8 @@
       $('#confirm').hidden = false;
       $('#confirm').innerHTML = `<h2>You're booked!</h2><p>Your booking code</p><p class="code">${esc(r.code)}</p>
         <div class="summary"><b>${esc(r.room_type)}</b> · ${esc(r.rate_plan)}<br>${fdate(r.arrival)} to ${fdate(r.departure)} · ${r.nights} night(s)<br>Total <b>${ugx(r.total)}</b>, payable at the hotel</div>
-        <p class="note">Keep your code and the email you used (${esc(r.email)}) to view or ${r.refundable ? 'cancel' : 'check'} your booking below.</p>`;
+        <p class="note">Keep your code and the email you used (${esc(r.email)}) to view or ${r.refundable ? 'cancel' : 'check'} your booking below.</p>
+        ${INFO.online_payments ? `<button class="btn btn-gold pay-now" data-code="${esc(r.code)}" data-email="${esc(r.email)}">${r.refundable ? 'Pay the first night now (optional)' : 'Pay now'}</button>` : ''}`;
       $('#confirm').scrollIntoView({ behavior: 'smooth' });
       f.reset();
     } catch (err) { $('#book-err').textContent = err.message; } finally { btn.disabled = false; }
@@ -85,13 +86,22 @@
       const b = await api('POST', '/bookings/lookup', { code: f.code.value, email: f.email.value });
       const status = { reserved: 'Confirmed', in_house: 'Checked in', checked_out: 'Completed', cancelled: 'Cancelled', no_show: 'No-show' }[b.status] || b.status;
       out.innerHTML = `<div class="summary mt"><b>${esc(b.code)} · ${status}</b><br>${esc(b.first_name)} ${esc(b.last_name)}<br>${esc(b.room_type)}${b.rate_plan ? ' · ' + esc(b.rate_plan) : ''}<br>${fdate(b.arrival)} to ${fdate(b.departure)} · ${b.nights} night(s) · ${ugx(b.total)}</div>
-        ${b.can_cancel ? '<button class="btn btn-ghost" id="cancel-booking">Cancel this booking</button>' : b.status === 'reserved' ? '<p class="note">To change or cancel this booking, please contact the hotel.</p>' : ''}`;
+        ${b.can_cancel ? '<button class="btn btn-ghost" id="cancel-booking">Cancel this booking</button>' : b.status === 'reserved' ? '<p class="note">To change or cancel this booking, please contact the hotel.</p>' : ''}
+        ${INFO.online_payments && b.status === 'reserved' ? `<button class="btn btn-gold pay-now" data-code="${esc(b.code)}" data-email="${esc(f.email.value)}">Pay online</button>` : ''}`;
       const c = $('#cancel-booking');
       if (c) c.addEventListener('click', async () => {
         if (!confirm('Cancel this booking?')) return;
         try { await api('POST', '/bookings/cancel', { code: f.code.value, email: f.email.value }); out.innerHTML = '<p>Your booking has been cancelled.</p>'; } catch (err) { out.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
       });
     } catch (err) { out.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+  });
+
+  // online payment: start a checkout with the hotel's payment provider
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('.pay-now'); if (!b) return;
+    b.disabled = true;
+    try { const r = await api('POST', '/bookings/pay', { code: b.dataset.code, email: b.dataset.email }); location.href = r.checkout_url; }
+    catch (err) { b.insertAdjacentHTML('afterend', `<p class="err">${esc(err.message)}</p>`); b.disabled = false; }
   });
 
   init().catch((err) => { $('#results').innerHTML = `<div class="card"><p class="err">${esc(err.message)}</p></div>`; });

@@ -206,7 +206,7 @@ export async function insertCharge(db, user, r, s, { department, amount, descrip
 
 async function reverseEntry(db, user, entryId, date, description, refType, refId) {
   const { rows } = await db.query('SELECT account_code, debit, credit FROM journal_lines WHERE entry_id = $1', [entryId]);
-  return postJournal(db, { date, description, refType, refId, userId: user.id, lines: rows.map((l) => ({ account: l.account_code, debit: l.credit, credit: l.debit })) });
+  return postJournal(db, { date, description, refType, refId, userId: user?.id ?? null, lines: rows.map((l) => ({ account: l.account_code, debit: l.credit, credit: l.debit })) });
 }
 
 export async function voidCharge(db, user, chargeId, reason) {
@@ -226,15 +226,30 @@ export async function postPayment(db, user, id, body) {
   const s = await getSettings(db);
   const method = String(body.method || '');
   if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, 'Choose a payment method.');
-  if (method === 'company_account' && !(r.company_name || body.company_name)) throw new HttpError(400, 'Enter the company name to bill.');
-  if (body.company_name && !r.company_name) await db.query('UPDATE reservations SET company_name=$2 WHERE id=$1', [r.id, text(body.company_name, 'Company', { max: 120 })]);
   const amount = money(body.amount, 'Amount');
+  let companyId = null;
+  if (method === 'company_account') {
+    const { rows: [co] } = body.company_id
+      ? await db.query('SELECT * FROM companies WHERE id=$1 AND active', [Number(body.company_id)])
+      : r.company_id ? await db.query('SELECT * FROM companies WHERE id=$1 AND active', [r.company_id])
+        : await db.query('SELECT * FROM companies WHERE lower(name)=lower($1) AND active', [String(body.company_name || r.company_name || '').trim()]);
+    if (!co) throw new HttpError(400, 'Choose the company to bill (set it up under Finance → Companies first).');
+    if (co.credit_limit > 0) {
+      const { rows: [b] } = await db.query(`SELECT
+          COALESCE((SELECT SUM(amount) FROM payments WHERE company_id=$1 AND method='company_account' AND NOT voided),0)
+          + COALESCE((SELECT SUM(il.amount) FROM invoice_lines il JOIN invoices i ON i.id=il.invoice_id WHERE i.company_id=$1 AND i.status='issued' AND il.payment_id IS NULL),0)
+          - COALESCE((SELECT SUM(amount) FROM ar_receipts WHERE company_id=$1),0) AS owed`, [co.id]);
+      if (Number(b.owed) + amount > co.credit_limit) throw new HttpError(409, `${co.name} would go over its credit limit of UGX ${Number(co.credit_limit).toLocaleString('en-US')}.`);
+    }
+    companyId = co.id;
+    await db.query('UPDATE reservations SET company_id=$2, company_name=$3 WHERE id=$1', [r.id, co.id, co.name]);
+  }
   if (r.status === 'checked_out' && amount > await balanceOf(db, r.id)) throw new HttpError(400, 'Payment is more than the outstanding balance.');
   const reference = text(body.reference, 'Reference', { max: 80 });
-  const entryId = await postJournal(db, { date: s.business_date, description: `${r.code}: payment (${method.replace('_', ' ')})`, refType: 'payment', refId: r.id, userId: user.id, lines: paymentLines(method, amount) });
+  const entryId = await postJournal(db, { date: s.business_date, description: `${r.code}: payment (${method.replace('_', ' ')})`, refType: 'payment', refId: r.id, userId: user?.id ?? null, lines: paymentLines(method, amount) });
   const { rows: [p] } = await db.query(
-    `INSERT INTO payments (reservation_id, business_date, method, amount, reference, posted_by, journal_entry_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [r.id, s.business_date, method, amount, reference, user.id, entryId]);
+    `INSERT INTO payments (reservation_id, business_date, method, amount, reference, posted_by, journal_entry_id, company_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [r.id, s.business_date, method, amount, reference, user?.id ?? null, entryId, companyId]);
   await audit(db, user, 'folio.payment', 'reservation', r.id, { payment_id: p.id, method, amount });
   return p;
 }
@@ -322,6 +337,12 @@ export async function runNightAudit(db, user) {
     if (rate > 0) {
       await insertCharge(db, user, r, s, { department: 'rooms', amount: rate, description: `Room charge, night of ${date}`, date });
       revenue += rate;
+      // OTA commission on this night, owed to the channel
+      const commission = r.channel_id && Number(r.commission_pct) > 0 ? Math.round((rate * Number(r.commission_pct)) / 100) : 0;
+      if (commission > 0) {
+        await postJournal(db, { date, description: `${r.code}: ${r.source} commission ${Number(r.commission_pct)}%`, refType: 'commission', refId: r.id, userId: user.id,
+          lines: [{ account: '5300', debit: commission }, { account: '2300', credit: commission }] });
+      }
     }
   }
   const { rows: ns } = await db.query("UPDATE reservations SET status='no_show' WHERE status='reserved' AND arrival <= $1 RETURNING room_type_id, to_char(departure,'YYYY-MM-DD') AS departure", [date]);

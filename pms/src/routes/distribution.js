@@ -4,6 +4,7 @@ import { HttpError, requirePerm, audit } from '../auth.js';
 import * as dist from '../services/distribution.js';
 import { getSettings } from '../services/frontoffice.js';
 import { validateEndpoint, adapters } from '../channels/index.js';
+import * as pay from '../services/onlinepay.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,11 +29,19 @@ export function publicRouter(pool) {
     const s = await getSettings(pool);
     res.json({ property_name: s.property_name, booking_enabled: s.booking_enabled, intro: s.booking_intro, cancellation_policy: s.cancellation_policy,
       check_in_time: String(s.check_in_time).slice(0, 5), check_out_time: String(s.check_out_time).slice(0, 5), today: s.business_date,
-      horizon_days: s.booking_horizon_days, contact_phone: s.contact_phone, contact_email: s.contact_email, currency: s.currency });
+      horizon_days: s.booking_horizon_days, contact_phone: s.contact_phone, contact_email: s.contact_email, currency: s.currency, online_payments: s.online_payments });
   });
   r.get('/availability', reads, async (req, res) => res.json(await dist.quote(pool, { arrival: req.query.arrival, departure: req.query.departure, adults: req.query.adults })));
   r.post('/bookings', writes, async (req, res) => res.json(await tx(pool, (db) => dist.createPublicBooking(db, req.body || {}))));
   r.post('/bookings/lookup', writes, async (req, res) => res.json(await dist.lookupPublicBooking(pool, req.body?.code, req.body?.email)));
+  r.post('/bookings/pay', writes, async (req, res) => res.json(await tx(pool, (db) => pay.startPayment(db, req.body?.code, req.body?.email))));
+  r.get('/pay/:token', reads, async (req, res) => res.json(await pay.intentInfo(pool, req.params.token)));
+  // Test checkout only: confirms a payment without a real provider. Refused unless the simulator is the active provider.
+  r.post('/pay/test', writes, async (req, res) => {
+    const s = await getSettings(pool);
+    if (!s.online_payments || s.payment_provider !== 'simulator') throw new HttpError(403, 'Test payments are switched off.');
+    res.json(await tx(pool, (db) => pay.completePayment(db, { token: req.body?.token, status: req.body?.outcome === 'paid' ? 'paid' : 'failed', provider_ref: 'TEST-' + Date.now(), method: req.body?.method })));
+  });
   r.post('/bookings/cancel', writes, async (req, res) => res.json(await tx(pool, (db) => dist.cancelPublicBooking(db, req.body?.code, req.body?.email))));
   return r;
 }

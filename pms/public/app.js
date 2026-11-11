@@ -62,7 +62,7 @@
     ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
-    ['Finance', [['reports', 'Reports', 'reports.view'], ['accounts', 'Accounts', 'accounts.view']]],
+    ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
@@ -90,7 +90,7 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count' }[r] || null;
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view' }[r] || null;
     const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
@@ -518,8 +518,141 @@
         <label>Cancellation policy (shown to guests)<textarea name="cancellation_policy" rows="2" maxlength="1000">${esc(s.cancellation_policy)}</textarea></label>
         <div class="three"><label>Check-in from<input name="check_in_time" value="${String(s.check_in_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Check-out by<input name="check_out_time" value="${String(s.check_out_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Bookable up to (days ahead)<input name="booking_horizon_days" type="number" min="7" max="730" value="${s.booking_horizon_days}"></label></div>
         <div class="two"><label>Contact phone<input name="contact_phone" value="${esc(s.contact_phone || '')}" maxlength="40"></label><label>Contact email<input name="contact_email" type="email" value="${esc(s.contact_email || '')}" maxlength="120"></label></div>
-        <p class="note">Guests pay at the hotel for now. Online card and mobile money payment needs a payment provider account (for example Flutterwave or Pesapal) and is planned with Phase 5.</p>
-        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`;
+        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      ${await (async () => { const op = await GET('/finance/online-payments').catch(() => null); if (!op) return ''; return `<div class="card mt"><h2 class="sec">Online payment</h2>
+        <form class="form" data-form="online-pay"><label class="row"><input type="checkbox" name="enabled" value="1" ${op.enabled ? 'checked' : ''}> Let guests pay online (non-refundable rates in full, other rates the first night)</label>
+        <label>Payment provider<select name="provider">${opts(op.providers.map((p) => [p.id, p.label]), op.provider)}</select></label>
+        ${op.provider === 'simulator' ? '<p class="note err">The test checkout lets anyone mark a payment as paid. Use it only for testing; connect a real provider (e.g. Flutterwave or Pesapal) before switching this on for guests.</p>' : ''}
+        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`; })()}`;
+  };
+
+
+  /* ================= FINANCE ================= */
+  let ACCTS = null;
+  const accts = async (force) => (ACCTS && !force ? ACCTS : (ACCTS = await GET('/finance/accounts')));
+  const cashOpts = (list, sel) => opts(list.filter((a) => a.is_cash && a.active).map((a) => [a.code, `${a.code} ${a.name}`]), sel);
+  const AGE = [['current', 'Not yet due'], ['d30', '1–30 days'], ['d60', '31–60'], ['d90', '61–90'], ['over90', '90+']];
+  const rangeForm = (key, from, to, extra = '') => `<form class="row no-print" data-form="range" data-key="${key}"><input class="search" type="date" name="from" value="${from}" aria-label="From"><input class="search" type="date" name="to" value="${to}" aria-label="To">${extra}<button class="btn btn-ghost">Show</button><button type="button" class="btn btn-ghost" data-action="print">Print</button></form>`;
+  const monthStart = () => SETTINGS.business_date.slice(0, 8) + '01';
+
+  VIEWS.companies = async () => {
+    const [cos, aging] = await Promise.all([GET('/finance/companies'), GET('/finance/ar-aging')]);
+    const ag = (id) => aging.rows.find((r) => r.id === id);
+    return `<div class="page-head"><div><h1 class="page">Company accounts</h1><p class="sub">Companies that stay on account. Guest bills moved to a company account are invoiced from here.</p></div>${CAN['finance.manage'] ? '<button class="btn btn-gold" data-action="company-edit">+ Company</button>' : ''}</div>
+      <div class="card">${table(['Company', '#Not invoiced', ...AGE.map(([, l]) => '#' + l), '#Owed', ''], cos.map((c) => { const a = ag(c.id) || {}; return `<tr><td><a href="#company/${c.id}"><b>${esc(c.name)}</b></a><br><span class="small muted">${c.terms_days} days · limit ${c.credit_limit ? num(c.credit_limit) : 'none'}</span></td>
+        <td class="num">${num(a.unbilled)}</td>${AGE.map(([k]) => `<td class="num ${k !== 'current' && a[k] ? 'err' : ''}">${a[k] ? num(a[k]) : ''}</td>`).join('')}<td class="num"><b>${num(a.total)}</b></td><td class="right"><a class="btn btn-sm" href="#company/${c.id}">Open</a></td></tr>`; }), 'No companies yet.')}
+      <p class="small muted">Aging is by due date, as at ${fdate(aging.as_at)}. Unallocated payments reduce the amount owed.</p></div>`;
+  };
+
+  VIEWS.company = async (id) => {
+    const d = await GET(`/finance/companies/${id}`);
+    const c = d.company, m = CAN['finance.manage'];
+    return `<div class="page-head"><div><p class="sub"><a href="#companies">← Company accounts</a></p><h1 class="page">${esc(c.name)}</h1><p class="sub">${c.tin ? 'TIN ' + esc(c.tin) + ' · ' : ''}${c.terms_days} days credit · owes <b>${ugx(d.balance)}</b></p></div>
+      ${m ? `<div class="row"><button class="btn btn-ghost" data-action="company-edit" data-id="${c.id}">Edit</button><button class="btn btn-gold" data-action="receipt" data-id="${c.id}">Record payment received</button></div>` : ''}</div>
+      <div class="card"><h2 class="sec">Not invoiced yet</h2>${d.unbilled.length ? `<form class="form" data-form="invoice" data-id="${c.id}">${table(['', 'Stay', 'Guest', 'Dates', '#Amount'], d.unbilled.map((p) => `<tr><td><input type="checkbox" name="p_${p.id}" value="1" checked aria-label="Include ${esc(p.code)}"></td><td>${esc(p.code)}</td><td>${esc(p.first_name)} ${esc(p.last_name)}</td><td>${fdate(p.arrival)} → ${fdate(p.departure)}</td><td class="num">${num(p.amount)}</td></tr>`))}
+        ${m ? `<details><summary class="small">Add other charges (e.g. conference, transport)</summary>${[0, 1].map((k) => `<div class="three"><label>Description<input name="xd_${k}" maxlength="200"></label><label>Department<select name="xt_${k}">${opts(Object.entries(DEPT), 'events')}</select></label><label>Amount (VAT incl.)<input name="xa_${k}" type="number" min="1"></label></div>`).join('')}</details>
+        <div class="actions"><button class="btn btn-gold">Create invoice</button></div>` : ''}</form>` : `<p class="muted">Nothing waiting.${m ? ' <button class="link" data-action="invoice-extra" data-id="' + c.id + '">Invoice other charges</button>' : ''}</p>`}</div>
+      <div class="card mt"><h2 class="sec">Invoices</h2>${table(['Invoice', 'Date', 'Due', '#Total', '#Balance', 'Status', ''], d.invoices.map((i) => `<tr><td><a href="#invoice/${i.id}">${esc(i.number)}</a></td><td>${fdate(i.invoice_date)}</td><td class="${i.status === 'issued' && i.balance > 0 && i.due_date < d.business_date ? 'err' : ''}">${fdate(i.due_date)}</td><td class="num">${num(i.total)}</td><td class="num">${i.status === 'void' ? '' : num(i.balance)}</td>
+        <td>${i.status === 'void' ? pill('Void') : i.balance <= 0 ? pill('Paid', 'ok') : i.due_date < d.business_date ? pill('Overdue', 'bad') : pill('Open', 'info')}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#invoice/${i.id}">View</a></td></tr>`), 'No invoices.')}</div>
+      <div class="card mt"><h2 class="sec">Payments received</h2>${table(['Receipt', 'Date', 'Into', 'Reference', '#Amount', '#Not allocated'], d.receipts.map((r) => `<tr><td>${esc(r.number)}</td><td>${fdate(r.receipt_date)}</td><td>${esc(r.account_name)}</td><td>${esc(r.reference || '')}</td><td class="num">${num(r.amount)}</td><td class="num">${r.unallocated ? num(r.unallocated) : ''}</td></tr>`), 'No payments yet.')}</div>`;
+  };
+
+  VIEWS.invoice = async (id) => {
+    const i = await GET(`/finance/invoices/${id}`);
+    return `<div class="page-head no-print"><div><p class="sub"><a href="#company/${i.company_id}">← ${esc(i.company_name)}</a></p><h1 class="page">Invoice ${esc(i.number)}</h1></div>
+      <div class="row"><button class="btn btn-ghost" data-action="print">Print / PDF</button>${CAN['finance.manage'] && i.status === 'issued' && !i.payments.length ? `<button class="btn btn-bad" data-action="invoice-void" data-id="${i.id}">Void</button>` : ''}</div></div>
+      <div class="card"><div class="inv-head"><div><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Tax invoice ${esc(i.number)}${i.status === 'void' ? ' · <b class="err">VOID</b>' : ''}</p></div>
+        <dl class="kv"><dt>Bill to</dt><dd>${esc(i.company_name)}</dd>${i.tin ? `<dt>TIN</dt><dd>${esc(i.tin)}</dd>` : ''}${i.address ? `<dt>Address</dt><dd>${esc(i.address)}</dd>` : ''}<dt>Date</dt><dd>${fdate(i.invoice_date)}</dd><dt>Due</dt><dd>${fdate(i.due_date)}</dd></dl></div>
+        ${table(['Description', '#Amount (UGX)'], i.lines.map((l) => `<tr><td>${esc(l.description)}</td><td class="num">${num(l.amount)}</td></tr>`).concat([`<tr class="total"><td>Total (VAT included at ${num(SETTINGS.vat_rate)}%)</td><td class="num">${num(i.total)}</td></tr>`, `<tr><td>of which VAT</td><td class="num">${num(Math.round(i.total * Number(SETTINGS.vat_rate) / (100 + Number(SETTINGS.vat_rate))))}</td></tr>`,
+          ...i.payments.map((p) => `<tr><td>Paid ${fdate(p.receipt_date)} (${esc(p.number)})</td><td class="num">(${num(p.amount)})</td></tr>`), `<tr class="total"><td>Balance due</td><td class="num">${num(i.balance)}</td></tr>`]))}
+        ${i.notes ? `<p class="note">${esc(i.notes)}</p>` : ''}</div>`;
+  };
+
+  VIEWS.payables = async () => {
+    const [aging, inv] = await Promise.all([GET('/finance/ap-aging'), GET('/inventory/setup').catch(() => ({ suppliers: [] }))]);
+    const ag = (id) => aging.rows.find((r) => r.id === id) || {};
+    return `<div class="page-head"><div><h1 class="page">Suppliers &amp; bills</h1><p class="sub">What the hotel owes. Deliveries become bills when the supplier's invoice arrives; then pay them.</p></div></div>
+      <div class="card">${table(['Supplier', '#Delivered, not billed', ...AGE.map(([, l]) => '#' + l), '#Owed', ''], inv.suppliers.map((x) => { const a = ag(x.id); return `<tr><td><a href="#supplier/${x.id}"><b>${esc(x.name)}</b></a></td><td class="num">${a.not_billed ? num(a.not_billed) : ''}</td>${AGE.map(([k]) => `<td class="num ${k !== 'current' && a[k] ? 'err' : ''}">${a[k] ? num(a[k]) : ''}</td>`).join('')}<td class="num"><b>${num(a.total || 0)}</b></td><td class="right"><a class="btn btn-sm" href="#supplier/${x.id}">Open</a></td></tr>`; }), 'No suppliers. Add them under Items & recipes.')}
+      <p class="small muted">As at ${fdate(aging.as_at)}. Add new suppliers under Stores & purchasing → Items & recipes.</p></div>`;
+  };
+
+  VIEWS.supplier = async (id) => {
+    const d = await GET(`/finance/suppliers/${id}`);
+    const m = CAN['finance.manage'];
+    return `<div class="page-head"><div><p class="sub"><a href="#payables">← Suppliers &amp; bills</a></p><h1 class="page">${esc(d.supplier.name)}</h1><p class="sub">Owed: <b>${ugx(d.balance)}</b></p></div>
+      ${m ? `<div class="row"><button class="btn btn-ghost" data-action="bill-expense" data-id="${id}">+ Bill (services, utilities…)</button><button class="btn btn-gold" data-action="pay-supplier" data-id="${id}">Pay supplier</button></div>` : ''}</div>
+      <div class="card"><h2 class="sec">Delivered, waiting for the supplier's invoice</h2>${d.unbilled_grns.length ? `<form class="form" data-form="bill-stock" data-id="${id}">${table(['', 'Delivery', 'Date', 'Delivery note', '#Value'], d.unbilled_grns.map((g) => `<tr><td><input type="checkbox" name="g_${g.id}" value="1" aria-label="Include ${esc(g.code)}"></td><td>${esc(g.code)}</td><td>${fdate(g.business_date)}</td><td>${esc(g.invoice_ref || '')}</td><td class="num">${num(g.total)}</td></tr>`))}
+        ${m ? `<div class="two"><label>Supplier's invoice number<input name="bill_number" required maxlength="60"></label><label>Invoice date<input type="date" name="bill_date" value="${SETTINGS.business_date}" max="${SETTINGS.business_date}"></label></div><div class="actions"><button class="btn btn-gold">Record supplier invoice</button></div>` : ''}</form>` : '<p class="muted">Nothing waiting.</p>'}</div>
+      <div class="card mt"><h2 class="sec">Bills</h2>${table(['Invoice no.', 'Type', 'Date', 'Due', '#Total', '#VAT', '#Balance', ''], d.bills.map((b) => `<tr><td>${esc(b.bill_number)}</td><td>${b.kind === 'stock' ? 'Stock' : 'Expense'}</td><td>${fdate(b.bill_date)}</td><td>${fdate(b.due_date)}</td><td class="num">${num(b.total)}</td><td class="num">${b.vat ? num(b.vat) : ''}</td>
+        <td class="num">${b.status === 'void' ? pill('Void') : b.balance <= 0 ? pill('Paid', 'ok') : num(b.balance)}</td><td class="right">${m && b.status === 'open' && b.balance === b.total ? `<button class="btn btn-sm btn-ghost" data-action="bill-void" data-id="${b.id}">Void</button>` : ''}</td></tr>`), 'No bills.')}</div>
+      <div class="card mt"><h2 class="sec">Payments</h2>${table(['Payment', 'Date', 'From', 'Reference', '#Amount', '#Not allocated'], d.payments.map((p) => `<tr><td>${esc(p.number)}</td><td>${fdate(p.payment_date)}</td><td>${esc(p.account_name)}</td><td>${esc(p.reference || '')}</td><td class="num">${num(p.amount)}</td><td class="num">${p.unallocated ? num(p.unallocated) : ''}</td></tr>`), 'No payments.')}</div>`;
+  };
+
+  VIEWS.money = async () => {
+    const t = cur('money', 'expenses');
+    const from = ui.q.moneyFrom || monthStart(), to = ui.q.moneyTo || SETTINGS.business_date;
+    const m = CAN['finance.manage'];
+    let body;
+    if (t === 'expenses') {
+      const list = await GET(`/finance/expenses?from=${from}&to=${to}`);
+      body = `<div class="row between mb">${rangeForm('money', from, to)}${m ? '<button class="btn btn-gold" data-action="expense">+ Record payment</button>' : ''}</div>${table(['Date', 'Paid to', 'What for', 'Account', 'From', '#VAT', '#Amount'], list.map((e) => `<tr><td>${fdate(e.date)}</td><td>${esc(e.payee)}</td><td>${esc(e.description)}${e.reference ? `<br><span class="small muted">${esc(e.reference)}</span>` : ''}</td><td>${esc(e.account_name)}</td><td>${esc(e.paid_from_name)}</td><td class="num">${e.vat ? num(e.vat) : ''}</td><td class="num">${num(e.amount)}</td></tr>`).concat(list.length ? [`<tr class="total"><td colspan="6">Total</td><td class="num">${num(list.reduce((a, e) => a + e.amount, 0))}</td></tr>`] : []), 'No payments in this period.')}`;
+    } else {
+      const list = await GET('/finance/transfers');
+      body = `<div class="row between mb"><span class="muted">Moving money between cash, bank and mobile money, e.g. banking the cash takings or a card settlement.</span>${m ? '<button class="btn btn-gold" data-action="transfer">+ Transfer</button>' : ''}</div>${table(['Date', 'From', 'To', '#Amount', '#Fee', 'Note'], list.map((x) => `<tr><td>${fdate(x.date)}</td><td>${esc(x.from_name)}</td><td>${esc(x.to_name)}</td><td class="num">${num(x.amount)}</td><td class="num">${x.fee ? num(x.fee) : ''}</td><td>${esc(x.description || '')}</td></tr>`), 'No transfers.')}`;
+    }
+    return `<div class="page-head"><div><h1 class="page">Expenses &amp; transfers</h1><p class="sub">Payments made directly (petty cash, fuel, VAT to URA, OTA commission…) and transfers between accounts.</p></div></div>
+      ${tabs('money', [['expenses', 'Payments out'], ['transfers', 'Transfers']], 'expenses')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.statements = async () => {
+    const t = cur('st', 'pl');
+    const from = ui.q.stFrom || monthStart(), to = ui.q.stTo || SETTINGS.business_date;
+    const section = (title, rows, total, label) => `<tr><td colspan="2"><b>${title}</b></td></tr>${rows.map((r) => `<tr><td>&nbsp;&nbsp;${esc(r.code)} ${esc(r.name)}</td><td class="num">${num(r.amount)}</td></tr>`).join('')}<tr class="total"><td>${label}</td><td class="num">${num(total)}</td></tr>`;
+    let body, head = rangeForm('st', from, to);
+    if (t === 'pl') {
+      const p = await GET(`/finance/pl?from=${from}&to=${to}`);
+      body = `<h2 class="sec">Profit &amp; loss · ${fdate(p.from)} to ${fdate(p.to)}</h2><p class="small muted">Revenue is shown before VAT.</p>${table(['', '#UGX'], [section('Revenue', p.revenue, p.total_revenue, 'Total revenue'), section('Cost of sales', p.cost_of_sales, p.total_cost_of_sales, 'Total cost of sales'), `<tr class="total"><td>Gross profit</td><td class="num">${num(p.gross_profit)}</td></tr>`, section('Operating expenses', p.expenses, p.total_expenses, 'Total expenses'), `<tr class="total"><td>Net profit</td><td class="num ${p.net_profit < 0 ? 'err' : ''}">${num(p.net_profit)}</td></tr>`])}`;
+    } else if (t === 'bs') {
+      const b = await GET(`/finance/balance-sheet?to=${to}`);
+      head = `<form class="row no-print" data-form="range" data-key="st"><input type="hidden" name="from" value="${from}"><label class="row small">As at <input class="search" type="date" name="to" value="${to}"></label><button class="btn btn-ghost">Show</button><button type="button" class="btn btn-ghost" data-action="print">Print</button></form>`;
+      body = `<h2 class="sec">Balance sheet as at ${fdate(b.as_at)} ${b.balanced ? pill('Balanced', 'ok') : pill('Out of balance', 'bad')}</h2>${table(['', '#UGX'], [section('Assets', b.assets, b.total_assets, 'Total assets'), section('Liabilities', b.liabilities, b.total_liabilities, 'Total liabilities'), section('Equity', [...b.equity, { code: '', name: 'Profit to date (not yet closed to retained earnings)', amount: b.earnings }], b.total_equity, 'Total equity'), `<tr class="total"><td>Liabilities + equity</td><td class="num">${num(b.total_liabilities + b.total_equity)}</td></tr>`])}`;
+    } else if (t === 'vat') {
+      const v = await GET(`/finance/vat?from=${from}&to=${to}`);
+      body = `<h2 class="sec">VAT summary · ${fdate(v.from)} to ${fdate(v.to)}</h2>${table(['', '#UGX'], [['Output VAT on sales (rooms, F&amp;B, invoices)', v.output_vat], ['Input VAT on supplier bills and expenses', v.input_vat], ['<b>Net VAT for the period</b>', v.net_vat], ['Paid to URA in the period', v.paid_to_ura], ['VAT account balance at the end of the period (owed if positive)', v.vat_account_balance]].map(([l, n]) => `<tr><td>${l}</td><td class="num">${num(n)}</td></tr>`))}
+        <p class="note">Use this to prepare the URA VAT return. Input VAT on stock deliveries is not split out yet; record supplier VAT on expense bills.</p>`;
+    } else {
+      const list = await accts();
+      const code = ui.q.glCode || '1030';
+      const g = await GET(`/finance/ledger/${code}?from=${from}&to=${to}`);
+      head = rangeForm('st', from, to, `<select class="search" name="code" aria-label="Account">${opts(list.map((a) => [a.code, `${a.code} ${a.name}`]), code)}</select>`);
+      body = `<h2 class="sec">${esc(g.account.code)} ${esc(g.account.name)} · ${fdate(g.from)} to ${fdate(g.to)}</h2>${table(['Date', 'Description', 'By', '#Debit', '#Credit', '#Balance'], [`<tr><td colspan="5">Opening balance</td><td class="num">${num(g.opening)}</td></tr>`, ...g.lines.map((l) => `<tr><td class="nowrap">${fdate(l.date)}</td><td>${esc(l.description)}</td><td class="small">${esc(l.full_name || '')}</td><td class="num">${l.debit ? num(l.debit) : ''}</td><td class="num">${l.credit ? num(l.credit) : ''}</td><td class="num">${num(l.balance)}</td></tr>`), `<tr class="total"><td colspan="5">Closing balance</td><td class="num">${num(g.closing)}</td></tr>`])}`;
+    }
+    return `<div class="page-head"><div><h1 class="page">Financial statements</h1><p class="sub">Built live from the books. Every figure traces back to its journal entries.</p></div>${head}</div>
+      ${tabs('st', [['pl', 'Profit & loss'], ['bs', 'Balance sheet'], ['vat', 'VAT'], ['gl', 'General ledger']], 'pl')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.bankrec = async () => {
+    const [list, all] = await Promise.all([GET('/finance/reconciliations'), accts(true)]);
+    return `<div class="page-head"><div><h1 class="page">Bank reconciliation</h1><p class="sub">Tick off the books against the bank or mobile money statement until the difference is zero.</p></div></div>
+      ${CAN['accounts.journal'] ? `<div class="card mb"><form class="form" data-form="rec-start"><div class="three"><label>Account<select name="account_code">${cashOpts(all, '1030')}</select></label><label>Statement date<input type="date" name="statement_date" value="${SETTINGS.business_date}" required></label><label>Statement closing balance (UGX)<input name="statement_balance" type="number" step="1" required></label></div><div class="actions"><button class="btn btn-gold">Start reconciliation</button></div></form></div>` : ''}
+      <div class="card">${table(['Account', 'Statement date', '#Statement balance', 'Status', ''], list.map((r) => `<tr><td>${esc(r.account_name)}</td><td>${fdate(r.sdate)}</td><td class="num">${num(r.statement_balance)}</td><td>${r.status === 'open' ? pill('In progress', 'warn') : pill('Finished', 'ok')}</td><td class="right"><a class="btn btn-sm" href="#rec/${r.id}">${r.status === 'open' ? 'Continue' : 'View'}</a></td></tr>`), 'No reconciliations yet.')}</div>`;
+  };
+
+  VIEWS.rec = async (id) => {
+    const r = await GET(`/finance/reconciliations/${id}`);
+    const open = r.status === 'open' && CAN['accounts.journal'];
+    return `<div class="page-head"><div><p class="sub"><a href="#bankrec">← Bank reconciliation</a></p><h1 class="page">${esc(r.account_name)}</h1><p class="sub">Statement ${fdate(r.sdate)}: ${ugx(r.statement_balance)}</p></div></div>
+      <div class="grid g3 mb"><div class="card kpi"><span>Cleared balance</span><b>${num(r.cleared_balance)}</b><small>previously cleared ${num(r.opening_cleared)}</small></div><div class="card kpi"><span>Statement balance</span><b>${num(r.statement_balance)}</b><small>UGX</small></div><div class="card kpi"><span>Difference</span><b class="${r.difference ? 'err' : ''}">${num(r.difference)}</b><small>${r.difference ? 'tick items until this is zero' : 'balanced'}</small></div></div>
+      <div class="card">${table(['', 'Date', 'Description', '#Money in', '#Money out'], r.items.map((i) => `<tr><td>${open ? `<input type="checkbox" data-action="rec-tick" data-rec="${r.id}" data-line="${i.id}" ${i.cleared ? 'checked' : ''} aria-label="Cleared">` : i.cleared ? '✓' : ''}</td><td class="nowrap">${fdate(i.date)}</td><td>${esc(i.description)}</td><td class="num">${i.debit ? num(i.debit) : ''}</td><td class="num">${i.credit ? num(i.credit) : ''}</td></tr>`), 'Nothing to reconcile up to this date.')}
+      ${open ? `<div class="actions mt"><button class="btn btn-gold" data-action="rec-finish" data-id="${r.id}" ${r.difference ? 'disabled' : ''}>Finish reconciliation</button></div><p class="small muted">Bank charges or interest on the statement but not in the books? Record them under Expenses &amp; transfers first.</p>` : ''}</div>`;
+  };
+
+  VIEWS.chart = async () => {
+    const list = await accts(true);
+    const lock = SETTINGS.books_locked_until ? String(SETTINGS.books_locked_until).slice(0, 10) : '';
+    return `<div class="page-head"><div><h1 class="page">Chart of accounts</h1><p class="sub">Accounts marked “system” are used automatically and cannot be removed.</p></div><div class="row"><button class="btn btn-ghost" data-action="journal">Manual journal</button><button class="btn btn-gold" data-action="account-edit">+ Account</button></div></div>
+      <div class="card mb"><form class="row" data-form="lock"><b>Books closed up to</b><input class="search" type="date" name="until" value="${lock}" max="${addDays(SETTINGS.business_date, -1)}" aria-label="Books closed up to"><button class="btn btn-ghost">Save</button><span class="small muted">Nothing can be posted on or before this date. Only an administrator can reopen a closed date.</span></form></div>
+      <div class="card">${table(['Code', 'Account', 'Type', '#Balance', '', ''], list.map((a) => `<tr class="${a.active ? '' : 'void'}"><td>${esc(a.code)}</td><td><b>${esc(a.name)}</b>${a.is_cash ? ' ' + pill('cash/bank', 'info') : ''}</td><td>${esc(a.type)}</td><td class="num">${num(['asset', 'expense'].includes(a.type) ? a.balance : -a.balance)}</td><td>${a.system ? pill('system') : ''}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="account-edit" data-code="${esc(a.code)}">Edit</button></td></tr>`))}</div>`;
   };
 
   /* ---------- forms & actions ---------- */
@@ -555,16 +688,89 @@
       <div class="actions">${cancelBtn}<button class="btn btn-gold" ${free.length ? '' : 'disabled'}>Check in</button></div></form>`,
       async (v) => { const res = await POST(`/reservations/${id}/check-in`, { room_id: Number(v.room_id), allow_dirty: !!v.allow_dirty, guest: { id_type: v.id_type || null, id_number: v.id_number || null } }); return `Checked in to room ${esc(res.room)}.`; });
   }
-  function paymentForm(id, bal, company) {
+  async function paymentForm(id, bal, company) {
+    const cos = (await GET('/finance/companies').catch(() => [])).filter((c) => c.active);
+    const pre = cos.find((c) => c.name === company);
     modal('Take payment', `<form class="form" data-form="pay">
       <div class="two"><label>Amount (UGX)<input name="amount" type="number" min="1" step="1" value="${Math.max(0, bal)}" required></label><label>Method<select name="method">${opts(Object.entries(METHOD), 'cash')}</select></label></div>
-      <div class="two"><label>Reference (receipt / transaction no.)<input name="reference" maxlength="80"></label><label>Company (for company account)<input name="company_name" value="${esc(company || '')}" maxlength="120"></label></div>
+      <div class="two"><label>Reference (receipt / transaction no.)<input name="reference" maxlength="80"></label><label>Company (for company account)<select name="company_id">${opts([['', '–'], ...cos.map((c) => [c.id, c.name])], pre?.id || '')}</select></label></div>
       <p class="note">“Company account” moves the balance to the company's account to invoice later.</p>
       <div class="actions">${cancelBtn}<button class="btn btn-gold">Record payment</button></div></form>`,
-      async (v) => { await POST(`/reservations/${id}/payments`, { amount: Number(v.amount), method: v.method, reference: v.reference, company_name: v.company_name }); return `${ugx(v.amount)} recorded.`; });
+      async (v) => { await POST(`/reservations/${id}/payments`, { amount: Number(v.amount), method: v.method, reference: v.reference, company_id: v.company_id ? Number(v.company_id) : undefined }); return `${ugx(v.amount)} recorded.`; });
   }
 
   const A = {
+
+    'company-edit': async (d) => {
+      const c = d.id ? (await GET('/finance/companies')).find((x) => String(x.id) === d.id) : null;
+      modal(c ? `Edit ${c.name}` : 'New company account', `<form class="form" data-form="company"><div class="two"><label>Company name<input name="name" value="${esc(c?.name || '')}" required maxlength="120"></label><label>TIN<input name="tin" value="${esc(c?.tin || '')}" maxlength="30"></label></div>
+        <div class="three"><label>Contact person<input name="contact" value="${esc(c?.contact || '')}"></label><label>Phone<input name="phone" value="${esc(c?.phone || '')}"></label><label>Email<input name="email" type="email" value="${esc(c?.email || '')}"></label></div>
+        <label>Address<input name="address" value="${esc(c?.address || '')}" maxlength="300"></label>
+        <div class="two"><label>Credit limit (UGX, 0 = none)<input name="credit_limit" type="number" min="0" value="${c?.credit_limit ?? 0}"></label><label>Payment terms (days)<input name="terms_days" type="number" min="0" max="180" value="${c?.terms_days ?? 30}"></label></div>
+        ${c ? `<label class="row"><input type="checkbox" name="active" value="1" ${c.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const b = { ...v, credit_limit: Number(v.credit_limit), terms_days: Number(v.terms_days), active: c ? !!v.active : true }; if (c) await PUT(`/finance/companies/${c.id}`, b); else await POST('/finance/companies', b); return 'Company saved.'; });
+    },
+    'invoice-extra': (d) => modal('Invoice other charges', `<form class="form" data-form="invoice-x">${[0, 1, 2].map((k) => `<div class="three"><label>${k ? '' : 'Description'}<input name="xd_${k}" maxlength="200"></label><label>${k ? '' : 'Department'}<select name="xt_${k}">${opts(Object.entries(DEPT), 'events')}</select></label><label>${k ? '' : 'Amount (VAT incl.)'}<input name="xa_${k}" type="number" min="1"></label></div>`).join('')}<div class="actions">${cancelBtn}<button class="btn btn-gold">Create invoice</button></div></form>`,
+      async (v) => { const extra = [0, 1, 2].map((k) => ({ description: v['xd_' + k], department: v['xt_' + k], amount: Number(v['xa_' + k]) })).filter((x) => x.description && x.amount); const inv = await POST('/finance/invoices', { company_id: Number(d.id), extra_lines: extra }); location.hash = `#invoice/${inv.id}`; return `Invoice ${esc(inv.number)} created.`; }),
+    'invoice-void': (d) => modal('Void invoice', `<form class="form" data-form="void-inv"><p class="note">Stays on the invoice go back to “not invoiced”. Extra charges are reversed in the accounts.</p><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Void invoice</button></div></form>`,
+      async (v) => { await POST(`/finance/invoices/${d.id}/void`, v); return 'Invoice voided.'; }),
+    receipt: async (d) => {
+      const [co, all] = await Promise.all([GET(`/finance/companies/${d.id}`), accts(true)]);
+      const open = co.invoices.filter((i) => i.status === 'issued' && i.balance > 0);
+      modal(`Payment from ${co.company.name}`, `<form class="form" data-form="receipt"><div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required></label><label>Received into<select name="account_code">${cashOpts(all, '1030')}</select></label><label>Reference<input name="reference" maxlength="80" placeholder="EFT / cheque no."></label></div>
+        ${open.length ? `<p class="small muted">Allocate to invoices (anything left stays as a credit on the account):</p>${table(['Invoice', 'Due', '#Balance', 'Allocate'], open.map((i) => `<tr><td>${esc(i.number)}</td><td>${fdate(i.due_date)}</td><td class="num">${num(i.balance)}</td><td><input class="search" type="number" min="0" name="a_${i.id}" value="" aria-label="Allocate to ${esc(i.number)}"></td></tr>`))}` : '<p class="note">No open invoices: the payment will sit on the account as a credit.</p>'}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Record payment</button></div></form>`,
+        async (v) => { const allocations = Object.keys(v).filter((k) => k.startsWith('a_') && Number(v[k]) > 0).map((k) => ({ invoice_id: Number(k.slice(2)), amount: Number(v[k]) })); await POST('/finance/receipts', { company_id: Number(d.id), amount: Number(v.amount), account_code: v.account_code, reference: v.reference, allocations }); return 'Payment recorded.'; });
+    },
+    'bill-expense': async (d) => {
+      const all = (await accts(true)).filter((a) => a.active && a.type === 'expense');
+      modal('Supplier bill (services, utilities, repairs…)', `<form class="form" data-form="bill-x"><div class="three"><label>Supplier's invoice number<input name="bill_number" required maxlength="60"></label><label>Invoice date<input type="date" name="bill_date" value="${SETTINGS.business_date}" max="${SETTINGS.business_date}"></label><label>Due date<input type="date" name="due_date"></label></div>
+        ${[0, 1, 2].map((k) => `<div class="three"><label>${k ? '' : 'Expense account'}<select name="ac_${k}">${opts([['', '–'], ...all.map((a) => [a.code, `${a.code} ${a.name}`])])}</select></label><label>${k ? '' : 'Description / amount before VAT'}<span class="row"><input name="de_${k}" maxlength="200" placeholder="Description"><input name="am_${k}" type="number" min="1" placeholder="Amount"></span></label><label>${k ? '' : 'VAT'}<input name="va_${k}" type="number" min="0" placeholder="0"></label></div>`).join('')}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save bill</button></div></form>`,
+        async (v) => { const lines = [0, 1, 2].map((k) => ({ account_code: v['ac_' + k], description: v['de_' + k], amount: Number(v['am_' + k]), vat: Number(v['va_' + k] || 0) })).filter((l) => l.account_code && l.amount);
+          await POST('/finance/bills', { supplier_id: Number(d.id), kind: 'expense', bill_number: v.bill_number, bill_date: v.bill_date, due_date: v.due_date || undefined, lines }); return 'Bill recorded.'; });
+    },
+    'bill-void': (d) => modal('Void bill', `<form class="form" data-form="void-bill"><label>Reason<input name="reason" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Void bill</button></div></form>`, async (v) => { await POST(`/finance/bills/${d.id}/void`, v); return 'Bill voided.'; }),
+    'pay-supplier': async (d) => {
+      const [s, all] = await Promise.all([GET(`/finance/suppliers/${d.id}`), accts(true)]);
+      const open = s.bills.filter((b) => b.status === 'open' && b.balance > 0);
+      modal(`Pay ${s.supplier.name}`, `<form class="form" data-form="pay-sup"><div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required value="${open.reduce((a, b) => a + b.balance, 0) || ''}"></label><label>Paid from<select name="account_code">${cashOpts(all, '1030')}</select></label><label>Reference<input name="reference" maxlength="80" placeholder="Cheque / transfer no."></label></div>
+        ${open.length ? table(['Bill', 'Due', '#Balance', 'Pay'], open.map((b) => `<tr><td>${esc(b.bill_number)}</td><td>${fdate(b.due_date)}</td><td class="num">${num(b.balance)}</td><td><input class="search" type="number" min="0" name="b_${b.id}" value="${b.balance}" aria-label="Pay ${esc(b.bill_number)}"></td></tr>`)) : '<p class="note">No open bills: this will be an advance payment.</p>'}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Record payment</button></div></form>`,
+        async (v) => { const allocations = Object.keys(v).filter((k) => k.startsWith('b_') && Number(v[k]) > 0).map((k) => ({ bill_id: Number(k.slice(2)), amount: Number(v[k]) })); await POST('/finance/supplier-payments', { supplier_id: Number(d.id), amount: Number(v.amount), account_code: v.account_code, reference: v.reference, allocations }); return 'Payment recorded.'; });
+    },
+    expense: async () => {
+      const all = await accts(true);
+      const targets = all.filter((a) => a.active && (a.type === 'expense' || (a.type === 'liability' && !['2000'].includes(a.code))));
+      modal('Record a payment', `<form class="form" data-form="expense"><div class="two"><label>Paid to<input name="payee" required maxlength="120"></label><label>What for<input name="description" required maxlength="200"></label></div>
+        <div class="three"><label>Account<select name="account_code">${opts(targets.map((a) => [a.code, `${a.code} ${a.name}`]), '6900')}</select></label><label>Paid from<select name="paid_from">${cashOpts(all, '1000')}</select></label><label>Date<input type="date" name="expense_date" value="${SETTINGS.business_date}" max="${SETTINGS.business_date}"></label></div>
+        <div class="three"><label>Total paid (UGX)<input name="amount" type="number" min="1" required></label><label>VAT included (if any)<input name="vat" type="number" min="0" value="0"></label><label>Receipt / reference<input name="reference" maxlength="80"></label></div>
+        <p class="small muted">To pay VAT to URA choose 2100 VAT payable; to pay an OTA its commission choose 2300.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { await POST('/finance/expenses', { ...v, amount: Number(v.amount), vat: Number(v.vat || 0) }); ACCTS = null; return 'Payment recorded.'; });
+    },
+    transfer: async () => {
+      const all = await accts(true);
+      const from = all.filter((a) => a.active && (a.is_cash || a.code === '1010'));
+      modal('Transfer between accounts', `<form class="form" data-form="transfer"><div class="three"><label>From<select name="from_account">${opts(from.map((a) => [a.code, `${a.code} ${a.name}`]), '1000')}</select></label><label>To<select name="to_account">${cashOpts(all, '1030')}</select></label><label>Date<input type="date" name="transfer_date" value="${SETTINGS.business_date}" max="${SETTINGS.business_date}"></label></div>
+        <div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required></label><label>Fee deducted (bank / card / mobile money)<input name="fee" type="number" min="0" value="0"></label><label>Note<input name="description" maxlength="200" placeholder="e.g. Banking cash takings"></label></div>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save transfer</button></div></form>`,
+        async (v) => { await POST('/finance/transfers', { ...v, amount: Number(v.amount), fee: Number(v.fee || 0) }); return 'Transfer recorded.'; });
+    },
+    'account-edit': async (d) => {
+      const a = d.code ? (await accts(true)).find((x) => x.code === d.code) : null;
+      modal(a ? `Edit ${a.code}` : 'New account', `<form class="form" data-form="account"><div class="three"><label>Code<input name="code" value="${esc(a?.code || '')}" ${a ? 'disabled' : 'required'} pattern="\\d{4}"></label><label>Name<input name="name" value="${esc(a?.name || '')}" required maxlength="100"></label><label>Type<select name="type" ${a ? 'disabled' : ''}>${opts([['expense', 'Expense'], ['revenue', 'Revenue'], ['asset', 'Asset'], ['liability', 'Liability'], ['equity', 'Equity']], a?.type)}</select></label></div>
+        ${!a?.system ? `<label class="row"><input type="checkbox" name="is_cash" value="1" ${a?.is_cash ? 'checked' : ''}> Cash, bank or mobile money account (assets only)</label>` : ''}${a && !a.system ? `<label class="row"><input type="checkbox" name="active" value="1" ${a.active ? 'checked' : ''}> Active</label>` : ''}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (a) await PUT(`/finance/accounts/${a.code}`, { name: v.name, is_cash: !!v.is_cash, active: a.system ? true : !!v.active }); else await POST('/finance/accounts', { code: v.code, name: v.name, type: v.type, is_cash: !!v.is_cash }); ACCTS = null; return 'Account saved.'; });
+    },
+    journal: async () => {
+      const all = (await accts(true)).filter((a) => a.active && !['1100', '1200', '1300', '2000'].includes(a.code));
+      modal('Manual journal', `<form class="form" data-form="journal"><div class="two"><label>Description<input name="description" required maxlength="200"></label><label>Date<input type="date" name="date" value="${SETTINGS.business_date}" max="${SETTINGS.business_date}"></label></div>
+        ${[0, 1, 2, 3].map((k) => `<div class="three"><label>${k ? '' : 'Account'}<select name="ac_${k}">${opts([['', '–'], ...all.map((a) => [a.code, `${a.code} ${a.name}`])])}</select></label><label>${k ? '' : 'Debit'}<input name="dr_${k}" type="number" min="0"></label><label>${k ? '' : 'Credit'}<input name="cr_${k}" type="number" min="0"></label></div>`).join('')}
+        <p class="small muted">Guest ledger, company accounts, inventory and supplier balances are kept by the system and are not listed. Debits must equal credits.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Post journal</button></div></form>`,
+        async (v) => { const lines = [0, 1, 2, 3].map((k) => ({ account_code: v['ac_' + k], debit: Number(v['dr_' + k] || 0), credit: Number(v['cr_' + k] || 0) })).filter((l) => l.account_code); await POST('/finance/journals', { description: v.description, date: v.date, lines }); ACCTS = null; return 'Journal posted.'; });
+    },
+    'rec-finish': async (d) => { await POST(`/finance/reconciliations/${d.id}/finish`); toast('Reconciliation finished.'); render(); },
 
     'rate-edit': async () => {
       const types = (await GET('/room-types')).filter((t) => t.active);
@@ -852,6 +1058,20 @@
   };
 
   const FORMS = {
+    range: (v, form) => { const k = form.dataset.key; ui.q[k + 'From'] = v.from; ui.q[k + 'To'] = v.to; if (v.code) ui.q.glCode = v.code; render(); },
+    invoice: async (v, form) => {
+      const payment_ids = Object.keys(v).filter((k) => k.startsWith('p_')).map((k) => Number(k.slice(2)));
+      const extra_lines = [0, 1].map((k) => ({ description: v['xd_' + k], department: v['xt_' + k], amount: Number(v['xa_' + k]) })).filter((x) => x.description && x.amount);
+      const inv = await POST('/finance/invoices', { company_id: Number(form.dataset.id), payment_ids, extra_lines }); toast(`Invoice ${esc(inv.number)} created.`); location.hash = `#invoice/${inv.id}`;
+    },
+    'bill-stock': async (v, form) => {
+      const grn_ids = Object.keys(v).filter((k) => k.startsWith('g_')).map((k) => Number(k.slice(2)));
+      if (!grn_ids.length) throw new Error('Tick the deliveries this invoice covers.');
+      await POST('/finance/bills', { supplier_id: Number(form.dataset.id), kind: 'stock', grn_ids, bill_number: v.bill_number, bill_date: v.bill_date }); toast('Supplier invoice recorded.'); render();
+    },
+    'rec-start': async (v) => { const r = await POST('/finance/reconciliations', { ...v, statement_balance: Number(v.statement_balance) }); location.hash = `#rec/${r.id}`; },
+    lock: async (v) => { await PUT('/finance/lock', { until: v.until || null }); await refreshSettings(); toast(v.until ? `Books closed up to ${fdate(v.until)}.` : 'Books reopened.'); render(); },
+    'online-pay': async (v) => { await PUT('/finance/online-payments', { enabled: !!v.enabled, provider: v.provider }); toast('Online payment settings saved.'); render(); },
     'rate-from': (v) => { ui.q.rateFrom = v.from; render(); },
     'booking-settings': async (v) => { await PUT('/distribution/booking-settings', { ...v, booking_enabled: !!v.booking_enabled, booking_horizon_days: Number(v.booking_horizon_days) }); toast('Booking engine settings saved.'); render(); },
 
@@ -920,6 +1140,10 @@
   document.addEventListener('change', async (e) => {
     if (e.target.dataset.action !== 'outlet-store') return;
     try { await PUT(`/inventory/outlets/${e.target.dataset.id}/store`, { store_id: e.target.value ? Number(e.target.value) : null }); toast('Outlet updated.'); INVS = null; } catch (err) { toast(esc(err.message), true); }
+  });
+  document.addEventListener('change', async (e) => {
+    if (e.target.dataset.action !== 'rec-tick') return;
+    try { await PUT(`/finance/reconciliations/${e.target.dataset.rec}/lines`, { line_ids: [Number(e.target.dataset.line)], cleared: e.target.checked }); render(); } catch (err) { toast(esc(err.message), true); }
   });
   document.addEventListener('input', (e) => { if (e.target.dataset.calc === 'tender' || e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
   document.addEventListener('change', (e) => { if (e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });

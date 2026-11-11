@@ -4,7 +4,7 @@ import { HttpError } from './auth.js';
 
 export const ACCOUNTS = {
   cash: '1000', card: '1010', mobile_money: '1020', bank_transfer: '1030',
-  guestLedger: '1100', company_account: '1200', vat: '2100',
+  guestLedger: '1100', company_account: '1200', vat: '2100', payable: '2000', commissionsPayable: '2300', commissions: '5300', bankCharges: '5800',
 };
 export const REVENUE = { rooms: '4000', fnb: '4100', amenities: '4200', events: '4300', other: '4900' };
 export const PAYMENT_METHODS = ['cash', 'card', 'mobile_money', 'bank_transfer', 'company_account'];
@@ -17,6 +17,8 @@ export async function postJournal(db, { date, description, refType, refId, userI
   const clean = lines.filter((l) => (l.debit || 0) > 0 || (l.credit || 0) > 0);
   const dr = clean.reduce((a, l) => a + (l.debit || 0), 0), cr = clean.reduce((a, l) => a + (l.credit || 0), 0);
   if (!clean.length || dr !== cr) throw new HttpError(500, `Unbalanced journal entry (${dr} vs ${cr}).`);
+  const { rows: [lock] } = await db.query("SELECT to_char(books_locked_until,'YYYY-MM-DD') AS d FROM settings WHERE id=1");
+  if (lock?.d && String(date) <= lock.d) throw new HttpError(409, `The books are closed up to ${lock.d}. Nothing can be posted on or before that date.`);
   const { rows: [e] } = await db.query(
     'INSERT INTO journal_entries (business_date, description, ref_type, ref_id, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
     [date, description, refType, refId == null ? null : String(refId), userId ?? null]);

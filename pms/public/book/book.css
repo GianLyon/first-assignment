@@ -39,3 +39,5 @@ h2 { font-family: "Cormorant Garamond", Georgia, serif; font-size: 1.7rem; margi
   .room { grid-template-columns: 1fr; } .thumb { min-height: 110px; }
   .two { grid-template-columns: 1fr; }
 }
+.test-pay { margin-top: 40px; } .test-flag { color: var(--bad); }
+.pay-now { margin-top: 12px; }
