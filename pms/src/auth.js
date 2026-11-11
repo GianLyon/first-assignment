@@ -28,14 +28,15 @@ export const PERMISSIONS = {
   admin: ['*'],
   manager: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
     'housekeeping.update', 'audit.run', 'accounts.view', 'reports.view', 'settings.manage', 'auditlog.view', 'pos.use', 'pos.void', 'pos.manage', 'pos.kitchen',
-    'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count', 'distribution.manage', 'finance.view'],
-  front_office: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'housekeeping.update', 'reports.view', 'pos.use', 'requisition.create'],
-  night_auditor: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'audit.run', 'reports.view', 'accounts.view', 'pos.use'],
-  housekeeping: ['reservations.view', 'housekeeping.update', 'requisition.create'],
-  accountant: ['reservations.view', 'folio.void', 'accounts.view', 'reports.view', 'auditlog.view', 'inventory.view', 'stock.count', 'finance.view', 'finance.manage', 'accounts.journal'],
-  waiter: ['pos.use'],
-  kitchen: ['pos.kitchen', 'inventory.view', 'requisition.create'],
-  storekeeper: ['inventory.view', 'inventory.manage', 'inventory.receive', 'requisition.create', 'requisition.issue', 'stock.count'],
+    'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count', 'distribution.manage', 'finance.view', 'hr.view', 'hr.manage', 'hr.approve', 'roster.manage', 'attendance.record', 'staff.self'],
+  front_office: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'housekeeping.update', 'reports.view', 'pos.use', 'requisition.create', 'staff.self'],
+  night_auditor: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'audit.run', 'reports.view', 'accounts.view', 'pos.use', 'staff.self'],
+  housekeeping: ['reservations.view', 'housekeeping.update', 'requisition.create', 'staff.self'],
+  accountant: ['reservations.view', 'folio.void', 'accounts.view', 'reports.view', 'auditlog.view', 'inventory.view', 'stock.count', 'finance.view', 'finance.manage', 'accounts.journal', 'hr.view', 'payroll.manage', 'staff.self'],
+  waiter: ['pos.use', 'staff.self'],
+  kitchen: ['pos.kitchen', 'inventory.view', 'requisition.create', 'staff.self'],
+  storekeeper: ['inventory.view', 'inventory.manage', 'inventory.receive', 'requisition.create', 'requisition.issue', 'stock.count', 'staff.self'],
+  hr_officer: ['hr.view', 'hr.manage', 'roster.manage', 'attendance.record', 'payroll.manage', 'staff.self'],
 };
 export const ROLES = Object.keys(PERMISSIONS);
 export const ALL_PERMISSIONS = [...new Set(Object.values(PERMISSIONS).flat().filter((p) => p !== '*')), 'users.manage'];

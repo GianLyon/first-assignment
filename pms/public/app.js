@@ -14,7 +14,7 @@
   const DEPT = { rooms: 'Rooms', fnb: 'Food & beverage', amenities: 'Amenities', events: 'Events', other: 'Other' };
   const METHOD = { cash: 'Cash', card: 'Card', mobile_money: 'Mobile money', bank_transfer: 'Bank transfer', company_account: 'Company account' };
   const STATUS = { reserved: ['Reserved', 'info'], in_house: ['In-house', 'ink'], checked_out: ['Checked out', ''], cancelled: ['Cancelled', 'bad'], no_show: ['No-show', 'bad'] };
-  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar', storekeeper: 'Storekeeper' };
+  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar', storekeeper: 'Storekeeper', hr_officer: 'HR officer' };
   const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
 
   let ME = null, CAN = {}, SETTINGS = null;
@@ -63,6 +63,7 @@
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
+    ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
@@ -90,7 +91,7 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view' }[r] || null;
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self' }[r] || null;
     const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
@@ -237,7 +238,7 @@
     const users = await GET('/users');
     return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
       <div class="card">${table(['Name', 'Username', 'Role', 'Status', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
-      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen, stock levels, requisitions'], ['Storekeeper', 'Stock, deliveries, purchase orders (not approval), issuing requisitions, stock counts']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
+      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen, stock levels, requisitions'], ['Storekeeper', 'Stock, deliveries, purchase orders (not approval), issuing requisitions, stock counts'], ['HR officer', 'Employees, rosters, attendance, leave records, payroll preparation (managers approve)']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
   };
 
   VIEWS.log = async () => {
@@ -655,6 +656,150 @@
       <div class="card">${table(['Code', 'Account', 'Type', '#Balance', '', ''], list.map((a) => `<tr class="${a.active ? '' : 'void'}"><td>${esc(a.code)}</td><td><b>${esc(a.name)}</b>${a.is_cash ? ' ' + pill('cash/bank', 'info') : ''}</td><td>${esc(a.type)}</td><td class="num">${num(['asset', 'expense'].includes(a.type) ? a.balance : -a.balance)}</td><td>${a.system ? pill('system') : ''}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="account-edit" data-code="${esc(a.code)}">Edit</button></td></tr>`))}</div>`;
   };
 
+
+  /* ================= PEOPLE (HR & PAYROLL) ================= */
+  let HRS = null;
+  const hrSetup = async () => (HRS || (HRS = await GET('/hr/setup')));
+  const LEAVE_ST = { pending: ['Waiting approval', 'warn'], approved: ['Approved', 'ok'], rejected: ['Rejected', 'bad'], cancelled: ['Cancelled', ''] };
+  const PAY_ST = { draft: ['Draft', 'warn'], approved: ['Approved', 'info'], posted: ['Posted', 'ok'], paid: ['Paid', 'ok'] };
+  const ATT_ST = { present: ['Present', 'ok'], late: ['Late', 'warn'], absent: ['Absent', 'bad'], leave: ['On leave', 'info'], off: ['Day off', ''], expected: ['Expected', ''], 'not rostered': ['Not rostered', ''] };
+  const fmonth = (p) => new Date(p + '-01T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const empName = (e) => `${e.first_name} ${e.last_name}`;
+  const deptFilter = (key, depts) => `<select class="search" data-action="dept-filter" data-key="${key}" aria-label="Department">${opts([['', 'All departments'], ...depts.map((d) => [d, d])], ui.q[key] || '')}</select>`;
+  const weekStart = (d) => { const t = new Date(d + 'T00:00:00Z'); const dow = (t.getUTCDay() + 6) % 7; return addDays(d, -dow); };
+
+  VIEWS.myhr = async () => {
+    const [me, setup] = await Promise.all([GET('/hr/me'), hrSetup()]);
+    if (!me.linked) return `<div class="page-head"><div><h1 class="page">My HR</h1></div></div><div class="card"><p>Your sign-in is not linked to an employee record yet. Ask HR to link it so you can see your shifts, leave and payslips here.</p></div>`;
+    const sh = (id) => setup.shifts.find((x) => x.id === id);
+    const att = me.attendance;
+    return `<div class="page-head"><div><h1 class="page">Hello, ${esc(me.employee.first_name)}</h1><p class="sub">${esc(me.employee.job_title)} · ${esc(me.employee.department)} · ${esc(me.employee.emp_no)}</p></div></div>
+      <div class="grid g3">
+        <div class="card kpi"><span>Today</span><b>${att?.clock_out ? 'Signed out' : att?.clock_in ? 'Signed in' : 'Not signed in'}</b><small>${att?.clock_in ? `in ${att.clock_in}` : ''}${att?.clock_out ? ` · out ${att.clock_out}` : ''}</small>
+          <div class="row mt">${!att?.clock_in ? '<button class="btn btn-gold" data-action="clock" data-a="in">Sign in</button>' : !att.clock_out ? '<button class="btn" data-action="clock" data-a="out">Sign out</button>' : ''}</div></div>
+        <div class="card kpi"><span>Annual leave left (${me.leave_balance.year})</span><b>${me.leave_balance.remaining}</b><small>of ${me.leave_balance.entitlement} days · ${me.leave_balance.pending} waiting approval</small><div class="row mt"><button class="btn btn-ghost" data-action="my-leave">Request leave</button></div></div>
+        <div class="card kpi"><span>Latest payslip</span><b>${me.payslips[0] ? num(me.payslips[0].net) : '–'}</b><small>${me.payslips[0] ? 'UGX net, ' + fmonth(me.payslips[0].period) : 'none yet'}</small>${me.payslips[0] ? `<div class="row mt"><a class="btn btn-ghost" href="#payslip/${me.payslips[0].id}">View</a></div>` : ''}</div>
+      </div>
+      <div class="card mt"><h2 class="sec">My shifts this week</h2>${table(me.week.map((d) => fdate(d.date)), [`<tr>${me.week.map((d) => `<td>${d.leave ? pill('Leave', 'info') : d.shift_id === null ? 'Off' : d.shift_id ? `<b>${esc(sh(d.shift_id)?.name || '')}</b><br><span class="small muted">${sh(d.shift_id)?.start_time}–${sh(d.shift_id)?.end_time}</span>` : '<span class="muted">–</span>'}</td>`).join('')}</tr>`])}</div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">My leave</h2>${table(['Type', 'Dates', '#Days', 'Status', ''], me.leave.map((l) => `<tr><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${pill(...LEAVE_ST[l.status])}</td><td class="right">${l.status === 'pending' ? `<button class="btn btn-sm btn-ghost" data-action="leave-cancel" data-id="${l.id}">Cancel</button>` : ''}</td></tr>`), 'No leave yet.')}</div>
+        <div class="card"><h2 class="sec">My payslips</h2>${table(['Month', '#Net pay', ''], me.payslips.map((p) => `<tr><td>${fmonth(p.period)}</td><td class="num">${num(p.net)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#payslip/${p.id}">View</a></td></tr>`), 'No payslips yet.')}</div></div>`;
+  };
+
+  VIEWS.payslip = async (id) => {
+    const [run, emp] = String(id).split('-');
+    const p = await GET(`/hr/payslip/${run}${emp ? '?employee_id=' + emp : ''}`);
+    const row = (l, v, neg) => v ? `<tr><td>${l}</td><td class="num">${neg ? '(' + num(v) + ')' : num(v)}</td></tr>` : '';
+    return `<div class="page-head no-print"><div><p class="sub"><a href="${emp ? '#payrun/' + run : '#myhr'}">← Back</a></p><h1 class="page">Payslip</h1></div><button class="btn btn-ghost" data-action="print">Print / PDF</button></div>
+      <div class="card payslip"><div class="inv-head"><div><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Payslip · ${fmonth(p.period)}${p.status === 'draft' || p.status === 'approved' ? ' · <b class="err">DRAFT</b>' : ''}</p></div>
+        <dl class="kv"><dt>Employee</dt><dd>${esc(empName(p))} (${esc(p.emp_no)})</dd><dt>Job</dt><dd>${esc(p.job_title)}, ${esc(p.department)}</dd><dt>TIN</dt><dd>${esc(p.tin || '–')}</dd><dt>NSSF no.</dt><dd>${esc(p.nssf_no || '–')}</dd><dt>Paid by</dt><dd>${p.pay_method === 'bank' ? `${esc(p.bank_name || 'Bank')} ${esc(p.bank_account || '')}` : p.pay_method === 'mobile_money' ? `Mobile money ${esc(p.momo_number || '')}` : 'Cash'}</dd></dl></div>
+        <div class="grid g2"><div>${table(['Earnings', '#UGX'], [row(`Basic salary (${p.days_worked - p.unpaid_days} of ${p.days_in_month} days)`, p.basic), row('Allowances', p.allowances), row(`Overtime (${p.overtime_hours} h)`, p.overtime), row('Other additions', p.other_additions), `<tr class="total"><td>Gross pay</td><td class="num">${num(p.gross)}</td></tr>`])}</div>
+          <div>${table(['Deductions', '#UGX'], [row('PAYE', p.paye), row('NSSF (5%)', p.nssf_employee), row('Advance recovery', p.advance_recovery), row('Other deductions', p.other_deductions), `<tr class="total"><td>Total deductions</td><td class="num">${num(p.paye + p.nssf_employee + p.advance_recovery + p.other_deductions)}</td></tr>`])}</div></div>
+        <div class="net-pay"><span>Net pay</span><b>${ugx(p.net)}</b></div><p class="small muted">Employer NSSF contribution (10%): ${ugx(p.nssf_employer)}. ${p.note ? esc(p.note) : ''}</p></div>`;
+  };
+
+  VIEWS.employees = async () => {
+    const st = cur('emp', 'active');
+    const [list, setup] = await Promise.all([GET(`/hr/employees?status=${st === 'all' ? 'all' : st}`), hrSetup()]);
+    const d = ui.q.empDept || '';
+    const shown = list.filter((e) => !d || e.department === d);
+    return `<div class="page-head"><div><h1 class="page">Employees</h1><p class="sub">${shown.length} shown · monthly basic pay ${ugx(shown.filter((e) => e.status === 'active').reduce((a, e) => a + Number(e.basic_salary || 0), 0))}</p></div>
+      <div class="row">${deptFilter('empDept', setup.departments)}${CAN['hr.manage'] ? '<button class="btn btn-gold" data-action="emp-edit">+ Employee</button>' : ''}</div></div>
+      ${tabs('emp', [['active', 'Current staff'], ['left', 'Former staff'], ['all', 'All']], 'active')}
+      <div class="card">${table(['Employee', 'Department', 'Job', 'Type', 'Started', '#Basic pay', 'Sign-in', ''], shown.map((e) => `<tr><td><a href="#employee/${e.id}"><b>${esc(empName(e))}</b></a><br><span class="small muted">${esc(e.emp_no)}${e.status === 'left' ? ' · left ' + fdate(String(e.end_date).slice(0, 10)) : ''}</span></td><td>${esc(e.department)}</td><td>${esc(e.job_title)}</td><td>${esc(e.employment_type)}</td><td>${fdate(String(e.start_date).slice(0, 10))}</td><td class="num">${num(e.basic_salary)}</td><td>${e.username ? esc(e.username) : '<span class="muted">–</span>'}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#employee/${e.id}">Open</a></td></tr>`), 'No employees.')}</div>`;
+  };
+
+  VIEWS.employee = async (id) => {
+    const d = await GET(`/hr/employees/${id}`);
+    const e = d.employee, m = CAN['hr.manage'];
+    const kv = (pairs) => `<dl class="kv">${pairs.filter(([, v]) => v !== undefined).map(([k, v]) => `<dt>${k}</dt><dd>${v === null || v === '' ? '–' : v}</dd>`).join('')}</dl>`;
+    return `<div class="page-head"><div><p class="sub"><a href="#employees">← Employees</a></p><h1 class="page">${esc(empName(e))}</h1><p class="sub">${esc(e.emp_no)} · ${esc(e.job_title)}, ${esc(e.department)} · ${e.status === 'left' ? pill('Left ' + fdate(String(e.end_date).slice(0, 10))) : pill('Current', 'ok')}</p></div>
+      ${m && e.status === 'active' ? `<div class="row"><button class="btn btn-ghost" data-action="emp-edit" data-id="${e.id}">Edit</button><button class="btn btn-ghost" data-action="hr-leave" data-id="${e.id}">Record leave</button><button class="btn btn-bad" data-action="emp-leave" data-id="${e.id}">Leaving the company</button></div>` : ''}</div>
+      <div class="grid g3"><div class="card"><h2 class="sec">Personal</h2>${kv([['Gender', esc(e.gender || '')], ['Date of birth', e.date_of_birth ? fdate(String(e.date_of_birth).slice(0, 10)) : ''], ['Phone', esc(e.phone || '')], ['Email', esc(e.email || '')], ['NIN', esc(e.nin || '')], ['TIN', esc(e.tin || '')], ['NSSF no.', esc(e.nssf_no || '')], ['Sign-in', esc(e.username || '')]])}</div>
+        <div class="card"><h2 class="sec">Employment & pay</h2>${kv([['Type', esc(e.employment_type)], ['Started', fdate(String(e.start_date).slice(0, 10))], ['Basic (month)', ugx(e.basic_salary)], ['Housing', num(e.housing_allowance)], ['Transport', num(e.transport_allowance)], ['Other allowance', num(e.other_allowance)], ['Paid by', e.pay_method === 'bank' ? `${esc(e.bank_name || 'Bank')} ${esc(e.bank_account || '')}` : e.pay_method === 'mobile_money' ? `Mobile money ${esc(e.momo_number || '')}` : 'Cash'], ['Leaving reason', e.leaving_reason ? esc(e.leaving_reason) : undefined]])}</div>
+        <div class="card kpi"><span>Annual leave ${d.leave_balance.year}</span><b>${d.leave_balance.remaining}</b><small>left of ${d.leave_balance.entitlement} · ${d.leave_balance.taken} taken · ${d.leave_balance.pending} pending</small></div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Leave</h2>${table(['Type', 'Dates', '#Days', 'Status'], d.leave.map((l) => `<tr><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${pill(...LEAVE_ST[l.status])}</td></tr>`), 'None.')}</div>
+        <div class="card"><h2 class="sec">Payslips</h2>${table(['Month', '#Gross', '#Net', ''], d.payslips.map((p) => `<tr><td>${fmonth(p.period)}</td><td class="num">${num(p.gross)}</td><td class="num">${num(p.net)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#payslip/${p.id}-${e.id}">View</a></td></tr>`), 'None yet.')}
+        <h2 class="sec mt">Advances</h2>${table(['Date', '#Amount', '#Recovered', '#Per month'], d.advances.map((a) => `<tr><td>${fdate(a.d)}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.recovered)}</td><td class="num">${num(a.monthly_recovery)}</td></tr>`), 'None.')}</div></div>
+      ${e.notes ? `<p class="note mt">${esc(e.notes)}</p>` : ''}`;
+  };
+
+  VIEWS.roster = async () => {
+    const from = ui.q.rosterFrom || weekStart(SETTINGS.business_date);
+    const setup = await hrSetup();
+    const d = ui.q.rosterDept || '';
+    const wk = await GET(`/hr/roster?from=${from}${d ? '&department=' + encodeURIComponent(d) : ''}`);
+    const edit = CAN['roster.manage'];
+    const shiftOpts = (v) => opts([['', '–'], ['off', 'Off'], ...setup.shifts.filter((x) => x.active).map((x) => [x.id, `${x.code} ${x.start_time}`])], v === null ? 'off' : v ?? '');
+    return `<div class="page-head"><div><h1 class="page">Rosters</h1><p class="sub">Week of ${fdateLong(wk.from)}. ${setup.shifts.map((x) => `<b>${esc(x.code)}</b> ${esc(x.name)} ${x.start_time}–${x.end_time}`).join(' · ')}</p></div>
+      <div class="row">${deptFilter('rosterDept', setup.departments)}<button class="btn btn-ghost" data-action="roster-week" data-d="-7">← Previous</button><button class="btn btn-ghost" data-action="roster-week" data-d="7">Next →</button>${edit ? `<button class="btn btn-ghost" data-action="roster-copy" data-from="${wk.from}">Copy last week</button>` : ''}</div></div>
+      <form class="card roster" data-form="roster">${table(['Employee', ...wk.days.map(fdate)], wk.employees.map((e) => `<tr><td><b>${esc(empName(e))}</b><br><span class="small muted">${esc(e.department)}</span></td>${e.days.map((x) => `<td>${x.leave ? pill('Leave', 'info') : edit ? `<select name="r_${e.id}_${x.date}" aria-label="${esc(e.first_name)} ${x.date}">${shiftOpts(x.shift_id)}</select>` : x.shift_id === null ? 'Off' : esc(setup.shifts.find((s) => s.id === x.shift_id)?.code || '–')}</td>`).join('')}</tr>`), 'No employees in this department.')}
+      ${edit && wk.employees.length ? '<div class="actions mt"><button class="btn btn-gold">Save roster</button></div>' : ''}</form>`;
+  };
+
+  VIEWS.attendance = async () => {
+    const date = ui.q.attDate || SETTINGS.business_date;
+    const setup = await hrSetup();
+    const d = ui.q.attDept || '';
+    const rows = await GET(`/hr/attendance?date=${date}${d ? '&department=' + encodeURIComponent(d) : ''}`);
+    const count = (k) => rows.filter((r) => r.status === k).length;
+    return `<div class="page-head"><div><h1 class="page">Attendance</h1><p class="sub">${fdateLong(date)} · late = more than 10 minutes after the shift starts</p></div>
+      <div class="row"><form class="row" data-form="att-date"><input class="search" type="date" name="date" value="${date}" aria-label="Date"><button class="btn btn-ghost">Show</button></form>${deptFilter('attDept', setup.departments)}</div></div>
+      <div class="grid g4 mb">${[['Present', count('present')], ['Late', count('late')], ['Absent', count('absent')], ['On leave', count('leave')]].map(([l, v]) => `<div class="card kpi"><span>${l}</span><b>${v}</b></div>`).join('')}</div>
+      <div class="card">${table(['Employee', 'Shift', 'In', 'Out', '#Hours', 'Status', ''], rows.map((r) => `<tr><td><b>${esc(empName(r))}</b><br><span class="small muted">${esc(r.department)}</span></td><td>${r.shift_name ? `${esc(r.shift_name)} ${r.shift_start}` : r.status === 'off' ? 'Day off' : '–'}</td><td>${r.clock_in || ''}</td><td>${r.clock_out || ''}</td><td class="num">${r.hours ?? ''}</td><td>${pill(...ATT_ST[r.status])}${r.source === 'self' ? ' <span class="small muted">self</span>' : ''}</td>
+        <td class="right">${CAN['attendance.record'] ? `<button class="btn btn-sm btn-ghost" data-action="att-edit" data-id="${r.id}" data-name="${esc(empName(r))}" data-date="${date}" data-in="${r.clock_in || ''}" data-out="${r.clock_out || ''}">Record</button>` : ''}</td></tr>`), 'Nobody employed on this date.')}</div>`;
+  };
+
+  VIEWS.leave = async () => {
+    const v = cur('lv', 'pending');
+    const list = await GET(`/hr/leave?view=${v}`);
+    return `<div class="page-head"><div><h1 class="page">Leave</h1><p class="sub">Managers approve; nobody approves their own leave. Unpaid leave is deducted in payroll automatically.</p></div></div>
+      ${tabs('lv', [['pending', 'Waiting approval'], ['upcoming', 'Approved & upcoming'], ['all', 'All']], 'pending')}
+      <div class="card">${table(['Employee', 'Type', 'Dates', '#Days', 'Reason', 'Status', ''], list.map((l) => `<tr><td><a href="#employee/${l.employee_id}">${esc(empName(l))}</a><br><span class="small muted">${esc(l.department)}</span></td><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${esc(l.reason || '')}${l.decision_note ? `<br><span class="small muted">${esc(l.decision_note)}</span>` : ''}</td><td>${pill(...LEAVE_ST[l.status])}${l.decided_by_name ? `<br><span class="small muted">${esc(l.decided_by_name)}</span>` : ''}</td>
+        <td class="right nowrap">${l.status === 'pending' && CAN['hr.approve'] && (l.user_id !== ME.id || ME.role === 'admin') ? `<button class="btn btn-sm btn-ok" data-action="leave-decide" data-id="${l.id}" data-d="approved">Approve</button> <button class="btn btn-sm btn-bad" data-action="leave-decide" data-id="${l.id}" data-d="rejected">Reject</button>` : ''}${CAN['hr.manage'] && ['pending', 'approved'].includes(l.status) && l.f > SETTINGS.business_date ? ` <button class="btn btn-sm btn-ghost" data-action="leave-cancel" data-id="${l.id}">Cancel</button>` : ''}</td></tr>`), 'Nothing here.')}</div>`;
+  };
+
+  VIEWS.payroll = async () => {
+    const t = cur('pr', 'runs');
+    let body;
+    if (t === 'runs') {
+      const runs = await GET('/hr/payroll');
+      body = `${CAN['payroll.manage'] ? `<form class="row mb" data-form="new-run"><input class="search" type="month" name="period" value="${SETTINGS.business_date.slice(0, 7)}" max="${SETTINGS.business_date.slice(0, 7)}" aria-label="Month"><button class="btn btn-gold">Prepare payroll</button></form>` : ''}
+        ${table(['Month', 'Status', '#Staff', '#Gross', '#Net pay', 'Prepared by', ''], runs.map((r) => `<tr><td><b>${fmonth(r.period)}</b></td><td>${pill(...PAY_ST[r.status])}</td><td class="num">${r.employees}</td><td class="num">${num(r.gross)}</td><td class="num">${num(r.net)}</td><td>${esc(r.created_by_name || '')}</td><td class="right"><a class="btn btn-sm" href="#payrun/${r.id}">Open</a></td></tr>`), 'No payrolls yet.')}`;
+    } else {
+      const [adv, emps] = await Promise.all([GET('/hr/advances'), GET('/hr/employees')]);
+      body = `${CAN['payroll.manage'] ? `<div class="row between mb"><span class="muted">Advances are recovered automatically from each payroll until repaid.</span><button class="btn btn-gold" data-action="advance" data-emps='${esc(JSON.stringify(emps.map((e) => [e.id, empName(e)])))}'>+ Advance</button></div>` : ''}
+        ${table(['Date', 'Employee', 'Reason', '#Amount', '#Per month', '#Recovered', '#Still owed'], adv.map((a) => `<tr><td>${fdate(a.d)}</td><td>${esc(empName(a))}</td><td>${esc(a.reason || '')}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.monthly_recovery)}</td><td class="num">${num(a.recovered)}</td><td class="num">${a.amount - a.recovered ? num(a.amount - a.recovered) : pill('Repaid', 'ok')}</td></tr>`), 'No advances.')}`;
+    }
+    return `<div class="page-head"><div><h1 class="page">Payroll</h1><p class="sub">Prepare → approve (someone else) → post to the accounts → pay. PAYE and NSSF are calculated automatically.</p></div></div>
+      ${tabs('pr', [['runs', 'Monthly payroll'], ['advances', 'Staff advances']], 'runs')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.payrun = async (id) => {
+    const r = await GET(`/hr/payroll/${id}`);
+    const t = cur('payrun', 'lines');
+    const draft = r.status === 'draft' && CAN['payroll.manage'];
+    const acts = [];
+    if (draft) acts.push(`<button class="btn btn-ghost" data-action="run-act" data-id="${r.id}" data-a="refresh">Refresh from staff records</button>`);
+    if (r.status === 'draft' && CAN['hr.approve'] && (r.created_by !== ME.id || ME.role === 'admin')) acts.push(`<button class="btn btn-gold" data-action="run-act" data-id="${r.id}" data-a="approve">Approve</button>`);
+    if (r.status === 'approved' && (CAN['hr.approve'] || CAN['payroll.manage'])) acts.push(`<button class="btn btn-ghost" data-action="run-act" data-id="${r.id}" data-a="reopen">Back to draft</button>`);
+    if (r.status === 'approved' && CAN['payroll.manage']) acts.push(`<button class="btn btn-gold" data-action="run-act" data-id="${r.id}" data-a="post">Post to accounts</button>`);
+    if (r.status === 'posted' && CAN['payroll.manage']) acts.push(`<button class="btn btn-gold" data-action="run-pay" data-id="${r.id}">Mark salaries paid</button>`);
+    if (['draft', 'approved'].includes(r.status) && CAN['payroll.manage']) acts.push(`<button class="btn btn-ghost" data-action="run-act" data-id="${r.id}" data-a="void">Delete</button>`);
+    acts.push('<button class="btn btn-ghost" data-action="print">Print</button>');
+    const T = r.totals;
+    let body;
+    if (t === 'lines') body = table(['Employee', '#Days', '#Basic', '#Allow.', '#Overtime', '#Gross', '#NSSF 5%', '#PAYE', '#Advance', '#Other ded.', '#Net', ''], r.lines.map((l) => `<tr><td><b>${esc(empName(l))}</b><br><span class="small muted">${esc(l.department)}${l.unpaid_days ? ` · ${l.unpaid_days} unpaid day(s)` : ''}</span></td><td class="num">${l.days_worked}/${l.days_in_month}</td><td class="num">${num(l.basic)}</td><td class="num">${num(l.allowances)}</td><td class="num">${l.overtime ? num(l.overtime) + `<br><span class="small muted">${l.overtime_hours} h</span>` : ''}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.nssf_employee)}</td><td class="num">${num(l.paye)}</td><td class="num">${l.advance_recovery ? num(l.advance_recovery) : ''}</td><td class="num">${l.other_deductions ? num(l.other_deductions) : ''}${l.other_additions ? `<br><span class="small muted">+${num(l.other_additions)} added</span>` : ''}</td><td class="num"><b>${num(l.net)}</b></td>
+        <td class="right nowrap">${draft ? `<button class="btn btn-sm btn-ghost" data-action="line-edit" data-run="${r.id}" data-emp="${l.employee_id}" data-name="${esc(empName(l))}" data-ot="${l.overtime_hours}" data-add="${l.other_additions}" data-ded="${l.other_deductions}" data-note="${esc(l.note || '')}">Adjust</button>` : ''} <a class="btn btn-sm btn-ghost" href="#payslip/${r.id}-${l.employee_id}">Slip</a></td></tr>`).concat([`<tr class="total"><td>Totals (${T.employees})</td><td></td><td></td><td></td><td></td><td class="num">${num(T.gross)}</td><td class="num">${num(T.nssf_employee)}</td><td class="num">${num(T.paye)}</td><td class="num">${num(T.advance_recovery)}</td><td class="num">${num(T.other_deductions)}</td><td class="num">${num(T.net)}</td><td></td></tr>`]));
+    else if (t === 'paye') body = `<p class="small muted">PAYE schedule for the URA return.</p>${table(['Employee', 'TIN', '#Gross pay', '#PAYE'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${esc(l.tin || '–')}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.paye)}</td></tr>`).concat([`<tr class="total"><td colspan="2">Total</td><td class="num">${num(T.gross)}</td><td class="num">${num(T.paye)}</td></tr>`]))}`;
+    else if (t === 'nssf') body = `<p class="small muted">NSSF schedule: 5% employee + 10% employer.</p>${table(['Employee', 'NSSF no.', '#Gross pay', '#Employee 5%', '#Employer 10%', '#Total'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${esc(l.nssf_no || '–')}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.nssf_employee)}</td><td class="num">${num(l.nssf_employer)}</td><td class="num">${num(l.nssf_employee + l.nssf_employer)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.nssf_employee)}</td><td class="num">${num(T.nssf_employer)}</td><td class="num">${num(T.nssf_employee + T.nssf_employer)}</td></tr>`]))}`;
+    else if (t === 'bank') body = `<p class="small muted">Payment list for the bank and mobile money.</p>${table(['Employee', 'Method', 'Bank / number', '#Net pay'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${{ bank: 'Bank', mobile_money: 'Mobile money', cash: 'Cash' }[l.pay_method]}</td><td>${l.pay_method === 'bank' ? `${esc(l.bank_name || '')} ${esc(l.bank_account || '')}` : esc(l.momo_number || '')}</td><td class="num">${num(l.net)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.net)}</td></tr>`]))}`;
+    else body = table(['Department', '#Staff', '#Gross pay', '#Cost incl. employer NSSF'], r.departments.map((x) => `<tr><td>${esc(x.department)}</td><td class="num">${x.employees}</td><td class="num">${num(x.gross)}</td><td class="num">${num(x.employer_cost)}</td></tr>`));
+    return `<div class="page-head"><div><p class="sub"><a href="#payroll">← Payroll</a></p><h1 class="page">Payroll ${fmonth(r.period)}</h1><p class="sub">${pill(...PAY_ST[r.status])} · prepared by ${esc(r.created_by_name || '')}${r.approved_by_name ? ' · approved by ' + esc(r.approved_by_name) : ''}${r.posted_by_name ? ' · posted by ' + esc(r.posted_by_name) : ''}</p></div><div class="row no-print">${acts.join('')}</div></div>
+      <div class="grid g4 mb">${[['Gross pay', T.gross], ['PAYE to URA', T.paye], ['NSSF (15%)', T.nssf_employee + T.nssf_employer], ['Net pay to staff', T.net]].map(([l, v]) => `<div class="card kpi"><span>${l}</span><b>${num(v)}</b><small>UGX</small></div>`).join('')}</div>
+      ${tabs('payrun', [['lines', 'Payroll'], ['paye', 'PAYE schedule'], ['nssf', 'NSSF schedule'], ['bank', 'Payment list'], ['dept', 'By department']], 'lines')}<div class="card">${body}</div>
+      <p class="small muted">PAYE uses the Uganda monthly resident bands and NSSF 5% + 10% of gross. Confirm current rates with URA and NSSF.</p>`;
+  };
+
   /* ---------- forms & actions ---------- */
   async function newReservation() {
     const types = (await GET('/room-types')).filter((t) => t.active);
@@ -700,6 +845,66 @@
   }
 
   const A = {
+
+    clock: async (d) => { await POST('/hr/me/clock', { action: d.a }); toast(d.a === 'in' ? 'Signed in.' : 'Signed out.'); render(); },
+    'my-leave': async () => {
+      const setup = await hrSetup();
+      modal('Request leave', `<form class="form" data-form="my-leave"><label>Type<select name="type">${opts(setup.leave_types.map((t) => [t.code, t.name]), 'annual')}</select></label>
+        <div class="two"><label>From<input type="date" name="from_date" required min="${SETTINGS.business_date}"></label><label>To<input type="date" name="to_date" required min="${SETTINGS.business_date}"></label></div><label>Reason<input name="reason" maxlength="300"></label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Send request</button></div></form>`, async (v) => { await POST('/hr/me/leave', v); return 'Leave requested. Your manager will be asked to approve it.'; });
+    },
+    'hr-leave': async (d) => {
+      const setup = await hrSetup();
+      modal('Record leave', `<form class="form" data-form="hr-leave"><label>Type<select name="type">${opts(setup.leave_types.map((t) => [t.code, t.name]), 'annual')}</select></label>
+        <div class="two"><label>From<input type="date" name="from_date" required></label><label>To<input type="date" name="to_date" required></label></div><label>Reason<input name="reason" maxlength="300"></label>
+        <p class="note">A manager still approves it under People → Leave.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`, async (v) => { await POST('/hr/leave', { ...v, employee_id: Number(d.id) }); return 'Leave recorded for approval.'; });
+    },
+    'leave-cancel': async (d) => { if (!confirm('Cancel this leave request?')) return; await POST(`/hr/leave/${d.id}/cancel`); toast('Leave cancelled.'); render(); },
+    'leave-decide': (d) => {
+      if (d.d === 'approved') return POST(`/hr/leave/${d.id}/decide`, { decision: 'approved' }).then(() => { toast('Leave approved.'); render(); });
+      modal('Reject leave', `<form class="form" data-form="leave-reject"><label>Reason (shown to the employee)<input name="note" required maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Reject</button></div></form>`, async (v) => { await POST(`/hr/leave/${d.id}/decide`, { decision: 'rejected', note: v.note }); return 'Leave rejected.'; });
+    },
+    'emp-edit': async (d) => {
+      const [setup, unlinked] = await Promise.all([hrSetup(), GET('/hr/users-unlinked').catch(() => [])]);
+      const e = d.id ? (await GET(`/hr/employees/${d.id}`)).employee : null;
+      const users = e?.user_id ? [[e.user_id, e.username], ...unlinked.map((u) => [u.id, `${u.full_name} (${u.username})`])] : unlinked.map((u) => [u.id, `${u.full_name} (${u.username})`]);
+      const sd = (x) => (x ? String(x).slice(0, 10) : '');
+      modal(e ? `Edit ${empName(e)}` : 'New employee', `<form class="form" data-form="emp"><div class="three"><label>First name<input name="first_name" value="${esc(e?.first_name || '')}" required></label><label>Last name<input name="last_name" value="${esc(e?.last_name || '')}" required></label><label>Gender<select name="gender">${opts([['', '–'], ['female', 'Female'], ['male', 'Male']], e?.gender || '')}</select></label></div>
+        <div class="three"><label>Date of birth<input type="date" name="date_of_birth" value="${sd(e?.date_of_birth)}"></label><label>Phone<input name="phone" value="${esc(e?.phone || '')}"></label><label>Email<input name="email" type="email" value="${esc(e?.email || '')}"></label></div>
+        <div class="three"><label>National ID (NIN)<input name="nin" value="${esc(e?.nin || '')}"></label><label>TIN<input name="tin" value="${esc(e?.tin || '')}"></label><label>NSSF number<input name="nssf_no" value="${esc(e?.nssf_no || '')}"></label></div>
+        <div class="three"><label>Department<select name="department">${opts(setup.departments.map((x) => [x, x]), e?.department)}</select></label><label>Job title<input name="job_title" value="${esc(e?.job_title || '')}" required></label><label>Type<select name="employment_type">${opts([['permanent', 'Permanent'], ['contract', 'Contract'], ['casual', 'Casual'], ['intern', 'Intern']], e?.employment_type)}</select></label></div>
+        <div class="three"><label>Start date<input type="date" name="start_date" value="${sd(e?.start_date)}" required></label><label>Basic salary / month (UGX)<input name="basic_salary" type="number" min="0" value="${e?.basic_salary ?? ''}" required></label><label>Annual leave days<input name="annual_leave_days" type="number" min="0" max="60" value="${e?.annual_leave_days ?? 21}"></label></div>
+        <div class="three"><label>Housing allowance<input name="housing_allowance" type="number" min="0" value="${e?.housing_allowance ?? 0}"></label><label>Transport allowance<input name="transport_allowance" type="number" min="0" value="${e?.transport_allowance ?? 0}"></label><label>Other allowance<input name="other_allowance" type="number" min="0" value="${e?.other_allowance ?? 0}"></label></div>
+        <div class="three"><label>Paid by<select name="pay_method">${opts([['bank', 'Bank'], ['mobile_money', 'Mobile money'], ['cash', 'Cash']], e?.pay_method)}</select></label><label>Bank / account no.<span class="row"><input name="bank_name" value="${esc(e?.bank_name || '')}" placeholder="Bank"><input name="bank_account" value="${esc(e?.bank_account || '')}" placeholder="Account"></span></label><label>Mobile money number<input name="momo_number" value="${esc(e?.momo_number || '')}"></label></div>
+        <label>Sign-in for self-service<select name="user_id">${opts([['', 'None'], ...users], e?.user_id || '')}</select></label><label>Notes<textarea name="notes" rows="2">${esc(e?.notes || '')}</textarea></label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const b = { ...v, user_id: v.user_id ? Number(v.user_id) : null, basic_salary: Number(v.basic_salary), housing_allowance: Number(v.housing_allowance || 0), transport_allowance: Number(v.transport_allowance || 0), other_allowance: Number(v.other_allowance || 0), annual_leave_days: Number(v.annual_leave_days) };
+          if (e) await PUT(`/hr/employees/${e.id}`, b); else { const n = await POST('/hr/employees', b); location.hash = `#employee/${n.id}`; } return 'Employee saved.'; });
+    },
+    'emp-leave': (d) => modal('Leaving the company', `<form class="form" data-form="emp-leave"><p class="note">Their roster after the leaving date is cleared and their sign-in is switched off. Payroll pays them up to the leaving date.</p><div class="two"><label>Last working day<input type="date" name="end_date" required value="${SETTINGS.business_date}"></label><label>Reason<input name="reason" required maxlength="300"></label></div><div class="actions">${cancelBtn}<button class="btn btn-bad">Confirm</button></div></form>`,
+      async (v) => { await POST(`/hr/employees/${d.id}/leave-company`, v); return 'Employment ended.'; }),
+    'roster-week': (d) => { ui.q.rosterFrom = addDays(ui.q.rosterFrom || weekStart(SETTINGS.business_date), Number(d.d)); render(); },
+    'roster-copy': async (d) => { const r = await POST('/hr/roster/copy', { from: d.from, department: ui.q.rosterDept || undefined }); toast(`${r.copied} shift(s) copied from last week. Existing entries were kept.`); render(); },
+    'att-edit': (d) => modal(`Attendance · ${d.name}`, `<form class="form" data-form="att"><p class="muted">${fdateLong(d.date)}</p><div class="two"><label>Signed in<input type="time" name="clock_in" value="${d.in}"></label><label>Signed out<input type="time" name="clock_out" value="${d.out}"></label></div><label>Note<input name="note" maxlength="200"></label><p class="small muted">A sign-out earlier than the sign-in counts as the next morning (night shift).</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await POST('/hr/attendance', { employee_id: Number(d.id), date: d.date, clock_in: v.clock_in, clock_out: v.clock_out, note: v.note }); return 'Attendance saved.'; }),
+    'line-edit': (d) => modal(`Adjust · ${d.name}`, `<form class="form" data-form="line"><div class="three"><label>Overtime hours (paid at 1.5×)<input name="overtime_hours" type="number" min="0" step="0.5" value="${d.ot}"></label><label>Other additions (bonus, tips…)<input name="other_additions" type="number" min="0" value="${d.add}"></label><label>Other deductions<input name="other_deductions" type="number" min="0" value="${d.ded}"></label></div><label>Note on payslip<input name="note" value="${esc(d.note)}" maxlength="200"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Recalculate</button></div></form>`,
+      async (v) => { await PUT(`/hr/payroll/${d.run}/lines/${d.emp}`, { overtime_hours: Number(v.overtime_hours || 0), other_additions: Number(v.other_additions || 0), other_deductions: Number(v.other_deductions || 0), note: v.note }); return 'Recalculated.'; }),
+    'run-act': async (d) => {
+      const msg = { approve: 'Approve this payroll?', post: 'Post this payroll to the accounts? It cannot be changed afterwards.', void: 'Delete this payroll?', reopen: 'Send back to draft?', refresh: 'Refresh from staff records? Overtime and adjustments are kept.' }[d.a];
+      if (msg && !confirm(msg)) return;
+      await POST(`/hr/payroll/${d.id}/${d.a}`); toast({ approve: 'Payroll approved.', post: 'Payroll posted to the accounts.', void: 'Payroll deleted.', reopen: 'Back to draft.', refresh: 'Payroll refreshed.' }[d.a]);
+      if (d.a === 'void') location.hash = '#payroll'; else render();
+    },
+    'run-pay': async (d) => {
+      const all = await accts(true);
+      modal('Salaries paid', `<form class="form" data-form="run-pay"><label>Paid from<select name="paid_from">${cashOpts(all, '1030')}</select></label><p class="note">Use the Payment list tab for the bank and mobile money transfers. PAYE and NSSF are paid to URA and NSSF under Finance → Expenses & transfers (accounts 2400 and 2410).</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Confirm</button></div></form>`,
+        async (v) => { await POST(`/hr/payroll/${d.id}/pay`, v); return 'Salaries marked as paid.'; });
+    },
+    advance: async (d) => {
+      const all = await accts(true); const emps = JSON.parse(d.emps);
+      modal('Staff advance', `<form class="form" data-form="advance"><label>Employee<select name="employee_id">${opts(emps)}</select></label><div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required></label><label>Recover per month<input name="monthly_recovery" type="number" min="1" required></label><label>Paid from<select name="paid_from">${cashOpts(all, '1000')}</select></label></div><label>Reason<input name="reason" maxlength="200"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Give advance</button></div></form>`,
+        async (v) => { await POST('/hr/advances', { ...v, employee_id: Number(v.employee_id), amount: Number(v.amount), monthly_recovery: Number(v.monthly_recovery) }); return 'Advance recorded.'; });
+    },
 
     'company-edit': async (d) => {
       const c = d.id ? (await GET('/finance/companies')).find((x) => String(x.id) === d.id) : null;
@@ -1058,6 +1263,12 @@
   };
 
   const FORMS = {
+    'att-date': (v) => { ui.q.attDate = v.date; render(); },
+    'new-run': async (v) => { const r = await POST('/hr/payroll', { period: v.period }); location.hash = `#payrun/${r.id}`; },
+    roster: async (v) => {
+      const entries = Object.entries(v).filter(([k]) => k.startsWith('r_')).map(([k, val]) => { const [, emp, date] = k.split('_'); return { employee_id: Number(emp), date, shift_id: val === '' ? undefined : val === 'off' ? null : Number(val) }; });
+      await PUT('/hr/roster', { entries: entries.map((x) => (x.shift_id === undefined ? { ...x, shift_id: '' } : x)) }); toast('Roster saved.'); render();
+    },
     range: (v, form) => { const k = form.dataset.key; ui.q[k + 'From'] = v.from; ui.q[k + 'To'] = v.to; if (v.code) ui.q.glCode = v.code; render(); },
     invoice: async (v, form) => {
       const payment_ids = Object.keys(v).filter((k) => k.startsWith('p_')).map((k) => Number(k.slice(2)));
@@ -1144,6 +1355,10 @@
   document.addEventListener('change', async (e) => {
     if (e.target.dataset.action !== 'rec-tick') return;
     try { await PUT(`/finance/reconciliations/${e.target.dataset.rec}/lines`, { line_ids: [Number(e.target.dataset.line)], cleared: e.target.checked }); render(); } catch (err) { toast(esc(err.message), true); }
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.dataset.action !== 'dept-filter') return;
+    ui.q[e.target.dataset.key] = e.target.value; render();
   });
   document.addEventListener('input', (e) => { if (e.target.dataset.calc === 'tender' || e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
   document.addEventListener('change', (e) => { if (e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });

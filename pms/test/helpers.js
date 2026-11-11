@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createPool, migrate } from '../src/db.js';
 import { createApp } from '../src/app.js';
-import { seedProperty, seedPos, seedInventory, seedDistribution } from '../src/seed.js';
+import { seedProperty, seedPos, seedInventory, seedDistribution, seedHr } from '../src/seed.js';
 
 export const DB = process.env.TEST_DATABASE_URL || 'postgres://hk:hk_dev_pw@localhost:5432/hk_pms_test';
 export const DAY0 = '2026-11-10';
@@ -12,7 +12,7 @@ export const ctx = { pool: null, server: null, base: '' };
 process.env.PUBLIC_WRITE_LIMIT ??= '1000';
 process.env.PUBLIC_READ_LIMIT ??= '1000';
 
-export async function startTestServer({ pos = false, inventory = false, distribution = false } = {}) {
+export async function startTestServer({ pos = false, inventory = false, distribution = false, hr = false } = {}) {
   ctx.pool = createPool(DB);
   await ctx.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await migrate(ctx.pool);
@@ -20,6 +20,7 @@ export async function startTestServer({ pos = false, inventory = false, distribu
   if (pos || inventory) await seedPos(ctx.pool);
   if (inventory) await seedInventory(ctx.pool);
   if (distribution) await seedDistribution(ctx.pool);
+  if (hr) await seedHr(ctx.pool);
   ctx.server = createApp(ctx.pool).listen(0);
   ctx.base = `http://127.0.0.1:${ctx.server.address().port}`;
   return ctx;

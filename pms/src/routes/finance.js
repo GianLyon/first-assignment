@@ -22,7 +22,7 @@ export function financeRouter(pool) {
   };
 
   /* ---------- lists used by forms ---------- */
-  r.get('/accounts', (req, _res, next) => { if (!['finance.view', 'accounts.view', 'payments.post'].some((p) => can(req.user, p))) throw new HttpError(403, 'You do not have permission to do this.'); next(); },
+  r.get('/accounts', (req, _res, next) => { if (!['finance.view', 'accounts.view', 'payments.post', 'payroll.manage'].some((p) => can(req.user, p))) throw new HttpError(403, 'You do not have permission to do this.'); next(); },
     async (_req, res) => res.json(await q(`SELECT a.*, COALESCE((SELECT SUM(debit - credit) FROM journal_lines WHERE account_code=a.code),0) AS balance FROM accounts a ORDER BY code`)));
   r.get('/companies', (req, _res, next) => { if (!['finance.view', 'payments.post'].some((p) => can(req.user, p))) throw new HttpError(403, 'You do not have permission to do this.'); next(); },
     async (_req, res) => res.json(await q('SELECT id, name, tin, contact, phone, email, address, credit_limit, terms_days, active FROM companies ORDER BY name')));

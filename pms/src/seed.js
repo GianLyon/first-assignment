@@ -116,6 +116,18 @@ export async function seedDistribution(pool) {
   });
 }
 
+/** Standard shifts. Only runs when no shift templates exist yet. */
+export async function seedHr(pool) {
+  return tx(pool, async (db) => {
+    const { rows } = await db.query('SELECT 1 FROM shift_templates LIMIT 1');
+    if (rows[0]) return { skipped: true };
+    for (const [code, name, st, en] of [['M', 'Morning', '07:00', '15:00'], ['E', 'Evening', '15:00', '23:00'], ['N', 'Night', '23:00', '07:00'], ['D', 'Day (office)', '08:00', '17:00']]) {
+      await db.query('INSERT INTO shift_templates (code, name, start_time, end_time) VALUES ($1,$2,$3,$4)', [code, name, st, en]);
+    }
+    return { skipped: false };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
@@ -125,6 +137,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
   const p = await seedPos(pool);
   if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
+  await seedHr(pool);
   const dist = await seedDistribution(pool);
   if (!dist.skipped) console.log('Rate plans and a test (simulator) channel set up.');
   const inv = await seedInventory(pool);
