@@ -67,7 +67,7 @@
     const f = e.target, btn = f.querySelector('button[type=submit]'); btn.disabled = true; $('#book-err').textContent = '';
     try {
       const r = await api('POST', '/bookings', { arrival: QUOTE.arrival, departure: QUOTE.departure, adults: QUOTE.adults, room_type_id: CHOICE.t.room_type.id, rate_plan_id: CHOICE.p.id,
-        guest: { first_name: f.first_name.value, last_name: f.last_name.value, email: f.email.value, phone: f.phone.value }, notes: f.notes.value, website: f.website.value });
+        guest: { first_name: f.first_name.value, last_name: f.last_name.value, email: f.email.value, phone: f.phone.value, marketing_consent: f.marketing_consent.checked }, notes: f.notes.value, website: f.website.value });
       $('#details').hidden = true;
       $('#confirm').hidden = false;
       $('#confirm').innerHTML = `<h2>You're booked!</h2><p>Your booking code</p><p class="code">${esc(r.code)}</p>

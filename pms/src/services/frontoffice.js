@@ -79,11 +79,24 @@ export async function createReservation(db, user, body) {
     if (!rows[0]) throw new HttpError(400, 'Guest not found.');
   } else {
     const g = body.guest || {};
+    // a returning guest (same email) keeps one profile, so their history and preferences follow them
+    const email = text(g.email, 'Email', { max: 120 })?.toLowerCase() || null;
+    const { rows: [known] } = email ? await db.query('SELECT id FROM guests WHERE lower(email)=$1 AND merged_into IS NULL AND erased_at IS NULL ORDER BY id DESC LIMIT 1', [email]) : { rows: [] };
+    if (known) {
+      await db.query('UPDATE guests SET phone=COALESCE(phone, $2), nationality=COALESCE(nationality, $3) WHERE id=$1', [known.id, text(g.phone, 'Phone', { max: 40 }), text(g.nationality, 'Nationality', { max: 60 })]);
+      guestId = known.id;
+    }
+  }
+  if (!guestId) {
+    const g = body.guest || {};
     const { rows: [ng] } = await db.query(
       `INSERT INTO guests (first_name, last_name, phone, email, nationality, id_type, id_number) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [text(g.first_name, 'First name', { required: true, max: 80 }), text(g.last_name, 'Last name', { max: 80 }) || '', text(g.phone, 'Phone', { max: 40 }),
         text(g.email, 'Email', { max: 120 }), text(g.nationality, 'Nationality', { max: 60 }), text(g.id_type, 'ID type', { max: 40 }), text(g.id_number, 'ID number', { max: 60 })]);
     guestId = ng.id;
+  }
+  if (body.guest?.marketing_consent === true) {
+    await db.query("UPDATE guests SET marketing_consent=TRUE, consent_at=now(), consent_source=$2, unsubscribed_at=NULL WHERE id=$1 AND NOT marketing_consent", [guestId, user ? 'front_desk' : 'booking_engine']);
   }
   const rate = body.rate == null || body.rate === '' ? type.base_rate : Number(body.rate);
   if (!Number.isInteger(rate) || rate < 0) throw new HttpError(400, 'Rate must be a whole number of shillings.');

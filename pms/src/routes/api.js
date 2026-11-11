@@ -1,5 +1,6 @@
 import express from 'express';
 import { generateDue } from '../services/reports.js';
+import { queueGuestEmails } from '../services/crm.js';
 import { tx } from '../db.js';
 import {
   HttpError, requireUser, requirePerm, can, ROLES, PERMISSIONS, ALL_PERMISSIONS, hashPassword, verifyPassword, createSession, sessionCookie, clearCookie,
@@ -172,6 +173,7 @@ export function apiRouter(pool) {
     const result = await tx(pool, (db) => fo.runNightAudit(db, req.user));
     // the day is closed: produce the scheduled reports for it (a failure here never undoes the audit)
     try { result.reports_queued = (await tx(pool, (db) => generateDue(db))).created; } catch (e) { console.error('Scheduled reports failed:', e.message); result.reports_queued = 0; }
+    try { result.guest_emails_queued = (await tx(pool, (db) => queueGuestEmails(db))).queued; } catch (e) { console.error('Guest emails failed:', e.message); result.guest_emails_queued = 0; }
     res.json(result);
   });
 

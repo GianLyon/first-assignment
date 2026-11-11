@@ -65,6 +65,7 @@
     ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
+    ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage']]],
     ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
@@ -82,7 +83,7 @@
   }
   function renderNav() {
     const { r } = route();
-    $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
+    $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules', guest: 'guests', campaign: 'campaigns' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
     $('#prop-name').textContent = SETTINGS.property_name;
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
   }
@@ -93,7 +94,7 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self', event: 'events.view', eventedit: 'events.manage', beo: 'events.view', asset: 'assets.manage', reportrun: 'reports.view' }[r] || null;
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self', event: 'events.view', eventedit: 'events.manage', beo: 'events.view', asset: 'assets.manage', reportrun: 'reports.view', guest: 'reservations.view', campaign: 'marketing.manage' }[r] || null;
     const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
@@ -164,7 +165,7 @@
     const voidBtn = (kind, x) => !x.voided && CAN['folio.void'] ? `<button class="link small" data-action="void" data-kind="${kind}" data-id="${x.id}">Void</button>` : (x.voided ? `<span class="small muted" title="${esc(x.void_reason)}">void</span>` : '');
     return `<div class="page-head no-print"><div><p class="sub"><a href="#reservations">← Reservations</a></p><h1 class="page">${esc(guestName(r))}</h1><p class="sub">${esc(r.code)} · ${statusPill(r.status)}</p></div><div class="row">${acts.join('')}</div></div>
       <div class="card"><div class="inv-head"><div><div class="only-print"><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Guest invoice · printed ${fdateLong(bd)}</p></div>
-        <dl class="kv"><dt>Guest</dt><dd>${esc(guestName(r))}</dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
+        <dl class="kv"><dt>Guest</dt><dd><a href="#guest/${r.guest_id}">${esc(guestName(r))}</a></dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
         <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd></dl></div>
         ${r.overbooked && r.status === 'reserved' ? '<p class="note err">Overbooked: this channel booking arrived when no room of this type was free. Move or upgrade another booking before arrival.</p>' : ''}
         ${f.nights.length ? `<p class="small muted">Nightly prices: ${f.nights.map((n) => `${fdate(n.night)} ${num(n.rate)}`).join(' · ')}</p>` : ''}
@@ -1151,7 +1152,7 @@
     if (t === 'outbox' && sch) {
       const box = await GET('/reporting/outbox');
       return head + `<div class="card"><div class="row between"><h2 class="sec">Emails</h2><button class="btn btn-sm" data-action="mail-send">Send waiting emails now</button></div>
-        ${table(['To', 'Subject', 'Status', 'Queued', ''], box.map((m) => `<tr><td>${esc(m.to_address)}</td><td><a href="#" data-action="mail-view" data-id="${m.id}">${esc(m.subject)}</a></td>
+        ${table(['To', 'Subject', 'Status', 'Queued', ''], box.map((m) => `<tr><td>${esc(m.to_address)}<br><span class="small muted">${esc(KIND[m.kind] || '')}</span></td><td><a href="#" data-action="mail-view" data-id="${m.id}">${esc(m.subject)}</a></td>
           <td>${pill(...MAIL_ST[m.status])}${m.last_error ? `<br><span class="small err">${esc(m.last_error)}</span>` : ''}${m.attempts > 1 ? `<br><span class="small muted">${m.attempts} attempts</span>` : ''}</td><td>${ftime(m.created_at)}</td>
           <td class="right">${m.status === 'failed' ? `<button class="btn btn-sm" data-action="mail-retry" data-id="${m.id}">Retry</button>` : ''}</td></tr>`), 'No emails yet.')}</div>`;
     }
@@ -1242,6 +1243,122 @@
   Object.assign(OPS_FORMS, {
     'rep-run': async (v) => { ui.q.repRun = v.report; const r = await POST('/reporting/run', v); if (r.emailed) toast(`Report emailed to ${r.emailed} address(es).`); location.hash = `#reportrun/${r.id}`; },
   });
+
+  /* ---------- Phase 9: guest CRM & marketing ---------- */
+  const KIND = { report: 'Report', campaign: 'Campaign', pre_arrival: 'Pre-arrival', post_stay: 'Thank-you', test: 'Test' };
+  const consentPill = (g) => (g.marketing_consent && !g.unsubscribed_at ? pill('Agreed to marketing', 'ok') : g.unsubscribed_at ? pill('Unsubscribed', 'bad') : pill('No marketing'));
+  const SEG_FIELDS = (s = {}) => `<div class="three"><label>VIP only<select name="vip">${opts([['', 'Any'], ['yes', 'VIP only']], s.vip)}</select></label><label>Tag<input name="tag" value="${esc(s.tag || '')}" placeholder="e.g. corporate"></label><label>Booked through<input name="source" value="${esc(s.source || '')}" placeholder="Website, Direct, Booking.com…"></label></div>
+    <div class="three"><label>At least … stays<input type="number" min="0" name="min_stays" value="${esc(s.min_stays ?? '')}"></label><label>At most … stays<input type="number" min="0" name="max_stays" value="${esc(s.max_stays ?? '')}"></label><label>Spent at least (UGX)<input type="number" min="0" name="min_spend" value="${esc(s.min_spend ?? '')}"></label></div>
+    <div class="three"><label>Last stay on or after<input type="date" name="stayed_since" value="${esc(s.stayed_since || '')}"></label><label>Not stayed since<input type="date" name="not_since" value="${esc(s.not_since || '')}"></label><label>Birthday month<select name="birth_month">${opts([['', 'Any'], ...['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => [String(i + 1), m])], s.birth_month)}</select></label></div>
+    <label>Nationality<input name="nationality" value="${esc(s.nationality || '')}"></label>`;
+  const segFrom = (v) => Object.fromEntries(['vip', 'tag', 'source', 'min_stays', 'max_stays', 'min_spend', 'stayed_since', 'not_since', 'birth_month', 'nationality'].map((k) => [k, v[k]]).filter(([, x]) => x !== '' && x != null));
+
+  VIEWS.guests = async () => {
+    const f = ui.q.gf || {};
+    const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+    const d = await GET(`/crm/guests?${qs}`);
+    return `<div class="page-head"><div><h1 class="page">Guest profiles</h1><p class="sub">Every guest once, with their stays, spend, preferences and marketing consent. Returning guests are matched by email.</p></div></div>
+      <div class="card"><form class="form" data-form="guest-filter"><div class="three"><label>Search<input name="q" value="${esc(f.q || '')}" placeholder="Name, email or phone"></label>
+        <label>Show<select name="vip">${opts([['', 'All guests'], ['yes', 'VIP only']], f.vip)}</select></label><label>Marketing<select name="consent">${opts([['', 'Any'], ['yes', 'Agreed'], ['no', 'Not agreed']], f.consent)}</select></label></div>
+        <div class="three"><label>Tag<input name="tag" value="${esc(f.tag || '')}"></label><label>At least … stays<input type="number" min="0" name="min_stays" value="${esc(f.min_stays || '')}"></label><label>Sort by<select name="sort">${opts([['recent', 'Most recent stay'], ['spend', 'Highest spend'], ['stays', 'Most stays'], ['name', 'Name']], f.sort)}</select></label></div>
+        <div class="actions"><button class="btn btn-gold">Show</button></div></form></div>
+      <div class="card mt"><p class="small muted">${num(d.total)} guest${d.total === 1 ? '' : 's'}${d.total > d.guests.length ? `, showing the first ${d.guests.length}` : ''}</p>
+      ${table(['Guest', 'Contact', '#Stays', '#Nights', '#Spend (UGX)', 'Last stay', 'Marketing'], d.guests.map((g) => `<tr><td><a href="#guest/${g.id}">${esc(guestName(g))}</a>${g.vip ? ' ' + pill('VIP', 'warn') : ''}${g.in_house ? ' ' + pill('In-house', 'ink') : ''}${g.tags.length ? `<br><span class="small muted">${g.tags.map(esc).join(', ')}</span>` : ''}</td>
+        <td class="small">${esc(g.email || '')}<br>${esc(g.phone || '')}</td><td class="num">${g.stays}</td><td class="num">${g.nights}</td><td class="num">${num(g.spend)}</td><td>${g.last_stay ? fdate(g.last_stay) : g.next_arrival ? `Arrives ${fdate(g.next_arrival)}` : ''}</td><td>${consentPill(g)}</td></tr>`), 'No guests match.')}</div>`;
+  };
+
+  VIEWS.guest = async (id) => {
+    const p = await GET(`/crm/guests/${id}`);
+    if (p.redirect) { location.replace(`#guest/${p.redirect}`); return ''; }
+    const g = p.guest; ui.guest = p;
+    const m = CAN['guests.manage'], mk = CAN['marketing.manage'];
+    return `<div class="page-head"><div><p class="sub"><a href="#guests">← Guest profiles</a></p><h1 class="page">${esc(guestName(g))} ${g.vip ? pill('VIP', 'warn') : ''}</h1><p class="sub">${consentPill(g)} ${g.consent_at && g.marketing_consent ? `<span class="small muted">since ${fdate(g.consent_at)} (${esc(String(g.consent_source || '').replace('_', ' '))})</span>` : ''}</p></div>
+      <div class="row">${m && !g.erased_at ? `<button class="btn btn-ghost" data-action="guest-edit">Edit</button>${g.marketing_consent && !g.unsubscribed_at ? '<button class="btn btn-ghost" data-action="guest-consent" data-c="0">Withdraw consent</button>' : '<button class="btn btn-ghost" data-action="guest-consent" data-c="1">Record consent</button>'}` : ''}
+        ${mk && !g.erased_at ? `<a class="btn btn-ghost" href="/api/crm/guests/${g.id}/export" download>Export data</a><button class="btn btn-bad" data-action="guest-erase">Erase</button>` : ''}</div></div>
+      <div class="grid g4"><div class="card kpi"><span>Stays</span><b>${g.stays}</b><small>${g.nights} nights</small></div><div class="card kpi"><span>Spend</span><b>${num(g.spend)}</b><small>UGX on their bills</small></div>
+        <div class="card kpi"><span>Last stay</span><b>${g.in_house ? 'In-house now' : g.last_stay ? fdate(g.last_stay) : '—'}</b><small>${g.next_arrival ? `next arrival ${fdate(g.next_arrival)}` : ''}</small></div><div class="card kpi"><span>Average per stay</span><b>${g.stays ? num(g.spend / g.stays) : '—'}</b><small>UGX</small></div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Details</h2><dl class="kv"><dt>Email</dt><dd>${esc(g.email || '–')}</dd><dt>Phone</dt><dd>${esc(g.phone || '–')}</dd><dt>Nationality</dt><dd>${esc(g.nationality || '–')}</dd>
+        <dt>Birthday</dt><dd>${g.birth_date ? fdate(g.birth_date) : '–'}</dd><dt>Tags</dt><dd>${g.tags.length ? g.tags.map(esc).join(', ') : '–'}</dd><dt>Preferences</dt><dd>${esc(g.preferences || '–')}</dd><dt>Notes</dt><dd>${esc(g.notes || '–')}</dd></dl></div>
+        <div class="card"><h2 class="sec">Stays</h2>${table(['Booking', 'Dates', 'Room', '#Spend'], p.stays.map((s) => `<tr><td><a href="#res/${s.id}">${esc(s.code)}</a><br>${statusPill(s.status)} <span class="small muted">${esc(s.source)}</span></td><td>${fdate(s.arrival)} → ${fdate(s.departure)}</td><td>${esc(s.room ? `${s.room} · ` : '')}${esc(s.room_type)}</td><td class="num">${num(s.spend)}</td></tr>`), 'No stays yet.')}</div></div>
+      ${p.possible_duplicates.length && m ? `<div class="card mt"><h2 class="sec">Possible duplicates</h2><p class="small muted">Same name, email or phone. Merging moves their stays and missing details into this profile.</p>
+        ${table(['Profile', 'Email', 'Phone', ''], p.possible_duplicates.map((d) => `<tr><td><a href="#guest/${d.id}">${esc(guestName(d))}</a></td><td>${esc(d.email || '')}</td><td>${esc(d.phone || '')}</td><td class="right"><button class="btn btn-sm" data-action="guest-merge" data-id="${d.id}">Merge into this profile</button></td></tr>`))}</div>` : ''}
+      <div class="card mt"><h2 class="sec">Emails sent</h2>${table(['Date', 'Type', 'Subject', 'Status'], p.emails.map((e) => `<tr><td>${ftime(e.created_at)}</td><td>${esc(KIND[e.kind] || e.kind)}</td><td>${esc(e.subject)}</td><td>${pill(...MAIL_ST[e.status])}</td></tr>`), 'None yet.')}</div>`;
+  };
+
+  VIEWS.campaigns = async () => {
+    const list = await GET('/crm/campaigns');
+    return `<div class="page-head"><div><h1 class="page">Campaigns</h1><p class="sub">Email offers and news to past guests. Only guests who agreed to marketing receive them, and every email has an unsubscribe link.</p></div><a class="btn btn-gold" href="#campaign/new">+ New campaign</a></div>
+      <div class="card">${table(['Campaign', 'Status', '#Recipients', '#Delivered', '#Failed', '#Unsubscribed'], list.map((c) => `<tr><td><a href="#campaign/${c.id}">${esc(c.name)}</a><br><span class="small muted">${esc(c.subject)}</span></td>
+        <td>${c.status === 'sent' ? `${pill('Sent', 'ok')}<br><span class="small muted">${ftime(c.sent_at)} · ${esc(c.sent_by_name || '')}</span>` : pill('Draft')}</td><td class="num">${c.recipients ?? ''}</td><td class="num">${c.status === 'sent' ? c.delivered : ''}</td><td class="num">${c.status === 'sent' ? c.failed : ''}</td><td class="num">${c.status === 'sent' ? c.unsubscribed : ''}</td></tr>`), 'No campaigns yet.')}</div>`;
+  };
+  VIEWS.campaign = async (id) => {
+    const x = id && id !== 'new' ? await GET(`/crm/campaigns/${id}`) : null;
+    const c = x?.campaign || { name: '', subject: '', body: 'Dear {first_name},\n\n\n\nWith warm regards,\n{property}', segment: {}, status: 'draft' };
+    const sent = c.status === 'sent';
+    const aud = ui.audience && ui.audience.id === (x ? c.id : 'new') ? ui.audience.a : x?.audience;
+    return `<div class="page-head"><div><p class="sub"><a href="#campaigns">← Campaigns</a></p><h1 class="page">${x ? esc(c.name) : 'New campaign'}</h1><p class="sub">${sent ? `Sent ${ftime(c.sent_at)} to ${c.recipients} guests` : 'Draft'}</p></div></div>
+      <form class="form" data-form="campaign" data-id="${x ? c.id : ''}"><fieldset ${sent ? 'disabled' : ''} class="plain">
+      <div class="grid g2"><div class="card"><h2 class="sec">Message</h2><label>Campaign name (for you)<input name="name" value="${esc(c.name)}" required maxlength="120"></label>
+        <label>Subject<input name="subject" value="${esc(c.subject)}" required maxlength="200"></label><label>Message<textarea name="body" rows="12" required>${esc(c.body)}</textarea></label>
+        <p class="small muted">Placeholders: {first_name} {last_name} {property} {review_link}. Web addresses become links. The unsubscribe link is added automatically.</p></div>
+      <div class="card"><h2 class="sec">Who receives it</h2>${SEG_FIELDS(c.segment)}
+        ${aud ? `<p class="note"><b>${aud.recipients}</b> guest${aud.recipients === 1 ? '' : 's'} will receive it (${aud.matching} match, the rest have not agreed to marketing or have no email).${aud.sample.length ? `<br><span class="small">${aud.sample.map(esc).join(', ')}${aud.recipients > aud.sample.length ? '…' : ''}</span>` : ''}</p>` : ''}
+        ${sent ? '' : '<div class="actions"><button class="btn btn-ghost" name="act" value="audience">Check audience</button><button class="btn btn-gold" name="act" value="save">Save draft</button></div>'}</div></div></fieldset></form>
+      ${x && !sent ? `<div class="card mt"><h2 class="sec">Send</h2><form class="form row" data-form="campaign-test" data-id="${c.id}"><label>Send a test to<input type="email" name="to" required placeholder="you@hotel.com"></label><button class="btn btn-ghost">Send test</button></form>
+        <div class="actions"><button class="btn btn-gold" data-action="campaign-send" data-id="${c.id}">Send to ${aud ? aud.recipients : ''} guests</button></div></div>` : ''}`;
+  };
+
+  VIEWS.guestemails = async () => {
+    const d = await GET('/crm/settings');
+    const tpl = (t) => `<div class="card"><form class="form" data-form="guest-template" data-key="${t.key}"><div class="row between"><h2 class="sec">${t.key === 'pre_arrival' ? 'Before arrival' : 'After the stay (thank you & review)'}</h2>${t.enabled ? pill('On', 'ok') : pill('Off')}</div>
+      <div class="two"><label class="row"><input type="checkbox" name="enabled" value="1" ${t.enabled ? 'checked' : ''}> Send automatically</label><label>${t.key === 'pre_arrival' ? 'Days before arrival' : 'Days after departure'}<input type="number" name="days" min="0" max="30" value="${t.days}"></label></div>
+      <label>Subject<input name="subject" value="${esc(t.subject)}" required></label><label>Message<textarea name="body" rows="10" required>${esc(t.body)}</textarea></label>
+      <p class="small muted">Placeholders: {first_name} {last_name} {property} {arrival} {departure} {code} {check_in_time} {review_link}.${t.key === 'post_stay' ? ' Guests who unsubscribed do not receive it.' : ' Sent to every guest with an email: it is about their booking.'}</p>
+      <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`;
+    return `<div class="page-head"><div><h1 class="page">Automatic guest emails</h1><p class="sub">Sent once per stay, after each night audit. Use them to sell extras before arrival and to collect reviews after.</p></div></div>
+      <div class="card"><form class="form" data-form="crm-settings"><div class="two"><label>Public web address of this system<input name="public_url" value="${esc(d.settings.public_url || '')}" placeholder="https://pms.yourhotel.com"></label>
+        <label>Review page<input name="review_url" value="${esc(d.settings.review_url || '')}" placeholder="Your Google, TripAdvisor or Booking.com review link"></label></div>
+        <p class="small muted">The web address is used for unsubscribe links, which marketing emails must carry. The review page fills {review_link}.</p><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      <div class="grid g2 mt">${d.templates.map(tpl).join('')}</div>`;
+  };
+
+  Object.assign(OPS_A, {
+    'guest-edit': () => {
+      const g = ui.guest.guest;
+      modal(`Edit ${guestName(g)}`, `<form class="form" data-form="ops-modal"><div class="two"><label>First name<input name="first_name" value="${esc(g.first_name)}" required></label><label>Last name<input name="last_name" value="${esc(g.last_name)}"></label></div>
+        <div class="two"><label>Email<input type="email" name="email" value="${esc(g.email || '')}"></label><label>Phone<input name="phone" value="${esc(g.phone || '')}"></label></div>
+        <div class="three"><label>Nationality<input name="nationality" value="${esc(g.nationality || '')}"></label><label>Birthday<input type="date" name="birth_date" value="${esc(g.birth_date || '')}"></label><label class="row"><input type="checkbox" name="vip" value="1" ${g.vip ? 'checked' : ''}> VIP</label></div>
+        <label>Tags (comma separated)<input name="tags" value="${esc(g.tags.join(', '))}" placeholder="corporate, honeymoon, repeat"></label>
+        <label>Preferences<textarea name="preferences" rows="2" placeholder="Room, pillows, dietary needs…">${esc(g.preferences || '')}</textarea></label><label>Notes<textarea name="notes" rows="2">${esc(g.notes || '')}</textarea></label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await PUT(`/crm/guests/${g.id}`, { ...v, vip: !!v.vip }); return 'Profile saved.'; });
+    },
+    'guest-consent': async (d) => {
+      const yes = d.c === '1';
+      if (!confirm(yes ? 'Record that this guest agreed to receive marketing emails?' : 'Record that this guest no longer wants marketing emails?')) return;
+      await POST(`/crm/guests/${ui.guest.guest.id}/consent`, { consent: yes }); toast(yes ? 'Consent recorded.' : 'Consent withdrawn.'); render();
+    },
+    'guest-merge': async (d) => { if (!confirm('Merge that profile into this one? Its stays and details move here. This cannot be undone.')) return; await POST(`/crm/guests/${ui.guest.guest.id}/merge`, { duplicate_id: Number(d.id) }); toast('Profiles merged.'); render(); },
+    'guest-erase': async () => {
+      if (!confirm('Erase this guest\'s personal details? Name, contacts, ID and preferences are removed for good. Bills and accounts are kept as the law requires.')) return;
+      await POST(`/crm/guests/${ui.guest.guest.id}/erase`); toast('Personal details erased.'); render();
+    },
+    'campaign-send': async (d) => { if (!confirm('Send this campaign now? It cannot be recalled.')) return; const r = await POST(`/crm/campaigns/${d.id}/send`); toast(`Sending to ${r.recipients} guests.`); render(); },
+  });
+  Object.assign(OPS_FORMS, {
+    'guest-filter': (v) => { ui.q.gf = v; render(); },
+    campaign: async (v, form, sub) => {
+      const id = form.dataset.id, segment = segFrom(v);
+      if (sub?.value === 'audience') { ui.audience = { id: id ? Number(id) : 'new', a: await POST('/crm/audience', { segment }) }; ui.campaignDraft = v; const html = await VIEWS.campaign(id || 'new'); $('#view').innerHTML = html; restoreDraft(v); return; }
+      const c = id ? await PUT(`/crm/campaigns/${id}`, { name: v.name, subject: v.subject, body: v.body, segment }) : await POST('/crm/campaigns', { name: v.name, subject: v.subject, body: v.body, segment });
+      ui.audience = null; toast('Draft saved.'); if (!id) location.hash = `#campaign/${c.id}`; else render();
+    },
+    'campaign-test': async (v, form) => { await POST(`/crm/campaigns/${form.dataset.id}/test`, { to: v.to }); toast('Test queued. It goes out within a minute (or press Send waiting emails now under Department reports).'); },
+    'crm-settings': async (v) => { await PUT('/crm/settings', v); toast('Saved.'); render(); },
+    'guest-template': async (v, form) => { await PUT(`/crm/templates/${form.dataset.key}`, { ...v, enabled: !!v.enabled, days: Number(v.days) }); toast('Saved.'); render(); },
+  });
+  // keep what was typed when the audience is re-checked on an unsaved campaign
+  function restoreDraft(v) { const f = $('form[data-form=campaign]'); if (!f) return; for (const [k, val] of Object.entries(v)) { const el = f.elements[k]; if (el && el.type !== 'submit') el.value = val; } }
 
   const A = {
 

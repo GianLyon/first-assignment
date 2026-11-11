@@ -92,7 +92,7 @@ export async function createPublicBooking(db, b) {
   // createReservation locks the room type and re-checks availability, so two guests cannot take the last room
   const r = await createReservation(db, null, {
     room_type_id: t.room_type.id, arrival: q.arrival, departure: q.departure, adults: q.adults, rate: p.nightly[0].rate, source: 'Website',
-    guest: { first_name: g.first_name, last_name: g.last_name, email, phone: g.phone, nationality: g.nationality }, notes: b.notes,
+    guest: { first_name: g.first_name, last_name: g.last_name, email, phone: g.phone, nationality: g.nationality, marketing_consent: g.marketing_consent === true }, notes: b.notes,
   });
   await db.query('UPDATE reservations SET rate_plan_id=$2 WHERE id=$1', [r.id, p.id]);
   await saveNights(db, r.id, p.nightly);

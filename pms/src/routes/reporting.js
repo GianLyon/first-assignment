@@ -6,6 +6,7 @@ import { HttpError, requirePerm, can } from '../auth.js';
 import * as rp from '../services/reports.js';
 import { transportInfo } from '../email/index.js';
 import { getSettings } from '../services/frontoffice.js';
+import { queueGuestEmails } from '../services/crm.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // who may see each report: managers see all; others only the areas they already have access to
@@ -43,7 +44,7 @@ export function reportingRouter(pool) {
     return rp.runNow(db, req.user, b);
   }));
 
-  r.get('/outbox', schedule, async (_req, res) => res.json(await q(`SELECT id, run_id, to_address, subject, status, attempts, last_error, created_at, sent_at FROM email_outbox ORDER BY id DESC LIMIT 100`)));
+  r.get('/outbox', schedule, async (_req, res) => res.json(await q(`SELECT id, run_id, kind, to_address, subject, status, attempts, last_error, created_at, sent_at FROM email_outbox ORDER BY id DESC LIMIT 100`)));
   r.get('/outbox/:id', schedule, async (req, res) => {
     const [m] = await q('SELECT id, to_address, subject, text_body, status FROM email_outbox WHERE id=$1', [id(req)]);
     if (!m) throw new HttpError(404, 'Email not found.');
@@ -51,7 +52,11 @@ export function reportingRouter(pool) {
   });
   r.post('/outbox/:id/retry', schedule, inTx(async (db, req) => { await rp.retryEmail(db, req.user, id(req)); return { ok: true }; }));
   // send what is waiting now instead of within the minute
-  r.post('/outbox/send', schedule, async (_req, res) => res.json(await rp.processOutbox(pool)));
+  r.post('/outbox/send', schedule, async (_req, res) => {
+    await tx(pool, (db) => rp.generateDue(db));
+    await tx(pool, (db) => queueGuestEmails(db));
+    res.json(await rp.processOutbox(pool));
+  });
 
   /* ---------- group dashboard ---------- */
   r.get('/group', requirePerm('group.view'), async (req, res) => {
