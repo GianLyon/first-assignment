@@ -65,7 +65,7 @@ In Cloudflare DNS add, or edit if one exists:
 1. Create an account at **vercel.com** and sign in **with GitHub**, allowing access to the `first-assignment` repository. Choose the **Pro** plan (business use).
 2. **Add New → Project**, import the repository. Vercel reads `vercel.json`: it builds the site with `scripts/build-site.sh` and publishes only the website's files (never the PMS code). Leave *Framework* as **Other** and the root directory as the repository root. Press **Deploy**.
 3. Under **Settings → Git**, set the *Production Branch* to the branch you deploy from (e.g. `main`).
-4. **Settings → Domains**: add `azelitech.com` and `www.example.com` (choose one to redirect to the other). Vercel shows the DNS records to create; add them in Cloudflare (Step 6).
+4. **Settings → Domains**: add `azelitech.com` and `www.azelitech.com` (choose one to redirect to the other). Vercel shows the DNS records to create; add them in Cloudflare (Step 6).
 
 ## Step 5: Azeli PMS (Render)
 1. Create an account at **render.com** and sign in **with GitHub**, allowing access to the repository.
@@ -75,11 +75,11 @@ In Cloudflare DNS add, or edit if one exists:
    |---|---|
    | `PROPERTY_NAME` | `Amaya Hotel & Luxury Suites` |
    | `ADMIN_PASSWORD` | a long password for the first sign-in (change it afterwards) |
-   | `PUBLIC_URL` | `https://amaya.example.com` |
+   | `PUBLIC_URL` | `https://amaya.azelitech.com` |
    | `SMTP_URL` | the Brevo line from Step 3 |
    | `EMAIL_FROM` | `Amaya Hotel & Luxury Suites <reports@azelitech.com>` |
 4. **Apply**. The first deploy takes a few minutes. The PMS creates its database tables and sets up the property on its own.
-5. `azeli-pms` → **Settings → Custom Domains**: add `amaya.example.com` (one sub-address per hotel). Render shows a DNS record for it.
+5. `azeli-pms` → **Settings → Custom Domains**: add `amaya.azelitech.com` (one sub-address per hotel). Render shows a DNS record for it.
 
 ## Step 6: Point your addresses (Cloudflare DNS)
 In Cloudflare → your domain → **DNS → Records**, add exactly the records Vercel and Render showed you:
@@ -89,14 +89,14 @@ In Cloudflare → your domain → **DNS → Records**, add exactly the records V
 Set each of these to **DNS only (grey cloud)**, not proxied. Vercel and Render issue the HTTPS certificates themselves, and the PMS needs to see visitors' own addresses for its sign-in protection. Within a few minutes both show the domain as verified.
 
 ## Step 7: First sign-in
-1. Open `https://amaya.example.com`, sign in as `admin` with your `ADMIN_PASSWORD`, then **Password** (top right) to change it.
+1. Open `https://amaya.azelitech.com`, sign in as `admin` with your `ADMIN_PASSWORD`, then **Password** (top right) to change it.
 2. **Settings**: rooms and room types, VAT rate. **Users**: one account per staff member.
 3. **Automatic emails**: add the hotel's Google review link; switch on the pre-arrival and thank-you emails.
 4. **Department reports → Schedules**: who gets which report.
 5. Send yourself a test: **Department reports → Run a report**, add your email, and check it arrives (and not in spam).
 
 ## Adding another hotel later
-In `render.yaml` copy the `azeli-pms` service and the `azeli-pms-db` database, rename both (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 5 and the PMS part of Step 6 with `hotel2.example.com`, then Step 7. Link the hotels on each one's **Group dashboard** if an owner has several.
+In `render.yaml` copy the `azeli-pms` service and the `azeli-pms-db` database, rename both (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 5 and the PMS part of Step 6 with `hotel2.azelitech.com`, then Step 7. Link the hotels on each one's **Group dashboard** if an owner has several.
 
 ## Keeping it safe
 - Render restarts the PMS automatically if it stops, and checks `/healthz` before every new version goes live.
