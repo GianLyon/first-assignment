@@ -4,23 +4,24 @@ This takes about an afternoon. You do the account sign-ups and payments; everyth
 
 ## What you are setting up
 
-| Piece | Service | Why this one | Approx. cost |
+| Piece | Service & plan | Why | Approx. cost |
 |---|---|---|---|
-| Domain name + DNS | **Cloudflare** (Registrar + DNS) | Sells .com at cost with no renewal mark-up; the best free DNS | ≈ $11 / year |
-| Website (azeli…com) | **Vercel** (Pro) | Fast worldwide, HTTPS included, deploys itself when the code changes, preview link for every change | $20 / month (Pro is required for a business site: the free Hobby plan is for personal, non-commercial use only) |
-| Azeli PMS (one per property) | **Render** web service (Starter) + Render Postgres (Basic 256 MB), Frankfurt | The PMS must run all the time (night-audit report emails, guest emails and channel updates every minute). Vercel only runs code briefly per request, so the PMS cannot run there. Render: no server to look after, HTTPS, health checks, automatic restarts, private database | ≈ $7 + $6 = **$13 / month per property** |
-| Team mailboxes (you@, sales@…) | **Google Workspace Business Starter** | Gmail, Calendar, Meet and Drive on your own domain; you already work in Google Ads and Business Profile | ≈ $7 / user / month (annual) or $8.40 monthly |
-| Emails the PMS sends (reports, guest emails, campaigns) | **Brevo** (SMTP) | Built for automated sending, which keeps your team's mailboxes off spam lists | Free up to 300 emails / day |
+| Domain name + DNS | **Cloudflare** Registrar + DNS | .com at cost, best DNS. Cloudflare's paid plans add protection for traffic that passes through Cloudflare; ours goes straight to Vercel and Render, so they would add nothing | ≈ $11 / year |
+| Website | **Vercel Pro** | Required for a business site; fast worldwide, deploys itself on every change | $20 / month |
+| Azeli PMS (one per hotel) | **Render** Starter web service + **Postgres Basic-1GB**, Frankfurt | Always on (night-audit and guest emails every minute), private database with continuous backups you can restore to any moment (3-day window) | $7 + $19 = **$26 / month per hotel** |
+| Team mailboxes | **Google Workspace Business Starter** | Gmail, Calendar, Meet, Drive on your domain; works with Google Ads and Business Profile | ≈ $7 / user / month (annual), $8.40 monthly |
+| Emails the PMS sends | **Brevo Starter** | No daily sending cap (reports, guest emails, campaigns), better standing with inboxes than personal mailboxes | ≈ $9 / month for 5,000 emails |
+| Off-site backup copy | **Cloudflare R2** | A nightly copy of each hotel's data outside Render (being built next) | cents / month |
 
-*Budget alternative for mailboxes:* Zoho Mail Lite at about $1 / user / month. It does email only; there's no Docs or Meet.
+**Example: 5 team mailboxes, the website and Amaya's PMS cost about $90 a month.** Each extra hotel adds about $26 a month, which you can include in your package price.
 
-**Example: 5 team mailboxes, the website on Vercel Pro and Amaya's PMS cost about $70 a month in total.** Each extra hotel you sign up adds about $13 a month, which you can include in your package price.
+Worth paying for later, not now: Google Workspace *Business Standard* ($14 / user) if you need 2 TB storage per person or recorded meetings; Render *Standard* PMS instance ($25) if pages feel slow at busy times; Render's *Pro* account tier if you want a 7-day restore window and team access to the Render dashboard.
 
 ### Is that enough capacity?
 Yes, with room to spare. A 50-room hotel with 50 staff signed in generates a few hundred requests an hour; the Starter instance (0.5 CPU, 512 MB) handles that comfortably, and a year of bookings, bills and accounts is a few tens of megabytes in the database. Move up when you see it:
 - **Pages feel slow at busy times** → change the PMS plan to *Standard* ($25) in Render, one click, no data moved.
 - **Database storage near its limit** → raise the database plan in Render.
-- **More than ~300 system emails a day** (large campaigns) → Brevo's paid Starter plan. Until then, emails over the daily limit are retried automatically over the following hours.
+- **More than 5,000 system emails a month** (large campaigns) → the next Brevo band.
 - **Each new hotel** gets its own PMS + database (copy the two blocks in `render.yaml`), so one hotel's busy night never slows another, and their data is kept apart.
 
 Render has no African region; Frankfurt is the closest (≈150–200 ms from Kampala, fine for a web system). Uganda's Data Protection and Privacy Act allows storing data abroad where it is adequately protected; mention it in your client contracts.
@@ -42,7 +43,7 @@ Below, `example.com` stands for the domain you bought.
 5. In the Google Admin console → *Apps → Gmail → Authenticate email*, generate the **DKIM** key and add it to Cloudflare as a TXT record, then press *Start authentication*.
 
 ## Step 3: System email (Brevo)
-1. Create an account at **brevo.com** (free plan).
+1. Create an account at **brevo.com** and choose the **Starter** plan (check on the pricing page that SMTP sending is included at your volume).
 2. **Senders, Domains & Dedicated IPs → Domains → Add a domain**: enter your domain and add the records Brevo shows to Cloudflare (DNS only).
 3. **SMTP & API → SMTP → Generate a new SMTP key**. Note the *login* and the *key*.
 4. Your PMS email setting will be:
@@ -94,4 +95,4 @@ In `render.yaml` copy the `azeli-pms` service and the `azeli-pms-db` database, r
 ## Keeping it safe
 - Render restarts the PMS automatically if it stops, and checks `/healthz` before every new version goes live.
 - The database is not reachable from the internet (`ipAllowList: []`), only from the PMS.
-- Check your Render database plan's backup policy before real data goes in, and keep the admin password in a password manager. Automatic off-site backups are the next item on the roadmap.
+- Render keeps continuous backups of the database (restore to any moment in the last 3 days from the database's *Recovery* page). A nightly off-site copy to Cloudflare R2 is being added. Keep the admin password in a password manager.

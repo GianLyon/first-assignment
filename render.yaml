@@ -40,6 +40,6 @@ services:
 databases:
   - name: azeli-pms-db
     region: frankfurt
-    plan: basic-256mb
+    plan: basic-1gb            # 1 GB memory: room for reports and several years of data; continuous backups
     postgresMajorVersion: "16"
     ipAllowList: []             # reachable only from the PMS inside Render, never from the internet
