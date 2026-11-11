@@ -95,6 +95,8 @@ export async function voidInvoice(db, user, id, reason) {
   if (!inv || inv.status !== 'issued') throw new HttpError(409, 'Only issued invoices can be voided.');
   const { rows: [al] } = await db.query('SELECT count(*)::int AS n FROM ar_allocations WHERE invoice_id=$1', [id]);
   if (al.n) throw new HttpError(409, 'Payments are allocated to this invoice. Remove them first.');
+  const { rows: [ev] } = await db.query('SELECT code FROM events WHERE invoice_id=$1', [id]);
+  if (ev) throw new HttpError(409, `This invoice is the final bill for event ${ev.code} and cannot be voided. Issue a credit through a manual journal instead.`);
   const why = text(reason, 'Reason', { required: true, max: 300 });
   const s = await getSettings(db);
   if (inv.journal_entry_id) {

@@ -7,6 +7,7 @@ import { inventoryRouter } from './routes/inventory.js';
 import { publicRouter, inboundRouter, distributionRouter } from './routes/distribution.js';
 import { financeRouter } from './routes/finance.js';
 import { hrRouter } from './routes/hr.js';
+import { operationsRouter } from './routes/operations.js';
 import { apiRouter } from './routes/api.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -39,6 +40,7 @@ export function createApp(pool) {
   app.use('/api/distribution', requireUser, distributionRouter(pool));
   app.use('/api/finance', requireUser, financeRouter(pool));
   app.use('/api/hr', requireUser, hrRouter(pool));
+  app.use('/api/ops', requireUser, operationsRouter(pool));
   app.use('/api/pos', requireUser, posRouter(pool));
   app.use('/api/inventory', requireUser, inventoryRouter(pool));
   app.use('/api', apiRouter(pool));

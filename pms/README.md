@@ -1,14 +1,14 @@
 # Hearth & Key PMS
 
 The hotel property management system offered to Hearth & Key marketing partners.
-Built so far: Phase 1 (foundation and front office), Phase 2 (restaurant / POS), Phase 3 (inventory, purchasing and requisitions), Phase 4 (booking engine and channel manager), Phase 5 (accounting & finance) and Phase 6 (HR & payroll). It is a real system with a database, staff accounts and accounting. It is not a demo.
+Built so far: Phase 1 (foundation and front office), Phase 2 (restaurant / POS), Phase 3 (inventory, purchasing and requisitions), Phase 4 (booking engine and channel manager), Phase 5 (accounting & finance), Phase 6 (HR & payroll) and Phase 7 (events & banqueting, assets & maintenance, amenity sales). It is a real system with a database, staff accounts and accounting. It is not a demo.
 The clickable sales demo lives separately in `../pms-demo/`.
 
 ## What it does
 
 | Area | Features |
 |---|---|
-| Staff accounts | Individual sign-in, ten roles (admin, manager, front office, night auditor, housekeeping, accountant, waiter/cashier, kitchen/bar, storekeeper, HR officer), password change/reset, account disable, sign-in lockout after 5 failed attempts |
+| Staff accounts | Individual sign-in, ten roles (admin, manager, front office, night auditor, housekeeping, accountant, waiter/cashier, kitchen/bar, storekeeper, HR officer, maintenance), password change/reset, account disable, sign-in lockout after 5 failed attempts |
 | Front office | Dashboard, room board, reservations (create, edit, cancel, search), availability grid, check-in with room assignment and ID capture, check-out, walk-in via same-day booking |
 | Overbooking protection | Availability is checked inside a locked transaction, so two receptionists cannot sell the last room at the same moment. The database also prevents two in-house guests in one room |
 | Guest bills (folios) | Charges by department (rooms, F&B, amenities, events, other), payments (cash, card, mobile money, bank transfer, company account), voids with a reason (manager/accountant only), printable invoice |
@@ -42,6 +42,10 @@ The clickable sales demo lives separately in `../pms-demo/`.
 | Leave | Annual (with balance), sick, maternity, paternity, compassionate and unpaid leave; requested by staff or HR, approved by a manager who is not the requester. Unpaid leave is deducted in payroll |
 | Payroll | Monthly payroll: pro-rata for joiners/leavers, unpaid leave, allowances, overtime at 1.5×, other additions/deductions, NSSF 5% + 10%, PAYE on the Uganda monthly bands, staff advance recovery. Prepared → approved by someone else → posted to the accounts → paid. Payslips, PAYE and NSSF schedules, payment list and wage cost by department |
 | Self-service | “My HR” for every staff member: sign in/out, this week's shifts, leave balance and requests, payslips |
+| **Amenities & services** (Phase 7) | Price list of spa treatments, transfers, tours, laundry and day passes. Bookings by day with time and staff (the same therapist or driver cannot be double-booked). When delivered, charge to an in-house guest's room or take cash, card or mobile money; posts to Amenities revenue with VAT |
+| Events & banqueting | Function rooms with capacity and half/full-day hire, packages priced per guest. Events move enquiry → tentative → confirmed → completed. Tentative and confirmed events hold the room (no overlapping bookings; capacity checked). Quote = package × guests + room hire + extras. Deposits are held as a liability and confirm the booking. Printable banquet event order (BEO) with instructions for kitchen, service, bar, housekeeping, technical and front office. Complete & bill applies deposits; the balance is paid on the spot or invoiced to the client's company account. Cancelling needs the deposit refunded or kept as forfeited-deposit income |
+| Assets | Fixed asset register (cost, residual value, useful life, location, serial, supplier). New assets post to Property, plant & equipment from cash/bank or as an opening balance. Monthly straight-line depreciation posted once per month. Disposal or sale books the gain or loss. Book value and service history per asset |
+| Maintenance | Any staff member reports a fault (room, asset or place, with priority). Reporting can take a vacant room out of order; when the job is done the room goes back to housekeeping as dirty. Assets with a fault show as under repair. Technicians assign, update, cost and close jobs. Assets with a service interval get preventive jobs created when due |
 | Channel manager | Channels with their own room/rate codes and commission. Every change to availability, prices or restrictions is queued and pushed automatically (every 20 s by default) as a signed message; full re-sync on demand. Bookings, changes and cancellations from channels arrive at `/api/channels/<code>/inbound`, are signature-checked, never duplicated, and are accepted even when sold out (flagged as overbooked on the dashboard). Every message is logged |
 
 Money is stored in whole Ugandan shillings. Each property gets its own database.
@@ -104,5 +108,5 @@ The test suite wipes and rebuilds the **test** database. It covers sign-in and l
 | **4. Booking engine & channel manager** (done) | Rate plans and calendar, public booking page, channel manager with signed push/receive, ready for a certified partner. Online payment follows with Phase 5 |
 | **5. Accounting & finance** (done) | Company accounts and invoicing, supplier bills and payments, expenses, transfers, chart of accounts, manual journals, closing the books, bank reconciliation, P&L, balance sheet, ledger, VAT summary, OTA commission, online payment (provider-neutral). Still to come: a live payment provider and URA EFRIS e-invoicing, both needing accounts with those services |
 | **6. HR & payroll** (done) | Employees, rosters, attendance, leave, staff advances, payroll with PAYE/NSSF posted to the accounts, payslips and statutory schedules, staff self-service |
-| 7. Events, assets & amenities | Function rooms and BEOs, asset register and maintenance, spa/transfer/tour sales |
+| **7. Events, assets & amenities** (done) | Function rooms, packages, event bookings with deposits, BEOs and billing; asset register with depreciation and disposals; maintenance work orders and preventive schedules; spa/transfer/tour/laundry sales with charge to room |
 | 8. Automated reporting | Scheduled department reports by email, multi-property dashboards |

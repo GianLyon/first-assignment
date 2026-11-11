@@ -234,3 +234,14 @@ fieldset { border: 0; padding: 0; margin: 0; }
 .roster td, .roster th { text-align: center; } .roster td:first-child, .roster th:first-child { text-align: left; }
 .net-pay { display: flex; justify-content: space-between; align-items: center; background: var(--ink); color: #fff; border-radius: 10px; padding: 14px 18px; margin: 14px 0 8px; }
 .net-pay b { font-family: var(--serif); font-size: 1.6rem; color: var(--gold); }
+
+/* events: banquet event order */
+.beo h2 { margin: 0; font-family: var(--serif); }
+.beo-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 16px; margin: 16px 0; }
+.beo-facts dt { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.beo-facts dd { margin: 2px 0 0; font-weight: 600; }
+.beo-depts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.beo-depts section { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 10px 12px; break-inside: avoid; }
+.beo-depts h3 { margin: 0 0 4px; font-size: .95rem; }
+.beo-depts p { margin: 0; white-space: pre-line; }
+@media (max-width: 520px) { .beo-facts, .beo-depts { grid-template-columns: 1fr 1fr; } .beo-depts { grid-template-columns: 1fr; } }

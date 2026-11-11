@@ -128,6 +128,29 @@ export async function seedHr(pool) {
   });
 }
 
+export async function seedOperations(pool) {
+  return tx(pool, async (db) => {
+    const { rows } = await db.query('SELECT 1 FROM function_rooms LIMIT 1');
+    if (rows[0]) return { skipped: true };
+    for (const [n, cap, full, half] of [['Nile Hall', 200, 2500000, 1500000], ['Boardroom', 16, 600000, 350000], ['Garden Terrace', 120, 1800000, 1000000]]) {
+      await db.query('INSERT INTO function_rooms (name, capacity, hire_full_day, hire_half_day) VALUES ($1,$2,$3,$4)', [n, cap, full, half]);
+    }
+    for (const [n, pp, inc] of [['Half-day conference', 65000, 'Morning tea, lunch buffet, mineral water, projector and flip chart'],
+      ['Full-day conference', 95000, 'Morning and afternoon tea, lunch buffet, mineral water, projector, PA system'],
+      ['Wedding reception', 120000, 'Three-course buffet, soft drinks, cake table, décor package'],
+      ['Cocktail evening', 55000, 'Canapés (6 pieces per guest), soft drinks']]) {
+      await db.query('INSERT INTO event_packages (name, per_person, includes) VALUES ($1,$2,$3)', [n, pp, inc]);
+    }
+    for (const [n, c, p, d, desc] of [['Full body massage (60 min)', 'spa', 150000, 60, 'Swedish or deep tissue'], ['Facial (45 min)', 'spa', 120000, 45, null],
+      ['Airport transfer (Entebbe)', 'transport', 180000, 90, 'One way, up to 3 guests'], ['Jinja day tour', 'tour', 350000, 480, 'Source of the Nile, per guest'],
+      ['City tour (half day)', 'tour', 150000, 240, 'Per guest'], ['Laundry: wash & fold (per kg)', 'laundry', 15000, null, null],
+      ['Pool day pass (non-resident)', 'leisure', 40000, null, null], ['Gym day pass (non-resident)', 'leisure', 30000, null, null]]) {
+      await db.query('INSERT INTO amenities (name, category, price, duration_min, description) VALUES ($1,$2,$3,$4,$5)', [n, c, p, d, desc]);
+    }
+    return { skipped: false };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
@@ -138,6 +161,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const p = await seedPos(pool);
   if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
   await seedHr(pool);
+  const ops = await seedOperations(pool);
+  if (!ops.skipped) console.log('Function rooms, event packages and an amenities price list set up.');
   const dist = await seedDistribution(pool);
   if (!dist.skipped) console.log('Rate plans and a test (simulator) channel set up.');
   const inv = await seedInventory(pool);
