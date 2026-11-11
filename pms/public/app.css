@@ -214,3 +214,10 @@ a.room { text-decoration: none; color: inherit; }
 .ticket-items { list-style: none; padding: 0; margin: 8px 0 14px; display: grid; gap: 6px; font-size: 1rem; }
 .ticket-items em { color: var(--bad); font-size: .85rem; }
 .tender { align-items: end; }
+/* ---------- stores & purchasing ---------- */
+.form .three { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; }
+.form .line-row { margin-top: -4px; }
+.form .line-row label { font-weight: 500; }
+.count-input { width: 120px; min-width: 0; }
+.modal:has(form[data-form=req-act]), .modal:has(form[data-form=po-act]), .modal:has(form[data-form=new-po]), .modal:has(form[data-form=receive]), .modal:has(form[data-form=new-req]) { width: min(820px, 100%); }
+@media (max-width: 520px) { .form .three { grid-template-columns: 1fr 1fr; } .form .three label:first-child { grid-column: span 2; } }

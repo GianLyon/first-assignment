@@ -2,6 +2,7 @@
 import { HttpError, audit, can } from '../auth.js';
 import { postJournal, saleLines } from '../ledger.js';
 import { getSettings, insertCharge } from './frontoffice.js';
+import { deductForCheck } from './inventory.js';
 
 const POS_METHODS = ['cash', 'card', 'mobile_money', 'room'];
 const text = (v, field, { required = false, max = 200 } = {}) => {
@@ -211,6 +212,7 @@ export async function settleCheck(db, user, checkId, { payments }) {
       [c.id, t.method, t.amount, t.reservation_id, folioChargeId, t.reference, s.business_date, shift.id, user.id, journalId]);
   }
   await db.query("UPDATE pos_checks SET status='settled', settled_by=$2, settled_at=now(), business_date=$3 WHERE id=$1", [c.id, user.id, s.business_date]);
+  await deductForCheck(db, user, c.id); // recipe ingredients out of the outlet's store, cost of sales posted
   await audit(db, user, 'pos.settle', 'pos_check', c.id, { code: c.code, total, payments: tenders.map((t) => ({ method: t.method, amount: t.amount })) });
   return getCheck(db, c.id);
 }

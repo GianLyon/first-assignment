@@ -1,7 +1,8 @@
 // First-time setup for a new property:  npm run seed
 // Environment options: PROPERTY_NAME, ADMIN_USERNAME, ADMIN_PASSWORD, BUSINESS_DATE (YYYY-MM-DD).
 // Creates the property settings, an admin account, a starter set of room types and rooms,
-// and a starter restaurant/bar setup (outlets, menu, tables). Parts that already exist are left alone.
+// a starter restaurant/bar setup (outlets, menu, tables) and starter stores, stock items, suppliers and
+// recipes. Parts that already exist are left alone, so it is safe to run again after an upgrade.
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { createPool, migrate, tx } from './db.js';
@@ -57,6 +58,46 @@ export async function seedPos(pool) {
   });
 }
 
+/** Starter stores, stock items, suppliers and recipes. Only runs when no stores exist yet. */
+export async function seedInventory(pool) {
+  return tx(pool, async (db) => {
+    const { rows } = await db.query('SELECT 1 FROM stores LIMIT 1');
+    if (rows[0]) return { skipped: true };
+    const st = {};
+    for (const [name, kind] of [['Main store', 'main'], ['Kitchen', 'kitchen'], ['Bar', 'bar'], ['Housekeeping', 'housekeeping'], ['Maintenance', 'maintenance']]) {
+      st[kind] = (await db.query('INSERT INTO stores (name, kind) VALUES ($1,$2) RETURNING id', [name, kind])).rows[0].id;
+    }
+    await db.query("UPDATE outlets SET stock_store_id=$1 WHERE kind IN ('restaurant','room_service') AND stock_store_id IS NULL", [st.kitchen]);
+    await db.query("UPDATE outlets SET stock_store_id=$1 WHERE kind='bar' AND stock_store_id IS NULL", [st.bar]);
+    const items = [
+      ['CHK', 'Chicken', 'kg', 'Meat & fish', 10], ['BEEF', 'Beef fillet', 'kg', 'Meat & fish', 5], ['GOAT', 'Goat meat', 'kg', 'Meat & fish', 5], ['TIL', 'Tilapia (whole)', 'piece', 'Meat & fish', 15],
+      ['RICE', 'Rice', 'kg', 'Dry goods', 20], ['FLOUR', 'Wheat flour', 'kg', 'Dry goods', 10], ['EGG', 'Eggs', 'piece', 'Dairy & eggs', 60], ['MATOKE', 'Matoke', 'bunch', 'Fruit & veg', 3],
+      ['VEG', 'Fresh vegetables', 'kg', 'Fruit & veg', 15], ['POT', 'Potatoes', 'kg', 'Fruit & veg', 20], ['FRUIT', 'Fresh fruit', 'kg', 'Fruit & veg', 10], ['OIL', 'Cooking oil', 'litre', 'Dry goods', 10],
+      ['COFFEE', 'Coffee beans', 'kg', 'Beverages', 2], ['LAGER', 'Local lager (500ml)', 'bottle', 'Beverages', 48], ['SODA', 'Soda (300ml)', 'bottle', 'Beverages', 48], ['WATER', 'Bottled water (500ml)', 'bottle', 'Beverages', 48],
+      ['WINE', 'House wine', 'bottle', 'Beverages', 12], ['WARAGI', 'Waragi', 'litre', 'Beverages', 3], ['TONIC', 'Tonic water', 'bottle', 'Beverages', 24],
+      ['SOAP', 'Guest soap', 'piece', 'Guest supplies', 100], ['TISSUE', 'Toilet rolls', 'piece', 'Guest supplies', 100], ['DETERG', 'Laundry detergent', 'kg', 'Cleaning', 10], ['BULB', 'LED bulbs', 'piece', 'Maintenance', 10],
+    ];
+    const id = {};
+    for (const [code, name, unit, category, reorder] of items) id[code] = (await db.query('INSERT INTO stock_items (code, name, unit, category, reorder_level) VALUES ($1,$2,$3,$4,$5) RETURNING id', [code, name, unit, category, reorder])).rows[0].id;
+    for (const [name, phone] of [['Kampala Fresh Produce Ltd', '+256 700 000 101'], ['Lake Victoria Fish Suppliers', '+256 700 000 102'], ['Nile Beverages Distributors', '+256 700 000 103'], ['City Hotel Supplies', '+256 700 000 104']]) {
+      await db.query('INSERT INTO suppliers (name, phone) VALUES ($1,$2)', [name, phone]);
+    }
+    const recipes = {
+      'Chicken luwombo': [['CHK', 0.4], ['VEG', 0.15], ['MATOKE', 0.1]], 'Whole grilled tilapia & chips': [['TIL', 1], ['POT', 0.3], ['OIL', 0.05]],
+      'Beef fillet steak': [['BEEF', 0.3], ['POT', 0.2], ['VEG', 0.1]], 'Vegetable curry & rice': [['VEG', 0.35], ['RICE', 0.2]], 'Goat stew with matoke': [['GOAT', 0.35], ['MATOKE', 0.15]],
+      'Rolex (chapati & egg roll)': [['FLOUR', 0.15], ['EGG', 2], ['OIL', 0.02]], 'Full breakfast': [['EGG', 2], ['POT', 0.15], ['FRUIT', 0.1], ['COFFEE', 0.02]], 'Tropical fruit platter': [['FRUIT', 0.4]],
+      'Local lager (500ml)': [['LAGER', 1]], 'Soda': [['SODA', 1]], 'Bottled water': [['WATER', 1]], 'Glass of house wine': [['WINE', 0.2]], 'Bottle of house wine': [['WINE', 1]],
+      'Waragi & tonic': [['WARAGI', 0.05], ['TONIC', 1]], 'Ugandan coffee': [['COFFEE', 0.02]], 'Fresh passion juice': [['FRUIT', 0.25]],
+    };
+    for (const [dish, lines] of Object.entries(recipes)) {
+      const { rows: [m] } = await db.query('SELECT id FROM menu_items WHERE name=$1', [dish]);
+      if (!m) continue;
+      for (const [code, qty] of lines) await db.query('INSERT INTO recipe_lines (menu_item_id, item_id, qty) VALUES ($1,$2,$3)', [m.id, id[code], qty]);
+    }
+    return { skipped: false };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
@@ -66,6 +107,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
   const p = await seedPos(pool);
   if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
+  const inv = await seedInventory(pool);
+  if (!inv.skipped) console.log('Stores, stock items, suppliers and recipes set up. Enter your opening stock under Purchasing.');
   if (r.skipped) console.log('Property settings already exist and were left unchanged.');
   else console.log(`Property created. Business date ${r.businessDate}.\nSign in as "${r.username}"${r.generated ? ` with password: ${r.password}\n(Change it after your first sign-in.)` : ' with the password you provided.'}`);
   await pool.end();

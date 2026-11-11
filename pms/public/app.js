@@ -14,7 +14,7 @@
   const DEPT = { rooms: 'Rooms', fnb: 'Food & beverage', amenities: 'Amenities', events: 'Events', other: 'Other' };
   const METHOD = { cash: 'Cash', card: 'Card', mobile_money: 'Mobile money', bank_transfer: 'Bank transfer', company_account: 'Company account' };
   const STATUS = { reserved: ['Reserved', 'info'], in_house: ['In-house', 'ink'], checked_out: ['Checked out', ''], cancelled: ['Cancelled', 'bad'], no_show: ['No-show', 'bad'] };
-  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar' };
+  const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar', storekeeper: 'Storekeeper' };
   const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
 
   let ME = null, CAN = {}, SETTINGS = null;
@@ -60,6 +60,7 @@
   const NAV = [
     ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
+    ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['accounts', 'Accounts', 'accounts.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
@@ -88,7 +89,7 @@
   async function render() {
     if (!ME) return;
     const { r, id } = route();
-    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use' }[r] || null;
+    const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count' }[r] || null;
     const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
@@ -232,7 +233,7 @@
     const users = await GET('/users');
     return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
       <div class="card">${table(['Name', 'Username', 'Role', 'Status', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
-      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen only']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
+      <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen, stock levels, requisitions'], ['Storekeeper', 'Stock, deliveries, purchase orders (not approval), issuing requisitions, stock counts']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
   };
 
   VIEWS.log = async () => {
@@ -362,6 +363,115 @@
     out.classList.toggle('err', total !== paid);
   }
 
+
+  /* ================= STORES & PURCHASING ================= */
+  const qn = (n) => { const v = Number(n) || 0; return Number.isInteger(v) ? num(v) : v.toLocaleString('en-US', { maximumFractionDigits: 3 }); };
+  let INVS = null;
+  const invSetup = async (force) => (INVS && !force ? INVS : (INVS = await GET('/inventory/setup')));
+  const RQ_STATUS = { pending: ['Waiting approval', 'warn'], approved: ['Approved', 'info'], issued: ['Issued', 'ok'], rejected: ['Rejected', 'bad'], cancelled: ['Cancelled', ''] };
+  const PO_STATUS = { draft: ['Draft', 'warn'], approved: ['Approved', 'info'], partly_received: ['Part received', 'info'], received: ['Received', 'ok'], cancelled: ['Cancelled', ''] };
+  const MV = { receipt: 'Delivery', opening: 'Opening stock', transfer_in: 'Transfer in', transfer_out: 'Transfer out', issue: 'Issued to department', sale: 'Sold (recipe)', count: 'Stock count', write_off: 'Write-off' };
+  const itemOpts = (items, sel) => opts([['', 'Choose item…'], ...items.filter((i) => i.active).map((i) => [i.id, `${i.name} (${i.unit})`])], sel);
+  const lineRows = (n, items, { cost = false, pre = [] } = {}) => [...Array(n)].map((_, k) => `<div class="${cost ? 'three' : 'two'} line-row">
+      <label>${k ? '' : 'Item'}<select name="item_${k}">${itemOpts(items, pre[k]?.item_id)}</select></label>
+      <label>${k ? '' : 'Quantity'}<input name="qty_${k}" type="number" min="0" step="0.001" value="${pre[k]?.qty ?? ''}"></label>
+      ${cost ? `<label>${k ? '' : 'Unit cost (UGX)'}<input name="cost_${k}" type="number" min="0" step="1" value="${pre[k]?.unit_cost ?? ''}"></label>` : ''}</div>`).join('');
+  const readLines = (v, n, cost = false) => [...Array(n)].map((_, k) => ({ item_id: Number(v['item_' + k]), qty: Number(v['qty_' + k]), unit_cost: cost ? Number(v['cost_' + k]) : undefined })).filter((l) => l.item_id && l.qty > 0);
+
+  VIEWS.stock = async () => {
+    const S = await invSetup(true);
+    const storeId = cur('stockStore', 'all');
+    const list = await GET(`/inventory/stock${storeId === 'all' ? '' : '?store_id=' + storeId}`);
+    const total = list.reduce((a, i) => a + i.value, 0);
+    const shown = storeId === 'all' ? list : list.filter((i) => i.qty !== 0);
+    return `<div class="page-head"><div><h1 class="page">Stock</h1><p class="sub">Quantities on hand, valued at weighted average cost.</p></div>
+      <div class="row">${CAN['requisition.create'] ? '<button class="btn btn-gold" data-action="new-req">+ Requisition</button>' : ''}${CAN['inventory.receive'] ? '<button class="btn btn-ghost" data-action="write-off">Write-off</button>' : ''}</div></div>
+      ${tabs('stockStore', [['all', 'All stores'], ...S.stores.filter((x) => x.active).map((x) => [String(x.id), x.name])], 'all')}
+      <div class="grid g3 mb"><div class="card kpi"><span>Stock value</span><b>${num(total)}</b><small>UGX at average cost</small></div>
+        <div class="card kpi"><span>At or below re-order level</span><b>${list.filter((i) => i.active && i.low).length}</b><small>items${storeId === 'all' ? ' (all stores)' : ' in this store'}</small></div>
+        <div class="card kpi"><span>Below zero</span><b>${list.filter((i) => i.qty < 0).length}</b><small>sold before the delivery was entered</small></div></div>
+      <div class="card">${table(['Item', 'Category', '#On hand', '#Re-order at', '#Avg cost', '#Value', ''], shown.map((i) => `<tr><td><b>${esc(i.name)}</b><br><span class="small muted">${esc(i.code)}</span></td><td>${esc(i.category)}</td>
+        <td class="num ${i.qty < 0 ? 'err' : ''}">${qn(i.qty)} ${esc(i.unit)}</td><td class="num">${qn(i.reorder_level)}</td><td class="num">${num(i.avg_cost)}</td><td class="num">${num(i.value)}</td>
+        <td class="right nowrap">${i.low && storeId === 'all' && i.active ? pill('Re-order', 'bad') + ' ' : ''}<button class="btn btn-sm btn-ghost" data-action="movements" data-id="${i.id}" data-name="${esc(i.name)}">History</button></td></tr>`), 'No stock in this store.')}</div>`;
+  };
+
+  VIEWS.requisitions = async () => {
+    const v = cur('rq', CAN['requisition.approve'] ? 'pending' : CAN['requisition.issue'] ? 'approved' : 'mine');
+    const list = await GET(`/inventory/requisitions?view=${v}`);
+    return `<div class="page-head"><div><h1 class="page">Requisitions</h1><p class="sub">Departments request stock, a manager approves, the store issues it.</p></div><button class="btn btn-gold" data-action="new-req">+ New requisition</button></div>
+      ${tabs('rq', [['pending', 'Waiting approval'], ['approved', 'Ready to issue'], ['done', 'Completed'], ['mine', 'Raised by me']], v)}
+      <div class="card">${table(['Code', 'Department', 'From → to', 'Requested', '#Items', 'Status', '#Cost', ''], list.map((r) => `<tr><td>${esc(r.code)}</td><td>${esc(r.department)}</td><td>${esc(r.from_store)} → ${esc(r.to_store || 'used by department')}</td>
+        <td>${ftime(r.requested_at)}<br><span class="small muted">${esc(r.requested_by_name || '')}</span></td><td class="num">${r.lines}</td><td>${pill(...RQ_STATUS[r.status])}</td><td class="num">${r.total_cost != null ? num(r.total_cost) : ''}</td>
+        <td class="right"><button class="btn btn-sm" data-action="open-req" data-id="${r.id}">Open</button></td></tr>`), 'Nothing here.')}</div>`;
+  };
+
+  VIEWS.purchasing = async () => {
+    const t = cur('po', 'open');
+    let body;
+    if (t === 'receipts') {
+      const g = await GET('/inventory/receipts');
+      body = table(['GRN', 'Date', 'Supplier', 'Store', 'Order', 'Invoice', '#Value', 'Received by'], g.map((x) => `<tr><td>${esc(x.code)}</td><td>${fdate(x.business_date)}</td><td>${x.is_opening ? pill('Opening stock') : esc(x.supplier_name)}</td><td>${esc(x.store_name)}</td><td>${esc(x.po_code || '–')}</td><td>${esc(x.invoice_ref || '')}</td><td class="num">${num(x.total)}</td><td>${esc(x.received_by_name || '')}</td></tr>`), 'No deliveries yet.');
+    } else {
+      const list = await GET(`/inventory/purchase-orders?view=${t}`);
+      body = table(['Order', 'Supplier', 'Deliver to', 'Raised', 'Status', '#Value', ''], list.map((p) => `<tr><td>${esc(p.code)}</td><td>${esc(p.supplier_name)}</td><td>${esc(p.store_name)}</td><td>${ftime(p.created_at)}</td><td>${pill(...PO_STATUS[p.status])}</td><td class="num">${num(p.total)}</td><td class="right"><button class="btn btn-sm" data-action="open-po" data-id="${p.id}">Open</button></td></tr>`), 'No orders.');
+    }
+    return `<div class="page-head"><div><h1 class="page">Purchasing</h1><p class="sub">Purchase orders, deliveries (goods received) and opening stock.</p></div>
+      <div class="row"><button class="btn btn-gold" data-action="new-po">+ Purchase order</button><button class="btn btn-ghost" data-action="receive" data-mode="direct">Delivery without order</button><button class="btn btn-ghost" data-action="receive" data-mode="opening">Opening stock</button></div></div>
+      ${tabs('po', [['open', 'Open orders'], ['closed', 'Closed orders'], ['receipts', 'Deliveries']], 'open')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.counts = async () => {
+    const [list, S] = await Promise.all([GET('/inventory/counts'), invSetup()]);
+    return `<div class="page-head"><div><h1 class="page">Stock counts</h1><p class="sub">Count a store, then post: differences adjust stock and post to the accounts.</p></div>
+      <form class="row" data-form="start-count"><select class="search" name="store_id" aria-label="Store">${opts(S.stores.filter((x) => x.active).map((x) => [x.id, x.name]))}</select><button class="btn btn-gold">Start count</button></form></div>
+      <div class="card">${table(['#', 'Store', 'Started', 'Status', 'Progress', '#Variance (UGX)', ''], list.map((c) => `<tr><td>${c.id}</td><td>${esc(c.store_name)}</td><td>${ftime(c.created_at)}<br><span class="small muted">${esc(c.created_by_name || '')}</span></td>
+        <td>${pill({ open: 'Open', posted: 'Posted', cancelled: 'Cancelled' }[c.status], { open: 'warn', posted: 'ok' }[c.status] || '')}</td><td>${c.counted} of ${c.lines} counted</td><td class="num ${c.variance_value < 0 ? 'err' : ''}">${c.variance_value != null ? num(c.variance_value) : ''}</td>
+        <td class="right"><a class="btn btn-sm" href="#count/${c.id}">${c.status === 'open' ? 'Continue' : 'View'}</a></td></tr>`), 'No counts yet.')}</div>`;
+  };
+
+  VIEWS.count = async (id) => {
+    const c = await GET(`/inventory/counts/${id}`);
+    const open = c.status === 'open';
+    return `<div class="page-head"><div><p class="sub"><a href="#counts">← Stock counts</a></p><h1 class="page">Count: ${esc(c.store_name)}</h1><p class="sub">Started ${fdateLong(c.business_date)}. Leave a line empty if you did not count it; it will not change.</p></div>
+      ${open ? '<div class="row"><button class="btn btn-ghost" data-action="cancel-count" data-id="' + c.id + '">Cancel count</button></div>' : ''}</div>
+      <form class="card" data-form="count-sheet" data-id="${c.id}">${table(['Item', 'Unit', ...(open ? [] : ['#System', '#Counted', '#Difference']), ...(open ? ['Counted'] : [])], c.lines.map((l) => open
+        ? `<tr><td>${esc(l.name)}<br><span class="small muted">${esc(l.category)}</span></td><td>${esc(l.unit)}</td><td><input class="search count-input" name="c_${l.item_id}" type="number" min="0" step="0.001" value="${l.counted_qty ?? ''}" aria-label="Counted ${esc(l.name)}"></td></tr>`
+        : `<tr><td>${esc(l.name)}</td><td>${esc(l.unit)}</td><td class="num">${l.posted_qty != null ? qn(l.posted_qty) : qn(l.expected_qty)}</td><td class="num">${l.counted_qty != null ? qn(l.counted_qty) : '–'}</td><td class="num ${l.counted_qty != null && l.counted_qty - l.posted_qty < 0 ? 'err' : ''}">${l.counted_qty != null && l.posted_qty != null ? qn(l.counted_qty - l.posted_qty) : ''}</td></tr>`))}
+      ${open ? `<div class="row mt"><button class="btn btn-ghost" name="do" value="save">Save progress</button><button class="btn btn-gold" name="do" value="post">Post count</button></div>` : `<p class="mt">Net variance: <b>${ugx(c.variance_value)}</b></p>`}</form>`;
+  };
+
+  VIEWS.stockitems = async () => {
+    const S = await invSetup(true);
+    const t = cur('si', 'items');
+    let body;
+    if (t === 'items') body = `<div class="row between mb"><span class="muted">${S.items.length} items</span><button class="btn btn-gold btn-sm" data-action="stock-item">+ Item</button></div>${table(['Code', 'Item', 'Unit', 'Category', '#Re-order at', 'Active', ''], S.items.map((i) => `<tr><td>${esc(i.code)}</td><td><b>${esc(i.name)}</b></td><td>${esc(i.unit)}</td><td>${esc(i.category)}</td><td class="num">${qn(i.reorder_level)}</td><td>${i.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="stock-item" data-id="${i.id}">Edit</button></td></tr>`))}`;
+    else if (t === 'suppliers') body = `<div class="row between mb"><span></span><button class="btn btn-gold btn-sm" data-action="supplier">+ Supplier</button></div>${table(['Supplier', 'Contact', 'Phone', 'Email', 'TIN', ''], S.suppliers.map((x) => `<tr><td><b>${esc(x.name)}</b>${x.active ? '' : ' ' + pill('Inactive')}</td><td>${esc(x.contact || '')}</td><td>${esc(x.phone || '')}</td><td>${esc(x.email || '')}</td><td>${esc(x.tin || '')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="supplier" data-id="${x.id}">Edit</button></td></tr>`))}`;
+    else if (t === 'stores') body = `<div class="row between mb"><span class="muted">Each sales outlet takes its recipe ingredients from one store.</span><button class="btn btn-gold btn-sm" data-action="store-edit">+ Store</button></div>${table(['Store', 'Type', 'Active', ''], S.stores.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.kind)}</td><td>${x.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="store-edit" data-id="${x.id}">Edit</button></td></tr>`))}
+      <h2 class="sec mt">Outlets</h2>${table(['Outlet', 'Takes stock from'], S.outlets.map((o) => `<tr><td>${esc(o.name)}</td><td><select class="search" data-action="outlet-store" data-id="${o.id}" aria-label="Store for ${esc(o.name)}">${opts([['', 'No stock deduction'], ...S.stores.map((x) => [x.id, x.name])], o.stock_store_id || '')}</select></td></tr>`))}`;
+    else {
+      const rec = await GET('/inventory/recipes');
+      body = `<p class="muted">Ingredients used per portion. When the POS sells an item, these quantities come out of the outlet's store.</p>${table(['Menu item', 'Category', '#Ingredients', '#Cost per portion', '#Price', '#Cost %', ''], rec.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.category)}</td><td class="num">${r.ingredients}</td><td class="num">${num(r.cost)}</td><td class="num">${num(r.price)}</td>
+        <td class="num ${r.price && r.cost / (r.price * 100 / (100 + Number(SETTINGS.vat_rate))) > 0.4 ? 'err' : ''}">${r.price && r.ingredients && r.cost ? Math.round((r.cost / (r.price * 100 / (100 + Number(SETTINGS.vat_rate)))) * 100) + '%' : r.ingredients ? '<span class="small muted">not costed yet</span>' : ''}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="recipe" data-id="${r.id}" data-name="${esc(r.name)}">Edit recipe</button></td></tr>`))}
+        <p class="small muted">Cost % compares ingredient cost with the price before VAT. Above 40% is highlighted.</p>`;
+    }
+    return `<div class="page-head"><div><h1 class="page">Items &amp; recipes</h1><p class="sub">Stock items, suppliers, stores and recipes.</p></div></div>
+      ${tabs('si', [['items', 'Stock items'], ['suppliers', 'Suppliers'], ['stores', 'Stores & outlets'], ['recipes', 'Recipes']], 'items')}<div class="card">${body}</div>`;
+  };
+
+  VIEWS.invreports = async () => {
+    const qs = ui.q.invFrom ? `?from=${ui.q.invFrom}&to=${ui.q.invTo}` : '';
+    const d = await GET(`/inventory/reports/summary${qs}`);
+    const fc = d.food_cost;
+    return `<div class="page-head"><div><h1 class="page">Inventory reports</h1><p class="sub">${fdate(d.from)} to ${fdate(d.to)}</p></div>
+      <form class="row no-print" data-form="invrep"><input class="search" type="date" name="from" value="${d.from}" aria-label="From"><input class="search" type="date" name="to" value="${d.to}" aria-label="To"><button class="btn btn-ghost">Show</button><button type="button" class="btn btn-ghost" data-action="print">Print</button></form></div>
+      <div class="grid g4">${[['Stock value', num(d.stores.reduce((a, x) => a + x.value, 0)), 'UGX, all stores'], ['F&B sales (net of VAT)', num(fc.revenue_net), 'UGX'], ['Cost of sales', num(fc.cost_of_sales), 'UGX, from recipes'], ['Food & beverage cost', Math.round(fc.food_cost_pct * 100) + '%', 'cost ÷ net sales']].map(([l, v, s]) => `<div class="card kpi"><span>${l}</span><b>${v}</b><small>${s}</small></div>`).join('')}</div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Stock value by store</h2>${table(['Store', '#UGX'], d.stores.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${num(x.value)}</td></tr>`))}</div>
+        <div class="card"><h2 class="sec">Issued to departments</h2>${table(['Department', '#Requisitions', '#Value', '#Expensed'], d.consumption.map((x) => `<tr><td>${esc(x.department)}</td><td class="num">${x.requisitions}</td><td class="num">${num(x.value)}</td><td class="num">${num(x.expensed)}</td></tr>`), 'Nothing issued in this period.')}
+        <p class="small muted">“Expensed” is stock used up by the department. The rest was moved into a department store (e.g. the kitchen).</p></div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">To re-order</h2>${table(['Item', '#On hand', '#Re-order at'], d.low_stock.map((i) => `<tr><td>${esc(i.name)}</td><td class="num">${qn(i.qty)} ${esc(i.unit)}</td><td class="num">${qn(i.reorder_level)}</td></tr>`), 'Nothing to re-order.')}</div>
+        <div class="card"><h2 class="sec">Below zero (enter missing deliveries)</h2>${table(['Item', 'Store', '#Qty'], d.negative.map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.store_name)}</td><td class="num err">${qn(i.qty)} ${esc(i.unit)}</td></tr>`), 'None.')}</div></div>`;
+  };
+
   /* ---------- forms & actions ---------- */
   async function newReservation() {
     const types = (await GET('/room-types')).filter((t) => t.active);
@@ -405,6 +515,94 @@
   }
 
   const A = {
+
+    'new-req': async () => {
+      const S = await invSetup(true);
+      const main = S.stores.find((x) => x.kind === 'main') || S.stores[0];
+      modal('New requisition', `<form class="form" data-form="new-req"><div class="three"><label>Department<select name="department">${opts(S.departments.map((x) => [x, x]))}</select></label>
+        <label>From store<select name="from_store_id">${opts(S.stores.filter((x) => x.active).map((x) => [x.id, x.name]), main?.id)}</select></label>
+        <label>Send to<select name="to_store_id">${opts([['', 'Used by the department'], ...S.stores.filter((x) => x.active).map((x) => [x.id, x.name + ' store'])])}</select></label></div>
+        ${lineRows(6, S.items)}<label>Notes<input name="notes" maxlength="500"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Submit for approval</button></div></form>`,
+        async (v) => { const lines = readLines(v, 6); const r = await POST('/inventory/requisitions', { department: v.department, from_store_id: Number(v.from_store_id), to_store_id: v.to_store_id ? Number(v.to_store_id) : null, notes: v.notes, lines }); return `Requisition ${esc(r.code)} sent for approval.`; });
+    },
+    'open-req': async (d) => {
+      const r = await GET(`/inventory/requisitions/${d.id}`);
+      const canApprove = r.status === 'pending' && CAN['requisition.approve'] && (r.requested_by !== ME.id || ME.role === 'admin');
+      const canIssue = r.status === 'approved' && CAN['requisition.issue'];
+      const editCol = canApprove ? 'Approve qty' : canIssue ? 'Issue qty' : null;
+      modal(`${r.code} · ${r.department}`, `<form class="form" data-form="req-act" data-id="${r.id}">
+        <dl class="kv"><dt>From</dt><dd>${esc(r.from_store)}</dd><dt>To</dt><dd>${esc(r.to_store || 'Used by the department (expensed)')}</dd><dt>Requested by</dt><dd>${esc(r.requested_by_name || '')}, ${ftime(r.requested_at)}</dd>${r.approved_by_name ? `<dt>${r.status === 'rejected' ? 'Rejected' : 'Approved'} by</dt><dd>${esc(r.approved_by_name)}</dd>` : ''}${r.issued_by_name ? `<dt>Issued by</dt><dd>${esc(r.issued_by_name)}, cost ${ugx(r.total_cost)}</dd>` : ''}<dt>Status</dt><dd>${pill(...RQ_STATUS[r.status])}</dd></dl>
+        ${r.notes ? `<p class="note">${esc(r.notes)}</p>` : ''}${r.reject_reason ? `<p class="note err">Rejected: ${esc(r.reject_reason)}</p>` : ''}
+        ${table(['Item', '#Requested', '#Approved', '#Issued', '#In store', ...(editCol ? [editCol] : [])], r.lines.map((l) => `<tr><td>${esc(l.name)}</td><td class="num">${qn(l.qty_requested)} ${esc(l.unit)}</td><td class="num">${l.qty_approved != null ? qn(l.qty_approved) : ''}</td><td class="num">${l.qty_issued != null ? qn(l.qty_issued) : ''}</td><td class="num ${l.in_store < (l.qty_approved ?? l.qty_requested) ? 'err' : ''}">${qn(l.in_store)}</td>
+          ${editCol ? `<td><input class="search" type="number" min="0" step="0.001" name="l_${l.id}" value="${canApprove ? l.qty_requested : l.qty_approved}" aria-label="${editCol} ${esc(l.name)}"></td>` : ''}</tr>`))}
+        ${canApprove ? `<label>Reason (only if rejecting)<input name="reason" maxlength="300"></label>` : ''}
+        <div class="actions">${canApprove ? '<button type="submit" class="btn btn-bad" name="do" value="reject">Reject</button><button type="submit" class="btn btn-gold" name="do" value="approve">Approve</button>' : ''}
+          ${canIssue ? '<button type="submit" class="btn btn-gold" name="do" value="issue">Issue from store</button>' : ''}
+          ${r.status === 'pending' && (r.requested_by === ME.id || CAN['requisition.approve']) ? '<button type="submit" class="btn btn-ghost" name="do" value="cancel">Cancel requisition</button>' : ''}
+          ${!canApprove && !canIssue ? cancelBtn : ''}</div></form>`, null);
+    },
+    'new-po': async () => {
+      const S = await invSetup(true);
+      modal('New purchase order', `<form class="form" data-form="new-po"><div class="three"><label>Supplier<select name="supplier_id">${opts(S.suppliers.filter((x) => x.active).map((x) => [x.id, x.name]))}</select></label>
+        <label>Deliver to<select name="store_id">${opts(S.stores.filter((x) => x.active).map((x) => [x.id, x.name]), (S.stores.find((x) => x.kind === 'main') || {}).id)}</select></label><label>Expected<input type="date" name="expected_date"></label></div>
+        ${lineRows(6, S.items, { cost: true })}<label>Notes<input name="notes" maxlength="500"></label><p class="note">A manager approves the order before it can be received.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Save order</button></div></form>`,
+        async (v) => { const po = await POST('/inventory/purchase-orders', { supplier_id: Number(v.supplier_id), store_id: Number(v.store_id), expected_date: v.expected_date || null, notes: v.notes, lines: readLines(v, 6, true) }); return `Order ${esc(po.code)} saved and waiting for approval.`; });
+    },
+    'open-po': async (d) => {
+      const p = await GET(`/inventory/purchase-orders/${d.id}`);
+      const canApprove = p.status === 'draft' && CAN['purchase.approve'] && (p.created_by !== ME.id || ME.role === 'admin');
+      const canReceive = ['approved', 'partly_received'].includes(p.status) && CAN['inventory.receive'];
+      modal(`${p.code} · ${p.supplier_name}`, `<form class="form" data-form="po-act" data-id="${p.id}">
+        <dl class="kv"><dt>Deliver to</dt><dd>${esc(p.store_name)}</dd><dt>Raised by</dt><dd>${esc(p.created_by_name || '')}, ${ftime(p.created_at)}</dd>${p.approved_by_name ? `<dt>Approved by</dt><dd>${esc(p.approved_by_name)}</dd>` : ''}<dt>Status</dt><dd>${pill(...PO_STATUS[p.status])}</dd><dt>Value</dt><dd>${ugx(p.total)}</dd></dl>
+        ${table(['Item', '#Ordered', '#Received', '#Unit cost', ...(canReceive ? ['Receiving now', 'Actual unit cost'] : [])], p.lines.map((l) => `<tr><td>${esc(l.name)}</td><td class="num">${qn(l.qty)} ${esc(l.unit)}</td><td class="num">${qn(l.received_qty)}</td><td class="num">${num(l.unit_cost)}</td>
+          ${canReceive ? `<td><input class="search" type="number" min="0" step="0.001" name="q_${l.item_id}" value="${Math.max(0, Math.round((l.qty - l.received_qty) * 1000) / 1000)}"></td><td><input class="search" type="number" min="0" step="1" name="c_${l.item_id}" value="${l.unit_cost}"></td>` : ''}</tr>`))}
+        ${canReceive ? '<label>Supplier invoice / delivery note number<input name="invoice_ref" maxlength="60"></label>' : ''}
+        <div class="actions">${canApprove ? '<button class="btn btn-gold" name="do" value="approve">Approve order</button>' : ''}${canReceive ? '<button class="btn btn-gold" name="do" value="receive">Receive delivery</button>' : ''}
+          ${['draft', 'approved'].includes(p.status) ? '<button class="btn btn-ghost" name="do" value="cancel">Cancel order</button>' : ''}${!canApprove && !canReceive ? cancelBtn : ''}</div></form>`, null);
+    },
+    receive: async (d) => {
+      const S = await invSetup(true); const opening = d.mode === 'opening';
+      modal(opening ? 'Opening stock' : 'Delivery without an order', `<form class="form" data-form="receive" data-opening="${opening ? 1 : ''}"><div class="two">
+        <label>Into store<select name="store_id">${opts(S.stores.filter((x) => x.active).map((x) => [x.id, x.name]), (S.stores.find((x) => x.kind === 'main') || {}).id)}</select></label>
+        ${opening ? '<span></span>' : `<label>Supplier<select name="supplier_id">${opts(S.suppliers.filter((x) => x.active).map((x) => [x.id, x.name]))}</select></label>`}</div>
+        ${lineRows(8, S.items, { cost: true })}${opening ? '<p class="note">Use this once at go-live to record what is already on the shelves. It is credited to owner\'s equity, not to a supplier.</p>' : '<label>Supplier invoice / delivery note number<input name="invoice_ref" maxlength="60"></label>'}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Receive</button></div></form>`,
+        async (v) => { const g = await POST('/inventory/receipts', { is_opening: opening, store_id: Number(v.store_id), supplier_id: v.supplier_id ? Number(v.supplier_id) : null, invoice_ref: v.invoice_ref, lines: readLines(v, 8, true) }); INVS = null; return `${esc(g.code)} recorded: ${ugx(g.total)}.`; });
+    },
+    'write-off': async () => {
+      const S = await invSetup(true);
+      modal('Write off stock', `<form class="form" data-form="wo"><div class="two"><label>Store<select name="store_id">${opts(S.stores.filter((x) => x.active).map((x) => [x.id, x.name]))}</select></label><label>Item<select name="item_id">${itemOpts(S.items)}</select></label></div>
+        <div class="two"><label>Quantity<input name="qty" type="number" min="0" step="0.001" required></label><label>Reason<input name="reason" required maxlength="300" placeholder="Broken, expired, spoiled…"></label></div><div class="actions">${cancelBtn}<button class="btn btn-bad">Write off</button></div></form>`,
+        async (v) => { const r = await POST('/inventory/write-offs', { store_id: Number(v.store_id), item_id: Number(v.item_id), qty: Number(v.qty), reason: v.reason }); return `Written off: ${ugx(r.value)}.`; });
+    },
+    movements: async (d) => {
+      const [mv, bal] = await Promise.all([GET(`/inventory/items/${d.id}/movements`), GET(`/inventory/items/${d.id}/balances`)]);
+      modal(`${d.name}: history`, `<p>${bal.map((b) => `${esc(b.name)}: <b>${qn(b.qty)}</b>`).join(' · ') || 'No stock anywhere.'}</p>${table(['Date', 'What', 'Store', '#Qty', '#Unit cost', 'By'], mv.map((m) => `<tr><td class="nowrap">${fdate(m.business_date)}</td><td>${MV[m.kind]}${m.note ? `<br><span class="small muted">${esc(m.note)}</span>` : ''}</td><td>${esc(m.store_name)}</td><td class="num ${m.qty < 0 ? 'err' : ''}">${m.qty > 0 ? '+' : ''}${qn(m.qty)}</td><td class="num">${num(m.unit_cost)}</td><td>${esc(m.user_name || '')}</td></tr>`), 'No movements yet.')}`);
+    },
+    'cancel-count': async (d) => { if (!confirm('Cancel this count? Nothing will be adjusted.')) return; await POST(`/inventory/counts/${d.id}/cancel`); location.hash = '#counts'; },
+    'stock-item': async (d) => {
+      const S = await invSetup(true); const i = d.id ? S.items.find((x) => String(x.id) === d.id) : null;
+      modal(i ? `Edit ${i.name}` : 'New stock item', `<form class="form" data-form="si"><div class="two"><label>Code<input name="code" value="${esc(i?.code || '')}" ${i ? 'disabled' : 'required'} maxlength="20"></label><label>Name<input name="name" value="${esc(i?.name || '')}" required maxlength="120"></label></div>
+        <div class="three"><label>Unit<input name="unit" value="${esc(i?.unit || '')}" required maxlength="20" placeholder="kg, litre, bottle…"></label><label>Category<input name="category" value="${esc(i?.category || '')}" maxlength="60"></label><label>Re-order level<input name="reorder_level" type="number" min="0" step="0.001" value="${i?.reorder_level ?? 0}"></label></div>
+        ${i ? `<label class="row"><input type="checkbox" name="active" value="1" ${i.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const b = { code: v.code, name: v.name, unit: v.unit, category: v.category, reorder_level: Number(v.reorder_level), active: i ? !!v.active : true }; if (i) await PUT(`/inventory/items/${i.id}`, b); else await POST('/inventory/items', b); INVS = null; return 'Item saved.'; });
+    },
+    supplier: async (d) => {
+      const S = await invSetup(true); const x = d.id ? S.suppliers.find((y) => String(y.id) === d.id) : null;
+      modal(x ? `Edit ${x.name}` : 'New supplier', `<form class="form" data-form="sup"><label>Name<input name="name" value="${esc(x?.name || '')}" required></label><div class="two"><label>Contact person<input name="contact" value="${esc(x?.contact || '')}"></label><label>Phone<input name="phone" value="${esc(x?.phone || '')}"></label></div>
+        <div class="two"><label>Email<input name="email" type="email" value="${esc(x?.email || '')}"></label><label>TIN<input name="tin" value="${esc(x?.tin || '')}"></label></div>${x ? `<label class="row"><input type="checkbox" name="active" value="1" ${x.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const b = { ...v, active: x ? !!v.active : true }; if (x) await PUT(`/inventory/suppliers/${x.id}`, b); else await POST('/inventory/suppliers', b); INVS = null; return 'Supplier saved.'; });
+    },
+    'store-edit': async (d) => {
+      const S = await invSetup(true); const x = d.id ? S.stores.find((y) => String(y.id) === d.id) : null;
+      modal(x ? `Edit ${x.name}` : 'New store', `<form class="form" data-form="store"><label>Name<input name="name" value="${esc(x?.name || '')}" required></label>${x ? `<label class="row"><input type="checkbox" name="active" value="1" ${x.active ? 'checked' : ''}> Active</label>` : `<label>Type<select name="kind">${opts([['other', 'Other'], ['main', 'Main store'], ['kitchen', 'Kitchen'], ['bar', 'Bar'], ['housekeeping', 'Housekeeping'], ['maintenance', 'Maintenance']])}</select></label>`}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { if (x) await PUT(`/inventory/stores/${x.id}`, { name: v.name, active: !!v.active }); else await POST('/inventory/stores', v); INVS = null; return 'Store saved.'; });
+    },
+    recipe: async (d) => {
+      const [S, lines] = await Promise.all([invSetup(true), GET(`/inventory/recipes/${d.id}`)]);
+      modal(`Recipe: ${d.name}`, `<form class="form" data-form="recipe"><p class="note">Quantity of each ingredient used for one portion, in the item's stock unit (e.g. 0.25 kg).</p>${lineRows(6, S.items, { pre: lines })}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save recipe</button></div></form>`,
+        async (v) => { await PUT(`/inventory/recipes/${d.id}`, { lines: readLines(v, 6) }); return 'Recipe saved.'; });
+    },
 
     'pos-outlet': (d) => { ui.posOutlet = Number(d.id); render(); },
     'pos-cat': (d) => { ui.posCat = Number(d.id); render(); },
@@ -538,6 +736,38 @@
   };
 
   const FORMS = {
+
+    invrep: (v) => { ui.q.invFrom = v.from; ui.q.invTo = v.to; render(); },
+    'start-count': async (v) => { const c = await POST('/inventory/counts', { store_id: Number(v.store_id) }); location.hash = `#count/${c.id}`; },
+    'count-sheet': async (v, form, submitter) => {
+      const id = form.dataset.id;
+      const lines = Object.entries(v).filter(([k]) => k.startsWith('c_')).map(([k, val]) => ({ item_id: Number(k.slice(2)), counted_qty: val === '' ? null : Number(val) }));
+      await PUT(`/inventory/counts/${id}/lines`, { lines });
+      if (submitter?.value === 'post') {
+        if (!confirm('Post this count? Stock will be adjusted to the counted quantities and the differences posted to the accounts.')) { toast('Progress saved.'); return; }
+        const r = await POST(`/inventory/counts/${id}/post`); toast(`Count posted. Losses ${ugx(r.loss)}, gains ${ugx(r.gain)}.`);
+      } else toast('Progress saved.');
+      render();
+    },
+    'req-act': async (v, form, submitter) => {
+      const id = form.dataset.id, act = submitter?.value;
+      const lines = Object.entries(v).filter(([k]) => k.startsWith('l_')).map(([k, val]) => ({ id: Number(k.slice(2)), qty: Number(val) }));
+      if (act === 'approve') await POST(`/inventory/requisitions/${id}/approve`, { lines: lines.map((l) => ({ id: l.id, qty_approved: l.qty })) });
+      else if (act === 'reject') await POST(`/inventory/requisitions/${id}/reject`, { reason: v.reason });
+      else if (act === 'issue') { const r = await POST(`/inventory/requisitions/${id}/issue`, { lines: lines.map((l) => ({ id: l.id, qty_issued: l.qty })) }); toast(`Issued. Cost ${ugx(r.total)}.`); }
+      else if (act === 'cancel') await POST(`/inventory/requisitions/${id}/cancel`);
+      closeModal(); if (act !== 'issue') toast({ approve: 'Approved.', reject: 'Rejected.', cancel: 'Cancelled.' }[act] || 'Done.'); render();
+    },
+    'po-act': async (v, form, submitter) => {
+      const id = form.dataset.id, act = submitter?.value;
+      if (act === 'approve') await POST(`/inventory/purchase-orders/${id}/approve`);
+      else if (act === 'cancel') { if (!confirm('Cancel this order?')) return; await POST(`/inventory/purchase-orders/${id}/cancel`); }
+      else if (act === 'receive') {
+        const lines = Object.entries(v).filter(([k]) => k.startsWith('q_')).map(([k, q]) => ({ item_id: Number(k.slice(2)), qty: Number(q), unit_cost: Number(v['c_' + k.slice(2)]) })).filter((l) => l.qty > 0);
+        const g = await POST('/inventory/receipts', { po_id: Number(id), invoice_ref: v.invoice_ref, lines }); toast(`${esc(g.code)} received: ${ugx(g.total)}.`);
+      }
+      closeModal(); if (act !== 'receive') toast(act === 'approve' ? 'Order approved.' : 'Order cancelled.'); render();
+    },
     login: async (v) => { try { const r = await POST('/auth/login', v); ME = r.user; await boot(); } catch (e) { renderLogin(e.message); } },
     'res-search': (v) => { ui.q.res = v.q; render(); },
     avail: (v) => { ui.q.availFrom = v.from; render(); },
@@ -560,9 +790,13 @@
     const v = Object.fromEntries(new FormData(form));
     const btn = form.querySelector('button:not([type=button])'); if (btn) btn.disabled = true;
     try {
-      if (FORMS[form.dataset.form]) await FORMS[form.dataset.form](v);
+      if (FORMS[form.dataset.form]) await FORMS[form.dataset.form](v, form, e.submitter);
       else if (modalSubmit) { const msg = await modalSubmit(v); closeModal(); if (msg) toast(msg); await refresh(); }
     } catch (err) { if (err.message !== 'Signed out') formErr(form, err.message); } finally { if (btn && document.contains(btn)) btn.disabled = false; }
+  });
+  document.addEventListener('change', async (e) => {
+    if (e.target.dataset.action !== 'outlet-store') return;
+    try { await PUT(`/inventory/outlets/${e.target.dataset.id}/store`, { store_id: e.target.value ? Number(e.target.value) : null }); toast('Outlet updated.'); INVS = null; } catch (err) { toast(esc(err.message), true); }
   });
   document.addEventListener('input', (e) => { if (e.target.dataset.calc === 'tender' || e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
   document.addEventListener('change', (e) => { if (e.target.closest('form[data-form=pay-check]')) updatePayCalc(); });
