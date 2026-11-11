@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 64" role="img" aria-label="Azeli PROPERTY MANAGEMENT SOFTWARE">
+  <rect width="64" height="64" rx="15" fill="#0f2a2e"/>
+  <path d="M14 49 L32 15 L50 49" fill="none" stroke="#faf6ef" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M23.5 49 A8.5 8.5 0 0 1 40.5 49 Z" fill="#c9a45c"/>
+  <text x="80" y="38" font-family="'Cormorant Garamond', Georgia, serif" font-size="40" font-weight="700" fill="#0f2a2e">Azeli</text>
+  <text x="81" y="56" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="600" letter-spacing="1.4" fill="#a8853f">PROPERTY MANAGEMENT SOFTWARE</text>
+</svg>

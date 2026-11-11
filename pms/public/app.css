@@ -1,4 +1,4 @@
-/* Hearth & Key PMS */
+/* Azeli PMS */
 :root {
   --ink: #0f2a2e; --ink-2: #163b40; --gold: #c9a45c; --gold-d: #a8853f;
   --bg: #f6f3ee; --card: #fff; --line: #e6dfd3; --text: #1d2a2c; --muted: #637173;
@@ -21,7 +21,7 @@ a { color: var(--info); }
 .side { background: var(--ink); color: rgba(255,255,255,.8); padding: 16px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; font-family: var(--serif); font-size: 1.25rem; font-weight: 700; color: #fff; }
 .brand em { color: var(--gold); font-style: normal; }
-.mark { width: 32px; height: 32px; border-radius: 8px; background: var(--gold); color: var(--ink); display: grid; place-items: center; }
+.mark { width: 32px; height: 32px; border-radius: 8px; display: block; flex: none; }
 #side-nav .grp { font-size: .66rem; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.42); margin: 14px 10px 4px; }
 #side-nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: rgba(255,255,255,.82); text-decoration: none; font-size: .88rem; }
 #side-nav a:hover { background: rgba(255,255,255,.07); }
@@ -245,3 +245,6 @@ fieldset { border: 0; padding: 0; margin: 0; }
 .beo-depts h3 { margin: 0 0 4px; font-size: .95rem; }
 .beo-depts p { margin: 0; white-space: pre-line; }
 @media (max-width: 520px) { .beo-facts, .beo-depts { grid-template-columns: 1fr 1fr; } .beo-depts { grid-template-columns: 1fr; } }
+.login-brand .mark { width: 48px; height: 48px; border-radius: 11px; }
+.login-brand span { font-size: 2rem; line-height: 1; }
+.login-brand small { display: block; margin-top: 5px; font-family: var(--sans, Inter, sans-serif); font-size: .62rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--gold-dark, #a8853f); }

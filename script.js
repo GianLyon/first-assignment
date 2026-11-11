@@ -1,11 +1,11 @@
-// Hearth & Key — site interactions (shared by every page)
+// Azeli Technologies — site interactions (shared by every page)
 
 // --- Contact form destination ------------------------------------------
 // Set FORM_ENDPOINT to a form service URL (e.g. https://formspree.io/f/xxxxxx)
 // to receive submissions by email. While empty, the form opens the visitor's
 // email app with the details pre-filled, sent to CONTACT_EMAIL.
 const FORM_ENDPOINT = "";
-const CONTACT_EMAIL = "hello@hearthandkey.com";
+const CONTACT_EMAIL = "hello@azelitechnologies.com";
 
 // Footer year
 const year = document.getElementById("year");

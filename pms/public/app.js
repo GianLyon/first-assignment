@@ -1,4 +1,4 @@
-// Hearth & Key PMS: staff web app (talks to the JSON API under /api).
+// Azeli PMS: staff web app (talks to the JSON API under /api).
 (() => {
   'use strict';
   const $ = (s, el = document) => el.querySelector(s);
@@ -48,7 +48,7 @@
   function renderLogin(msg = '') {
     closeModal();
     $('#root').innerHTML = `<div class="login-wrap"><form class="login form" data-form="login">
-      <div class="brand"><span class="mark">H</span><span>Hearth &amp; Key <em>PMS</em></span></div>
+      <div class="brand login-brand"><img class="mark" src="/brand/azeli-mark.svg" alt="" width="48" height="48"><span>Azeli<small>Property Management Software</small></span></div>
       <h1>Sign in</h1><p class="muted mt0">Use the account your administrator gave you.</p>
       ${msg ? `<p class="note err">${esc(msg)}</p>` : ''}
       <label>Username<input name="username" autocomplete="username" required autofocus></label>
@@ -71,7 +71,7 @@
   const route = () => { const [r, id] = (location.hash.replace('#', '') || 'dashboard').split('/'); return { r, id }; };
   function shell() {
     $('#root').innerHTML = `<div class="app">
-      <aside class="side" aria-label="Modules"><div class="brand"><span class="mark">H</span><span>Hearth &amp; Key <em>PMS</em></span></div><nav id="side-nav"></nav></aside>
+      <aside class="side" aria-label="Modules"><div class="brand"><img class="mark" src="/brand/azeli-mark-light.svg" alt="" width="32" height="32"><span>Azeli <em>PMS</em></span></div><nav id="side-nav"></nav></aside>
       <div class="main"><header class="topbar">
         <button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show menu">☰</button>
         <div class="prop"><b id="prop-name"></b><span id="biz-date"></span></div>
@@ -506,7 +506,7 @@
         <td>${!c.active ? pill('Paused') : c.last_error ? `<span class="pill bad" title="${esc(c.last_error)}">Error</span>` : pill('OK', 'ok')}</td>
         <td class="right nowrap"><button class="btn btn-sm btn-ghost" data-action="channel-map" data-id="${c.id}" data-name="${esc(c.name)}">Mapping</button> <button class="btn btn-sm btn-ghost" data-action="channel-log" data-id="${c.id}" data-name="${esc(c.name)}">Log</button> <button class="btn btn-sm btn-ghost" data-action="channel-more" data-id="${c.id}">More</button></td></tr>`), 'No channels yet.')}</div>
       <div class="card mt"><h2 class="sec">How channels connect</h2><p>Booking.com, Expedia and Airbnb only connect through certified partners. Add your provider as a <b>Webhook</b> channel: the PMS sends signed availability and price updates to the provider's address, and the provider sends bookings back to:</p>
-        <p><code class="mono">${esc(location.origin)}/api/channels/&lt;channel code&gt;/inbound</code></p><p class="small muted">Every message in both directions is signed with the channel's secret (HMAC-SHA256 in the X-HK-Signature header). Use the <b>simulator</b> channel to try everything before going live.</p></div>`;
+        <p><code class="mono">${esc(location.origin)}/api/channels/&lt;channel code&gt;/inbound</code></p><p class="small muted">Every message in both directions is signed with the channel's secret (HMAC-SHA256 in the X-Azeli-Signature header). Use the <b>simulator</b> channel to try everything before going live.</p></div>`;
   };
 
   VIEWS.bookingengine = async () => {

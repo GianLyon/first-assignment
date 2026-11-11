@@ -49,7 +49,7 @@ export function publicRouter(pool) {
 /* ---------- signed messages from channels (no sign-in; HMAC instead) ---------- */
 export function inboundRouter(pool) {
   const r = express.Router();
-  r.post('/:code/inbound', limiter(120, 60e3), async (req, res) => res.json(await dist.receiveInbound(pool, req.params.code, req.rawBody, req.headers['x-hk-signature'])));
+  r.post('/:code/inbound', limiter(120, 60e3), async (req, res) => res.json(await dist.receiveInbound(pool, req.params.code, req.rawBody, req.headers['x-azeli-signature'])));
   return r;
 }
 

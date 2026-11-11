@@ -1,4 +1,4 @@
-// Sample data for the Hearth & Key PMS demo (fictional property).
+// Sample data for the Azeli PMS demo (fictional property).
 // All amounts in Ugandan shillings (UGX), VAT-inclusive.
 window.SEED = {
   property: "Lakeview Hotel & Suites",

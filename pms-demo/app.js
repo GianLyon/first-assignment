@@ -1,4 +1,4 @@
-// Hearth & Key PMS: interactive demo (runs entirely in the browser).
+// Azeli PMS: interactive demo (runs entirely in the browser).
 (() => {
   "use strict";
   const KEY = "hk-pms-demo-v1";

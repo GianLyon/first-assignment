@@ -1,6 +1,6 @@
-# Hearth & Key PMS
+# Azeli PMS (Azeli Property Management Software)
 
-The hotel property management system offered to Hearth & Key marketing partners.
+The hotel property management system offered to Azeli Technologies marketing partners.
 Built so far: Phase 1 (foundation and front office), Phase 2 (restaurant / POS), Phase 3 (inventory, purchasing and requisitions), Phase 4 (booking engine and channel manager), Phase 5 (accounting & finance), Phase 6 (HR & payroll) and Phase 7 (events & banqueting, assets & maintenance, amenity sales). It is a real system with a database, staff accounts and accounting. It is not a demo.
 The clickable sales demo lives separately in `../pms-demo/`.
 
@@ -75,7 +75,7 @@ OTAs only connect through certified channel-manager partners. Add the partner as
 2. Map each room type and rate plan to the partner's room and rate codes, then run **Full re-sync**.
 3. The partner posts bookings to `https://<your-pms>/api/channels/<code>/inbound`.
 
-Messages in both directions are JSON signed with `X-HK-Signature: sha256=<HMAC-SHA256 of the raw body, keyed with the channel secret>`.
+Messages in both directions are JSON signed with `X-Azeli-Signature: sha256=<HMAC-SHA256 of the raw body, keyed with the channel secret>`.
 Outgoing: `{ event: "ari.update" | "ari.full_sync", currency, items: [{ room_code, rate_code, date, available, rate, min_stay, closed }] }`.
 Incoming: `{ event: "booking.created" | "booking.modified" | "booking.cancelled", booking: { id, room_code, rate_code, arrival, departure, adults, guest: { first_name, last_name, email, phone }, nightly: [{ date, rate }] } }`.
 If the partner uses a different format, a small bridge service can translate. The built-in **simulator** channel lets you try all of this first.

@@ -45,7 +45,7 @@ export const ALL_PERMISSIONS = [...new Set(Object.values(PERMISSIONS).flat().fil
 export const can = (user, perm) => !!user && (PERMISSIONS[user.role] || []).some((p) => p === '*' || p === perm);
 
 /* ---------- sessions ---------- */
-const COOKIE = 'hk_session';
+const COOKIE = 'azeli_session';
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 export async function createSession(pool, userId) {

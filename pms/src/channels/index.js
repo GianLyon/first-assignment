@@ -6,7 +6,7 @@
 //             connects to a certified channel-manager provider (or a small bridge service), which
 //             then talks to Booking.com, Expedia, Airbnb and others.
 //
-// Signature: header X-HK-Signature: sha256=<hex HMAC-SHA256 of the raw body, keyed with the channel secret>.
+// Signature: header X-Azeli-Signature: sha256=<hex HMAC-SHA256 of the raw body, keyed with the channel secret>.
 // The same scheme is used for bookings the channel sends back to /api/channels/<code>/inbound.
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -33,7 +33,7 @@ export const adapters = {
       const body = JSON.stringify(message);
       const res = await fetch(validateEndpoint(channel.endpoint_url), {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hk-event': message.event, 'x-hk-signature': sign(channel.secret, body) },
+        headers: { 'content-type': 'application/json', 'x-hk-event': message.event, 'x-azeli-signature': sign(channel.secret, body) },
         body, signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error(`Channel responded ${res.status} ${res.statusText}`.trim());

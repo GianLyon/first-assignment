@@ -109,7 +109,7 @@ test('channel manager pushes signed availability and rates; failures are recorde
   ok(await admin.put(`/api/distribution/channels/${hookChannel.id}/mappings`, { mappings: [{ room_type_id: dlx, rate_plan_id: 1, external_room_code: 'DBL-DLX', external_rate_code: 'FLEX' }, { room_type_id: ste, rate_plan_id: 1, external_room_code: 'STE', external_rate_code: 'FLEX' }] }));
   ok(await admin.post(`/api/distribution/channels/${hookChannel.id}/full-sync`, { days: 60 }));
   const h = hooks.at(-1);
-  assert.equal(h.headers['x-hk-signature'], sig(hookChannel.secret, h.body));
+  assert.equal(h.headers['x-azeli-signature'], sig(hookChannel.secret, h.body));
   const msg = JSON.parse(h.body);
   assert.equal(msg.event, 'ari.full_sync'); assert.equal(msg.currency, 'UGX');
   const d1213 = msg.items.find((i) => i.room_code === 'DBL-DLX' && i.date === '2026-12-13');
@@ -138,7 +138,7 @@ test('channel manager pushes signed availability and rates; failures are recorde
 test('signed OTA bookings: create, duplicate, modify, cancel, overbooking, bad signatures', async () => {
   const send = async (payload, secret = hookChannel.secret) => {
     const body = JSON.stringify(payload);
-    return guest.post('/api/channels/provider/inbound', body, { raw: true, headers: { 'content-type': 'application/json', 'x-hk-signature': sig(secret, body) } });
+    return guest.post('/api/channels/provider/inbound', body, { raw: true, headers: { 'content-type': 'application/json', 'x-azeli-signature': sig(secret, body) } });
   };
   const booking = { id: 'BDC-778899', room_code: 'DBL-DLX', rate_code: 'FLEX', arrival: '2026-12-20', departure: '2026-12-23', adults: 2,
     guest: { first_name: 'Hans', last_name: 'Weber', email: 'hans@example.de' }, nightly: [{ date: '2026-12-20', rate: 380000 }, { date: '2026-12-21', rate: 380000 }, { date: '2026-12-22', rate: 390000 }] };
