@@ -221,3 +221,11 @@ a.room { text-decoration: none; color: inherit; }
 .count-input { width: 120px; min-width: 0; }
 .modal:has(form[data-form=req-act]), .modal:has(form[data-form=po-act]), .modal:has(form[data-form=new-po]), .modal:has(form[data-form=receive]), .modal:has(form[data-form=new-req]) { width: min(820px, 100%); }
 @media (max-width: 520px) { .form .three { grid-template-columns: 1fr 1fr; } .form .three label:first-child { grid-column: span 2; } }
+/* ---------- distribution ---------- */
+.rates-grid td.rc { text-align: center; font-size: .8rem; min-width: 74px; }
+.rates-grid td.rc b { display: block; font-size: .85rem; }
+.rates-grid td.rc b.custom { color: var(--gold-d); }
+.rates-grid td.rc span { display: block; color: var(--muted); font-size: .72rem; }
+.rates-grid td.rc.full { background: #fbefd9; } .rates-grid td.rc.closed { background: #f8e1de; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; background: #f3efe8; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+fieldset { border: 0; padding: 0; margin: 0; }

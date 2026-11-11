@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Book your stay</title>
+  <meta name="description" content="Book directly with the hotel for the best rate." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="book.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Book direct · best rate</p>
+      <h1 id="hotel-name">Book your stay</h1>
+      <p id="intro" class="intro"></p>
+    </div>
+  </header>
+
+  <main class="wrap" id="main">
+    <form class="search card" id="search" aria-label="Search availability">
+      <label>Check-in<input type="date" name="arrival" required></label>
+      <label>Check-out<input type="date" name="departure" required></label>
+      <label>Guests<select name="adults"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+      <button class="btn btn-gold" type="submit">Check availability</button>
+    </form>
+
+    <section id="results" aria-live="polite"></section>
+
+    <section id="details" class="card" hidden>
+      <h2>Your details</h2>
+      <div id="summary" class="summary"></div>
+      <form id="guest-form" class="form">
+        <div class="two"><label>First name<input name="first_name" required maxlength="80" autocomplete="given-name"></label><label>Last name<input name="last_name" required maxlength="80" autocomplete="family-name"></label></div>
+        <div class="two"><label>Email<input name="email" type="email" required maxlength="120" autocomplete="email"></label><label>Phone<input name="phone" required maxlength="40" autocomplete="tel" placeholder="+256 …"></label></div>
+        <label>Special requests (optional)<textarea name="notes" rows="2" maxlength="500"></textarea></label>
+        <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <p class="policy" id="policy"></p>
+        <p class="note">You pay at the hotel. No card is needed to book.</p>
+        <p class="err" id="book-err" role="alert"></p>
+        <div class="row"><button type="button" class="btn btn-ghost" id="back">Back</button><button class="btn btn-gold" type="submit">Confirm booking</button></div>
+      </form>
+    </section>
+
+    <section id="confirm" class="card" hidden></section>
+
+    <section class="card manage">
+      <h2>Manage a booking</h2>
+      <form id="lookup" class="form">
+        <div class="two"><label>Booking code<input name="code" required maxlength="20" placeholder="R1234"></label><label>Email used to book<input name="email" type="email" required></label></div>
+        <button class="btn btn-ghost" type="submit">Find my booking</button>
+      </form>
+      <div id="lookup-result" aria-live="polite"></div>
+    </section>
+  </main>
+  <footer class="wrap foot" id="foot"></footer>
+  <script src="book.js"></script>
+</body>
+</html>

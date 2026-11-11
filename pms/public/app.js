@@ -59,6 +59,7 @@
   /* ---------- shell ---------- */
   const NAV = [
     ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['accounts', 'Accounts', 'accounts.view']]],
@@ -116,6 +117,7 @@
         <div class="card kpi"><span>Departures</span><b>${d.departures.length}</b><small>still to check out</small></div>
         <div class="card kpi"><span>Rooms to clean</span><b>${d.rooms.dirty}</b><small>${d.rooms.ooo} out of order</small></div>
       </div>
+      ${d.overbooked.length ? `<div class="card mt"><h2 class="sec err">Overbooked channel bookings</h2>${table(['Guest', 'Room type', 'Dates', 'Channel'], d.overbooked.map((o) => `<tr><td><a href="#res/${o.id}">${esc(guestName(o))}</a></td><td>${esc(o.room_type_name)}</td><td>${fdate(o.arrival)} → ${fdate(o.departure)}</td><td>${esc(o.source)}</td></tr>`))}</div>` : ''}
       <div class="grid g2 mt">
         <div class="card"><h2 class="sec">Arrivals</h2>${table(['Guest', 'Room type', 'Source', ''], d.arrivals.map((a) => `<tr><td><a href="#res/${a.id}">${esc(guestName(a))}</a><br><span class="small muted">${esc(a.code)}</span></td><td>${esc(a.room_type_name)}</td><td>${esc(a.source)}</td><td class="right">${CAN['frontdesk.checkin'] ? `<button class="btn btn-sm btn-gold" data-action="check-in" data-id="${a.id}">Check in</button>` : ''}</td></tr>`), 'No arrivals waiting.')}</div>
         <div class="card"><h2 class="sec">Departures</h2>${table(['Room', 'Guest', '#Balance', ''], d.departures.map((x) => `<tr><td>${esc(x.room_number)}</td><td><a href="#res/${x.id}">${esc(guestName(x))}</a></td><td class="num">${num(x.balance)}</td><td class="right"><a class="btn btn-sm" href="#res/${x.id}">Open bill</a></td></tr>`), 'No departures waiting.')}</div>
@@ -160,7 +162,9 @@
     return `<div class="page-head no-print"><div><p class="sub"><a href="#reservations">← Reservations</a></p><h1 class="page">${esc(guestName(r))}</h1><p class="sub">${esc(r.code)} · ${statusPill(r.status)}</p></div><div class="row">${acts.join('')}</div></div>
       <div class="card"><div class="inv-head"><div><div class="only-print"><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Guest invoice · printed ${fdateLong(bd)}</p></div>
         <dl class="kv"><dt>Guest</dt><dd>${esc(guestName(r))}</dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
-        <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${ugx(r.rate)} / night</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}</dd></dl></div>
+        <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd></dl></div>
+        ${r.overbooked && r.status === 'reserved' ? '<p class="note err">Overbooked: this channel booking arrived when no room of this type was free. Move or upgrade another booking before arrival.</p>' : ''}
+        ${f.nights.length ? `<p class="small muted">Nightly prices: ${f.nights.map((n) => `${fdate(n.night)} ${num(n.rate)}`).join(' · ')}</p>` : ''}
         ${r.notes ? `<p class="note">${esc(r.notes)}</p>` : ''}
         <h2 class="sec mt">Charges</h2>
         ${table(['Date', 'Description', 'Department', '#Amount', ''], f.charges.map((c) => `<tr class="${c.voided ? 'void' : ''}"><td class="nowrap">${fdate(c.business_date)}</td><td>${esc(c.description)}</td><td>${DEPT[c.department]}</td><td class="num">${num(c.amount)}</td><td class="right no-print">${voidBtn('charge', c)}</td></tr>`), 'No charges yet.')}
@@ -472,6 +476,52 @@
         <div class="card"><h2 class="sec">Below zero (enter missing deliveries)</h2>${table(['Item', 'Store', '#Qty'], d.negative.map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.store_name)}</td><td class="num err">${qn(i.qty)} ${esc(i.unit)}</td></tr>`), 'None.')}</div></div>`;
   };
 
+
+  /* ================= DISTRIBUTION ================= */
+  VIEWS.rates = async () => {
+    const from = ui.q.rateFrom || SETTINGS.business_date;
+    const cal = await GET(`/distribution/calendar?from=${from}&days=14`);
+    const days = cal[0]?.nights.map((n) => n.night) || [];
+    const canEdit = CAN['distribution.manage'];
+    return `<div class="page-head"><div><h1 class="page">Rates &amp; availability</h1><p class="sub">Standard price per night (before rate-plan discounts), rooms left, and restrictions. Changes go to the booking engine and every channel.</p></div>
+      <div class="row"><form class="row" data-form="rate-from"><input class="search" type="date" name="from" value="${from}" aria-label="From date"><button class="btn btn-ghost">Show</button></form>${canEdit ? '<button class="btn btn-gold" data-action="rate-edit">Change rates / restrictions</button>' : ''}</div></div>
+      <div class="card rates-grid">${table(['Room type', ...days.map(fdate)], cal.map((t) => `<tr><td><b>${esc(t.name)}</b><br><span class="small muted">standard ${num(t.base_rate)}</span></td>${t.nights.map((n) => `<td class="rc ${n.stop_sell ? 'closed' : ''} ${n.free <= 0 ? 'full' : ''}">
+        <b class="${n.custom ? 'custom' : ''}">${num(n.rate)}</b><span>${n.free} left</span>${n.min_stay ? `<span>min ${n.min_stay}</span>` : ''}${n.stop_sell ? '<span class="pill bad">closed</span>' : ''}</td>`).join('')}</tr>`))}
+      <p class="small muted">Gold price = set for that date. “Closed” = stop-sell (not sold online or on channels; the front desk can still book).</p></div>`;
+  };
+
+  VIEWS.plans = async () => {
+    const plans = await GET('/distribution/rate-plans');
+    return `<div class="page-head"><div><h1 class="page">Rate plans</h1><p class="sub">Ways to sell each room: flexible, non-refundable, long stay… Prices are the standard rate minus the plan discount.</p></div><button class="btn btn-gold" data-action="plan-edit">+ Rate plan</button></div>
+      <div class="card">${table(['Code', 'Plan', '#Discount', 'Breakfast', 'Cancellation', '#Min stay', 'Sold on', 'Active', ''], plans.map((p) => `<tr><td>${esc(p.code)}</td><td><b>${esc(p.name)}</b><br><span class="small muted">${esc(p.description || '')}</span></td><td class="num">${num(p.discount_pct)}%</td><td>${p.breakfast ? 'Included' : '–'}</td><td>${p.refundable ? 'Free cancellation' : pill('Non-refundable', 'warn')}</td><td class="num">${p.min_stay}</td><td>${[p.on_website && 'Website', p.on_channels && 'Channels'].filter(Boolean).join(', ') || '–'}</td><td>${p.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="plan-edit" data-id="${p.id}">Edit</button></td></tr>`))}</div>`;
+  };
+
+  VIEWS.channels = async () => {
+    const d = await GET('/distribution/channels');
+    return `<div class="page-head"><div><h1 class="page">Channels (OTAs)</h1><p class="sub">Availability and prices are pushed automatically when they change. Bookings from channels arrive in Reservations.</p></div>
+      <div class="row"><button class="btn btn-ghost" data-action="sync-now">Push changes now${d.pending_changes ? ` (${d.pending_changes} waiting)` : ''}</button><button class="btn btn-gold" data-action="channel-edit">+ Channel</button></div></div>
+      <div class="card">${table(['Channel', 'Connector', '#Commission', 'Mapped', 'Active bookings', 'Last push', 'Status', ''], d.channels.map((c) => `<tr><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.code)}</span></td><td>${esc((d.adapters.find((a) => a.id === c.adapter) || {}).label || c.adapter)}</td><td class="num">${num(c.commission_pct)}%</td><td>${c.mappings} rate(s)</td><td>${c.active_bookings}</td><td>${c.last_push_at ? ftime(c.last_push_at) : 'never'}</td>
+        <td>${!c.active ? pill('Paused') : c.last_error ? `<span class="pill bad" title="${esc(c.last_error)}">Error</span>` : pill('OK', 'ok')}</td>
+        <td class="right nowrap"><button class="btn btn-sm btn-ghost" data-action="channel-map" data-id="${c.id}" data-name="${esc(c.name)}">Mapping</button> <button class="btn btn-sm btn-ghost" data-action="channel-log" data-id="${c.id}" data-name="${esc(c.name)}">Log</button> <button class="btn btn-sm btn-ghost" data-action="channel-more" data-id="${c.id}">More</button></td></tr>`), 'No channels yet.')}</div>
+      <div class="card mt"><h2 class="sec">How channels connect</h2><p>Booking.com, Expedia and Airbnb only connect through certified partners. Add your provider as a <b>Webhook</b> channel: the PMS sends signed availability and price updates to the provider's address, and the provider sends bookings back to:</p>
+        <p><code class="mono">${esc(location.origin)}/api/channels/&lt;channel code&gt;/inbound</code></p><p class="small muted">Every message in both directions is signed with the channel's secret (HMAC-SHA256 in the X-HK-Signature header). Use the <b>simulator</b> channel to try everything before going live.</p></div>`;
+  };
+
+  VIEWS.bookingengine = async () => {
+    const s = await GET('/settings');
+    const url = `${location.origin}/book/`;
+    return `<div class="page-head"><div><h1 class="page">Booking engine</h1><p class="sub">The page guests use to book directly. Link it from the hotel website's “Book now” button.</p></div><a class="btn btn-gold" href="/book/" target="_blank" rel="noopener">Open booking page</a></div>
+      <div class="card"><p>Booking page address: <code class="mono">${esc(url)}</code></p>
+      <form class="form" data-form="booking-settings">
+        <label class="row"><input type="checkbox" name="booking_enabled" value="1" ${s.booking_enabled ? 'checked' : ''}> Accept online bookings</label>
+        <label>Welcome text<input name="booking_intro" value="${esc(s.booking_intro)}" maxlength="500"></label>
+        <label>Cancellation policy (shown to guests)<textarea name="cancellation_policy" rows="2" maxlength="1000">${esc(s.cancellation_policy)}</textarea></label>
+        <div class="three"><label>Check-in from<input name="check_in_time" value="${String(s.check_in_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Check-out by<input name="check_out_time" value="${String(s.check_out_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Bookable up to (days ahead)<input name="booking_horizon_days" type="number" min="7" max="730" value="${s.booking_horizon_days}"></label></div>
+        <div class="two"><label>Contact phone<input name="contact_phone" value="${esc(s.contact_phone || '')}" maxlength="40"></label><label>Contact email<input name="contact_email" type="email" value="${esc(s.contact_email || '')}" maxlength="120"></label></div>
+        <p class="note">Guests pay at the hotel for now. Online card and mobile money payment needs a payment provider account (for example Flutterwave or Pesapal) and is planned with Phase 5.</p>
+        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`;
+  };
+
   /* ---------- forms & actions ---------- */
   async function newReservation() {
     const types = (await GET('/room-types')).filter((t) => t.active);
@@ -515,6 +565,72 @@
   }
 
   const A = {
+
+    'rate-edit': async () => {
+      const types = (await GET('/room-types')).filter((t) => t.active);
+      const from = ui.q.rateFrom || SETTINGS.business_date;
+      modal('Change rates & restrictions', `<form class="form" data-form="rate-edit"><fieldset class="row"><legend class="small">Room types</legend>${types.map((t) => `<label class="row"><input type="checkbox" name="rt_${t.id}" value="1" checked> ${esc(t.name)}</label>`).join('')}</fieldset>
+        <div class="two"><label>From<input type="date" name="from" value="${from}" required></label><label>To (inclusive)<input type="date" name="to" value="${from}" required></label></div>
+        <div class="three"><label>Price per night (UGX)<input name="rate" type="number" min="0" step="100" placeholder="no change"></label><label>Minimum stay<select name="min_stay">${opts([['', 'No change'], ['clear', 'No minimum'], ...[2, 3, 4, 5, 7].map((n) => [n, n + ' nights'])])}</select></label>
+          <label>Sales<select name="stop_sell">${opts([['', 'No change'], ['open', 'Open'], ['close', 'Close (stop-sell)']])}</select></label></div>
+        <label class="row"><input type="checkbox" name="clear_rate" value="1"> Go back to the standard price for these dates</label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Apply</button></div></form>`,
+        async (v) => {
+          const body = { room_type_ids: Object.keys(v).filter((k) => k.startsWith('rt_')).map((k) => Number(k.slice(3))), from: v.from, to: v.to };
+          if (v.clear_rate) body.rate = null; else if (v.rate !== '') body.rate = Number(v.rate);
+          if (v.min_stay === 'clear') body.min_stay = null; else if (v.min_stay) body.min_stay = Number(v.min_stay);
+          if (v.stop_sell) body.stop_sell = v.stop_sell === 'close';
+          await PUT('/distribution/calendar', body); return 'Rates updated. Channels will be updated automatically.';
+        });
+    },
+    'plan-edit': async (d) => {
+      const p = d.id ? (await GET('/distribution/rate-plans')).find((x) => String(x.id) === d.id) : null;
+      modal(p ? `Edit ${p.name}` : 'New rate plan', `<form class="form" data-form="plan"><div class="two"><label>Code<input name="code" value="${esc(p?.code || '')}" ${p ? 'disabled' : 'required'} maxlength="20"></label><label>Name<input name="name" value="${esc(p?.name || '')}" required></label></div>
+        <label>Description for guests<input name="description" value="${esc(p?.description || '')}" maxlength="300"></label>
+        <div class="three"><label>Discount (%)<input name="discount_pct" type="number" min="0" max="99" step="0.5" value="${p?.discount_pct ?? 0}"></label><label>Minimum stay<input name="min_stay" type="number" min="1" value="${p?.min_stay ?? 1}"></label><label>Display order<input name="sort" type="number" value="${p?.sort ?? 0}"></label></div>
+        <div class="row">${[['breakfast', 'Breakfast included', p ? p.breakfast : true], ['refundable', 'Free cancellation', p ? p.refundable : true], ['on_website', 'Sell on website', p ? p.on_website : true], ['on_channels', 'Sell on channels', p ? p.on_channels : true], ['active', 'Active', p ? p.active : true]].map(([k, l, c]) => `<label class="row"><input type="checkbox" name="${k}" value="1" ${c ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { const b = { code: v.code, name: v.name, description: v.description, discount_pct: Number(v.discount_pct), min_stay: Number(v.min_stay), sort: Number(v.sort), breakfast: !!v.breakfast, refundable: !!v.refundable, on_website: !!v.on_website, on_channels: !!v.on_channels, active: !!v.active };
+          if (p) await PUT(`/distribution/rate-plans/${p.id}`, b); else await POST('/distribution/rate-plans', b); return 'Rate plan saved.'; });
+    },
+    'sync-now': async () => { const r = await POST('/distribution/sync'); toast(r.results ? r.results.map((x) => `${esc(x.channel)}: ${x.error ? 'error' : x.pushed + ' updates'}`).join(' · ') || 'Nothing to push.' : 'Nothing waiting.'); render(); },
+    'channel-edit': async (d) => {
+      const all = await GET('/distribution/channels'); const c = d.id ? all.channels.find((x) => String(x.id) === d.id) : null;
+      modal(c ? `Edit ${c.name}` : 'New channel', `<form class="form" data-form="channel"><div class="two"><label>Code (used in the inbound address)<input name="code" value="${esc(c?.code || '')}" ${c ? 'disabled' : 'required'} pattern="[a-z0-9\\-]{2,30}"></label><label>Name<input name="name" value="${esc(c?.name || '')}" required placeholder="Booking.com"></label></div>
+        <div class="two"><label>Connector<select name="adapter">${opts(all.adapters.map((a) => [a.id, a.label]), c?.adapter || 'webhook')}</select></label><label>Commission (%)<input name="commission_pct" type="number" min="0" max="99" step="0.5" value="${c?.commission_pct ?? 15}"></label></div>
+        <label>Endpoint URL (webhook connector)<input name="endpoint_url" value="${esc(c?.endpoint_url || '')}" placeholder="https://provider.example.com/ari"></label>
+        ${c ? `<label class="row"><input type="checkbox" name="active" value="1" ${c.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => {
+          const b = { name: v.name, adapter: v.adapter, commission_pct: Number(v.commission_pct), endpoint_url: v.endpoint_url || null, active: c ? !!v.active : true };
+          if (c) { await PUT(`/distribution/channels/${c.id}`, b); return 'Channel saved.'; }
+          const r = await POST('/distribution/channels', { ...b, code: v.code });
+          setTimeout(() => showSecret(r.code, r.secret), 50); return null;
+        });
+    },
+    'channel-more': async (d) => {
+      const all = await GET('/distribution/channels'); const c = all.channels.find((x) => String(x.id) === d.id);
+      modal(c.name, `<p>${c.last_error ? `<span class="err">Last error: ${esc(c.last_error)}</span>` : 'No errors.'}</p><div class="row">
+        <button class="btn btn-ghost" data-action="channel-edit" data-id="${c.id}">Edit</button><button class="btn btn-ghost" data-action="channel-full" data-id="${c.id}">Full re-sync</button>
+        <button class="btn btn-ghost" data-action="channel-secret" data-id="${c.id}" data-code="${esc(c.code)}">New secret</button>${c.adapter === 'simulator' ? `<button class="btn btn-gold" data-action="channel-test" data-id="${c.id}">Send a test booking</button>` : ''}</div>`);
+    },
+    'channel-full': async (d) => { const r = await POST(`/distribution/channels/${d.id}/full-sync`); closeModal(); toast(r.error ? `Failed: ${esc(r.error)}` : `${r.pushed} updates sent.`, !!r.error); render(); },
+    'channel-secret': async (d) => { if (!confirm('Create a new secret? The provider must be updated with it, or messages will be rejected.')) return; const r = await POST(`/distribution/channels/${d.id}/secret`); showSecret(d.code, r.secret); },
+    'channel-test': async (d) => { const r = await POST(`/distribution/channels/${d.id}/test-booking`, {}); closeModal(); toast(`Test booking ${esc(r.reservation_code)} received${r.overbooked ? ' (overbooked)' : ''}.`); render(); },
+    'channel-log': async (d) => {
+      const log = await GET(`/distribution/channels/${d.id}/log`);
+      modal(`${d.name}: activity`, table(['When', 'Direction', 'What', 'Result'], log.map((l) => `<tr><td class="nowrap">${ftime(l.created_at)}</td><td>${l.direction === 'out' ? 'Sent' : 'Received'}</td><td>${esc(l.kind)}<br><span class="small muted">${esc(l.summary || '')}</span></td><td>${l.status === 'ok' ? pill('OK', 'ok') : pill('Error', 'bad')}</td></tr>`), 'No activity yet.'));
+    },
+    'channel-map': async (d) => {
+      const [types, plans, maps] = await Promise.all([GET('/room-types'), GET('/distribution/rate-plans'), GET(`/distribution/channels/${d.id}/mappings`)]);
+      const m = (t, p) => maps.find((x) => x.room_type_id === t && x.rate_plan_id === p) || {};
+      modal(`${d.name}: room & rate codes`, `<form class="form" data-form="channel-map"><p class="note">Enter the channel's own codes for each room type and rate plan you sell there. Leave blank to not sell that combination.</p>
+        ${table(['Room type', 'Rate plan', 'Channel room code', 'Channel rate code'], types.filter((t) => t.active).flatMap((t) => plans.filter((p) => p.active && p.on_channels).map((p) => `<tr><td>${esc(t.name)}</td><td>${esc(p.name)}</td><td><input class="search" name="r_${t.id}_${p.id}" value="${esc(m(t.id, p.id).external_room_code || '')}" maxlength="40"></td><td><input class="search" name="p_${t.id}_${p.id}" value="${esc(m(t.id, p.id).external_rate_code || '')}" maxlength="40"></td></tr>`)))}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save mapping</button></div></form>`,
+        async (v) => {
+          const mappings = Object.keys(v).filter((k) => k.startsWith('r_')).map((k) => { const [, t, p] = k.split('_'); return { room_type_id: Number(t), rate_plan_id: Number(p), external_room_code: v[k], external_rate_code: v[`p_${t}_${p}`] }; }).filter((x) => x.external_room_code && x.external_rate_code);
+          await PUT(`/distribution/channels/${d.id}/mappings`, { mappings }); return 'Mapping saved. Run a full re-sync to send everything to the channel.';
+        });
+    },
 
     'new-req': async () => {
       const S = await invSetup(true);
@@ -736,6 +852,8 @@
   };
 
   const FORMS = {
+    'rate-from': (v) => { ui.q.rateFrom = v.from; render(); },
+    'booking-settings': async (v) => { await PUT('/distribution/booking-settings', { ...v, booking_enabled: !!v.booking_enabled, booking_horizon_days: Number(v.booking_horizon_days) }); toast('Booking engine settings saved.'); render(); },
 
     invrep: (v) => { ui.q.invFrom = v.from; ui.q.invTo = v.to; render(); },
     'start-count': async (v) => { const c = await POST('/inventory/counts', { store_id: Number(v.store_id) }); location.hash = `#count/${c.id}`; },
@@ -776,6 +894,11 @@
     'open-shift': async (v) => { await POST('/pos/shift/open', { outlet_id: Number(v.outlet_id), opening_float: Number(v.opening_float) }); ui.posOutlet = Number(v.outlet_id); toast('Shift opened.'); render(); },
     settings: async (v) => { await PUT('/settings', { property_name: v.property_name, vat_rate: Number(v.vat_rate) }); toast('Settings saved.'); refresh(); },
   };
+
+  function showSecret(code, secret) {
+    modal('Channel secret', `<p>Give this secret to the channel provider. It signs every message in both directions. <b>It is shown only once.</b></p>
+      <p><code class="mono">${esc(secret)}</code></p><p>Bookings address for the provider:<br><code class="mono">${esc(location.origin)}/api/channels/${esc(code)}/inbound</code></p><div class="actions"><button class="btn btn-gold" data-action="close-modal">Done</button></div>`);
+  }
 
   /* ---------- events ---------- */
   document.addEventListener('click', async (e) => {

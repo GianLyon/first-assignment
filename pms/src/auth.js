@@ -28,7 +28,7 @@ export const PERMISSIONS = {
   admin: ['*'],
   manager: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
     'housekeeping.update', 'audit.run', 'accounts.view', 'reports.view', 'settings.manage', 'auditlog.view', 'pos.use', 'pos.void', 'pos.manage', 'pos.kitchen',
-    'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count'],
+    'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count', 'distribution.manage'],
   front_office: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'housekeeping.update', 'reports.view', 'pos.use', 'requisition.create'],
   night_auditor: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'audit.run', 'reports.view', 'accounts.view', 'pos.use'],
   housekeeping: ['reservations.view', 'housekeeping.update', 'requisition.create'],

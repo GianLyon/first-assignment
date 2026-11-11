@@ -161,7 +161,8 @@ export function apiRouter(pool) {
         COALESCE((SELECT SUM(amount) FROM folio_charges c WHERE c.reservation_id=r.id AND NOT voided),0) - COALESCE((SELECT SUM(amount) FROM payments p WHERE p.reservation_id=r.id AND NOT voided),0) AS balance
         FROM reservations r JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id WHERE r.status='in_house' AND r.departure <= $1 ORDER BY rm.number`, [s.business_date])).rows;
     const last = await one('SELECT * FROM night_audits ORDER BY business_date DESC LIMIT 1');
-    res.json({ business_date: s.business_date, property_name: s.property_name, rooms, in_house: inHouse.n, arrivals, departures: departures.map((d) => ({ ...d, balance: Number(d.balance) })), last_audit: last || null });
+    const overbooked = (await pool.query(`SELECT r.id, r.code, r.arrival, r.departure, g.first_name, g.last_name, t.name AS room_type_name, r.source FROM reservations r JOIN guests g ON g.id=r.guest_id JOIN room_types t ON t.id=r.room_type_id WHERE r.overbooked AND r.status='reserved' ORDER BY r.arrival`)).rows;
+    res.json({ business_date: s.business_date, property_name: s.property_name, rooms, in_house: inHouse.n, arrivals, departures: departures.map((d) => ({ ...d, balance: Number(d.balance) })), last_audit: last || null, overbooked });
   });
   r.get('/night-audit', requirePerm('audit.run'), async (_req, res) => {
     res.json({ preview: await fo.nightAuditPreview(pool), history: (await pool.query('SELECT a.*, u.full_name AS run_by_name FROM night_audits a LEFT JOIN users u ON u.id=a.run_by ORDER BY business_date DESC LIMIT 30')).rows });

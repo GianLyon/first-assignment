@@ -1,5 +1,6 @@
 import { HttpError, audit } from '../auth.js';
 import { postJournal, chargeLines, paymentLines, DEPARTMENTS, PAYMENT_METHODS } from '../ledger.js';
+import { enqueueAri, enqueueAriFromToday } from './ari.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (d) => typeof d === 'string' && DATE_RE.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
@@ -91,7 +92,8 @@ export async function createReservation(db, user, body) {
     `INSERT INTO reservations (guest_id, room_type_id, arrival, departure, adults, children, rate, source, company_name, notes, created_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
     [guestId, type.id, arrival, departure, adults, children, rate, text(body.source, 'Source', { max: 40 }) || 'Direct',
-      text(body.company_name, 'Company', { max: 120 }), text(body.notes, 'Notes', { max: 1000 }), user.id]);
+      text(body.company_name, 'Company', { max: 120 }), text(body.notes, 'Notes', { max: 1000 }), user?.id ?? null]);
+  await enqueueAri(db, type.id, arrival, departure, 'reservation');
   await audit(db, user, 'reservation.create', 'reservation', r.id, { code: r.code, arrival, departure, room_type: type.code, rate });
   return r;
 }
@@ -123,6 +125,9 @@ export async function updateReservation(db, user, id, body) {
   const { rows: [u] } = await db.query(
     `UPDATE reservations SET arrival=$2, departure=$3, room_type_id=$4, rate=$5, adults=$6, notes=$7, company_name=$8 WHERE id=$1 RETURNING *`,
     [r.id, next.arrival, next.departure, next.room_type_id, next.rate, next.adults, next.notes, next.company_name]);
+  if (datesChanged) { await enqueueAri(db, r.room_type_id, r.arrival, r.departure, 'reservation change'); await enqueueAri(db, u.room_type_id, u.arrival, u.departure, 'reservation change'); }
+  // per-night prices: drop nights outside the new stay; an explicit new rate replaces them all
+  await db.query('DELETE FROM reservation_nights WHERE reservation_id=$1 AND (night < $2 OR night >= $3 OR $4)', [r.id, u.arrival, u.departure, u.rate !== r.rate]);
   await audit(db, user, 'reservation.update', 'reservation', r.id, { from: { arrival: r.arrival, departure: r.departure, rate: r.rate, room_type_id: r.room_type_id }, to: { arrival: u.arrival, departure: u.departure, rate: u.rate, room_type_id: u.room_type_id } });
   return u;
 }
@@ -132,6 +137,7 @@ export async function cancelReservation(db, user, id, reason) {
   if (r.status !== 'reserved') throw new HttpError(409, 'Only reservations that have not checked in can be cancelled.');
   const why = text(reason, 'Cancellation reason', { required: true, max: 300 });
   await db.query("UPDATE reservations SET status='cancelled', cancel_reason=$2 WHERE id=$1", [r.id, why]);
+  await enqueueAri(db, r.room_type_id, r.arrival, r.departure, 'cancellation');
   await audit(db, user, 'reservation.cancel', 'reservation', r.id, { reason: why });
 }
 
@@ -161,15 +167,16 @@ export async function checkIn(db, user, id, { room_id, allow_dirty = false, gues
 export async function folio(db, id) {
   const { rows: [r] } = await db.query(
     `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality,
-            rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number
+            rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number, rp.name AS rate_plan_name, ch.name AS channel_name
      FROM reservations r JOIN guests g ON g.id = r.guest_id JOIN room_types rt ON rt.id = r.room_type_id
-     LEFT JOIN rooms rm ON rm.id = r.room_id WHERE r.id = $1`, [id]);
+     LEFT JOIN rooms rm ON rm.id = r.room_id LEFT JOIN rate_plans rp ON rp.id = r.rate_plan_id LEFT JOIN channels ch ON ch.id = r.channel_id WHERE r.id = $1`, [id]);
   if (!r) throw new HttpError(404, 'Reservation not found.');
   const charges = (await db.query('SELECT c.*, u.full_name AS posted_by_name FROM folio_charges c LEFT JOIN users u ON u.id = c.posted_by WHERE reservation_id = $1 ORDER BY business_date, id', [id])).rows;
   const payments = (await db.query('SELECT p.*, u.full_name AS posted_by_name FROM payments p LEFT JOIN users u ON u.id = p.posted_by WHERE reservation_id = $1 ORDER BY business_date, id', [id])).rows;
   const totalCharges = charges.filter((c) => !c.voided).reduce((a, c) => a + c.amount, 0);
   const totalPayments = payments.filter((p) => !p.voided).reduce((a, p) => a + p.amount, 0);
-  return { reservation: r, charges, payments, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
+  const nights = (await db.query("SELECT to_char(night,'YYYY-MM-DD') AS night, rate FROM reservation_nights WHERE reservation_id=$1 ORDER BY night", [id])).rows;
+  return { reservation: r, charges, payments, nights, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
 }
 async function balanceOf(db, id) {
   const { rows: [b] } = await db.query(
@@ -258,6 +265,7 @@ export async function checkOut(db, user, id) {
     departure = s.business_date > r.arrival ? s.business_date : (await db.query("SELECT to_char($1::date + 1, 'YYYY-MM-DD') AS d", [r.arrival])).rows[0].d;
   }
   await db.query("UPDATE reservations SET status='checked_out', departure=$2, checked_out_at=now() WHERE id=$1", [r.id, departure]);
+  await enqueueAri(db, r.room_type_id, s.business_date, r.departure, 'check-out');
   await db.query("UPDATE rooms SET hk_status='dirty' WHERE id=$1 AND hk_status <> 'out_of_order'", [r.room_id]);
   await audit(db, user, 'reservation.check_out', 'reservation', r.id, { balance: bal });
   return { credit_balance: bal < 0 ? -bal : 0 };
@@ -273,6 +281,7 @@ export async function setHousekeeping(db, user, roomId, status) {
     if (rows[0]) throw new HttpError(409, `Room ${room.number} is occupied. Move the guest first.`);
   }
   await db.query('UPDATE rooms SET hk_status=$2 WHERE id=$1', [roomId, status]);
+  if ((status === 'out_of_order') !== (room.hk_status === 'out_of_order')) await enqueueAriFromToday(db, room.room_type_id, 'room out of order change');
   await audit(db, user, 'room.housekeeping', 'room', roomId, { number: room.number, from: room.hk_status, to: status });
 }
 
@@ -284,7 +293,9 @@ export async function nightAuditPreview(db) {
      WHERE r.status='in_house' AND r.departure <= $1 ORDER BY rm.number`, [s.business_date])).rows;
   const noShows = (await db.query(
     `SELECT r.id, r.code, g.first_name, g.last_name FROM reservations r JOIN guests g ON g.id=r.guest_id WHERE r.status='reserved' AND r.arrival <= $1`, [s.business_date])).rows;
-  const inHouse = (await db.query("SELECT count(*)::int AS n, COALESCE(sum(rate),0) AS revenue FROM reservations WHERE status='in_house' AND departure > $1", [s.business_date])).rows[0];
+  const inHouse = (await db.query(
+    `SELECT count(*)::int AS n, COALESCE(sum(COALESCE((SELECT rate FROM reservation_nights n WHERE n.reservation_id=r.id AND n.night=$1), r.rate)),0) AS revenue
+     FROM reservations r WHERE status='in_house' AND departure > $1`, [s.business_date])).rows[0];
   const openChecks = (await db.query(
     `SELECT c.id, c.code, o.name AS outlet, t.name AS table_name FROM pos_checks c JOIN outlets o ON o.id=c.outlet_id LEFT JOIN dining_tables t ON t.id=c.table_id
      WHERE c.status='open' ORDER BY c.id`)).rows;
@@ -306,12 +317,16 @@ export async function runNightAudit(db, user) {
   const { rows: stays } = await db.query("SELECT * FROM reservations WHERE status='in_house' AND departure > $1 FOR UPDATE", [date]);
   let revenue = 0;
   for (const r of stays) {
-    if (r.rate > 0) {
-      await insertCharge(db, user, r, s, { department: 'rooms', amount: r.rate, description: `Room charge, night of ${date}`, date });
-      revenue += r.rate;
+    const { rows: [n] } = await db.query('SELECT rate FROM reservation_nights WHERE reservation_id=$1 AND night=$2', [r.id, date]);
+    const rate = n ? n.rate : r.rate; // the price agreed for this night, else the stay's rate
+    if (rate > 0) {
+      await insertCharge(db, user, r, s, { department: 'rooms', amount: rate, description: `Room charge, night of ${date}`, date });
+      revenue += rate;
     }
   }
-  const { rowCount: noShows } = await db.query("UPDATE reservations SET status='no_show' WHERE status='reserved' AND arrival <= $1", [date]);
+  const { rows: ns } = await db.query("UPDATE reservations SET status='no_show' WHERE status='reserved' AND arrival <= $1 RETURNING room_type_id, to_char(departure,'YYYY-MM-DD') AS departure", [date]);
+  const noShows = ns.length;
+  for (const x of ns) await enqueueAri(db, x.room_type_id, date, x.departure, 'no-show');
   await db.query(`UPDATE rooms SET hk_status='dirty' WHERE hk_status='clean' AND id IN (SELECT room_id FROM reservations WHERE status='in_house')`);
   await db.query('INSERT INTO night_audits (business_date, run_by, room_charges_posted, room_revenue, no_shows) VALUES ($1,$2,$3,$4,$5)', [date, user.id, stays.length, revenue, noShows]);
   const { rows: [n] } = await db.query("UPDATE settings SET business_date = business_date + 1 WHERE id = 1 RETURNING to_char(business_date, 'YYYY-MM-DD') AS d");

@@ -1,7 +1,7 @@
 # Hearth & Key PMS
 
 The hotel property management system offered to Hearth & Key marketing partners.
-Built so far: **Phase 1 (foundation and front office)**, **Phase 2 (restaurant / POS)** and **Phase 3 (inventory, purchasing and requisitions)**. It is a real system with a database, staff accounts and accounting. It is not a demo.
+Built so far: **Phase 1 (foundation and front office)**, **Phase 2 (restaurant / POS)** and **Phase 3 (inventory, purchasing and requisitions)** and **Phase 4 (booking engine and channel manager)**. It is a real system with a database, staff accounts and accounting. It is not a demo.
 The clickable sales demo lives separately in `../pms-demo/`.
 
 ## What it does
@@ -28,6 +28,9 @@ The clickable sales demo lives separately in `../pms-demo/`.
 | Recipes | Ingredients per portion for each menu item, costed with cost % against the price before VAT. When the POS settles a bill, ingredients come out of the outlet's store and cost of sales is posted. Sales are never blocked by stock levels; items that go below zero are flagged |
 | Stock counts & write-offs | Count a store, save progress, post: differences adjust stock and post to Stock variances. Write-offs need a reason |
 | Inventory reports | Stock value by store, F&B cost % for any period, consumption by department, items to re-order, items below zero |
+| **Rates & rate plans** (Phase 4) | Rate plans (e.g. flexible, non-refundable, long stay) as a discount on the standard price, with breakfast, cancellation, minimum stay and where they are sold. A rate calendar sets date-specific prices, minimum stays and stop-sells per room type. Each booked night keeps its own price and the night audit charges exactly that |
+| Website booking engine | Public page at `/book/` (no sign-in): search dates, see room types and plans with prices, book with name/email/phone, get a booking code; look up and cancel online within the rate's rules. Protected against double-selling the last room, bots (honeypot) and floods (rate limits). Guests pay at the hotel |
+| Channel manager | Channels with their own room/rate codes and commission. Every change to availability, prices or restrictions is queued and pushed automatically (every 20 s by default) as a signed message; full re-sync on demand. Bookings, changes and cancellations from channels arrive at `/api/channels/<code>/inbound`, are signature-checked, never duplicated, and are accepted even when sold out (flagged as overbooked on the dashboard). Every message is logged |
 
 Money is stored in whole Ugandan shillings. Each property gets its own database.
 
@@ -48,6 +51,21 @@ npm start                            # http://localhost:3000
 
 Database migrations run automatically on start (`npm run migrate` runs them on their own).
 
+## Connecting a real channel (Booking.com, Expedia, Airbnb…)
+
+OTAs only connect through certified channel-manager partners. Add the partner as a **Webhook** channel under **Channels (OTAs)**:
+
+1. Create the channel with the partner's endpoint URL (https). The secret is shown once: give it to the partner.
+2. Map each room type and rate plan to the partner's room and rate codes, then run **Full re-sync**.
+3. The partner posts bookings to `https://<your-pms>/api/channels/<code>/inbound`.
+
+Messages in both directions are JSON signed with `X-HK-Signature: sha256=<HMAC-SHA256 of the raw body, keyed with the channel secret>`.
+Outgoing: `{ event: "ari.update" | "ari.full_sync", currency, items: [{ room_code, rate_code, date, available, rate, min_stay, closed }] }`.
+Incoming: `{ event: "booking.created" | "booking.modified" | "booking.cancelled", booking: { id, room_code, rate_code, arrival, departure, adults, guest: { first_name, last_name, email, phone }, nightly: [{ date, rate }] } }`.
+If the partner uses a different format, a small bridge service can translate. The built-in **simulator** channel lets you try all of this first.
+
+Settings: `ARI_PUSH_SECONDS` (default 20, 0 = off), `PUBLIC_WRITE_LIMIT` / `PUBLIC_READ_LIMIT` (booking-page requests per visitor per minute, default 10 / 60).
+
 ## Tests
 
 ```bash
@@ -55,7 +73,7 @@ createdb hk_pms_test
 TEST_DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/hk_pms_test npm test
 ```
 
-The test suite wipes and rebuilds the **test** database. It covers sign-in and lockout, role permissions, overbooking including simultaneous bookings, check-in rules, VAT postings, voids, payments, check-out, the night audit, stay changes, balanced books and the audit trail, plus the POS (bills, kitchen/bar tickets, notes, item and bill voids, split payments, charge to room, shift cash-up, F&B reports) and inventory (opening stock, purchase-order approval and part deliveries, weighted average cost, requisition approval and issue, recipe deduction on POS sales, write-offs, stock counts and reports).
+The test suite wipes and rebuilds the **test** database. It covers sign-in and lockout, role permissions, overbooking including simultaneous bookings, check-in rules, VAT postings, voids, payments, check-out, the night audit, stay changes, balanced books and the audit trail, plus the booking engine and channel manager (pricing, calendar restrictions, online booking/lookup/cancel, simultaneous last-room bookings, rate limiting, nightly charges, signed pushes to a test provider endpoint, failures, signed inbound bookings, duplicates, changes, cancellations, overbooking) and the POS (bills, kitchen/bar tickets, notes, item and bill voids, split payments, charge to room, shift cash-up, F&B reports) and inventory (opening stock, purchase-order approval and part deliveries, weighted average cost, requisition approval and issue, recipe deduction on POS sales, write-offs, stock counts and reports).
 
 ## Going live checklist
 
@@ -71,8 +89,8 @@ The test suite wipes and rebuilds the **test** database. It covers sign-in and l
 | **1. Foundation & front office** (done) | Accounts & roles, reservations, check-in/out, folios, payments, night audit, accounting core, daily report, audit log |
 | **2. Restaurant / POS** (done) | Outlets, menus, table orders, kitchen/bar tickets, charge to room, split payments, shift cash-up, F&B reports |
 | **3. Inventory & requisitions** (done) | Stores, suppliers, purchase orders, goods received, departmental requisitions with approvals, recipes and POS stock deduction, stock counts, write-offs, reports |
-| 4. Booking engine & channel manager | Public booking page with online payment (card / mobile money), OTA connectivity via a channel-manager partner API |
-| 5. Accounting & finance | Company (city ledger) invoicing, supplier invoices and payments (accounts payable from Phase 3 deliveries), bank reconciliation, P&L and balance sheet, EFRIS e-invoicing |
+| **4. Booking engine & channel manager** (done) | Rate plans and calendar, public booking page, channel manager with signed push/receive, ready for a certified partner. Online payment follows with Phase 5 |
+| 5. Accounting & finance | Online card / mobile money payments for the booking engine, OTA commission accounting, company (city ledger) invoicing, supplier invoices and payments (accounts payable from Phase 3 deliveries), bank reconciliation, P&L and balance sheet, EFRIS e-invoicing |
 | 6. HR & payroll | Staff records, rosters, attendance, leave, payroll with PAYE/NSSF |
 | 7. Events, assets & amenities | Function rooms and BEOs, asset register and maintenance, spa/transfer/tour sales |
 | 8. Automated reporting | Scheduled department reports by email, multi-property dashboards |

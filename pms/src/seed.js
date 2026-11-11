@@ -98,6 +98,24 @@ export async function seedInventory(pool) {
   });
 }
 
+/** Starter rate plans and a simulator channel. Only runs when no rate plans exist yet. */
+export async function seedDistribution(pool) {
+  return tx(pool, async (db) => {
+    const { rows } = await db.query('SELECT 1 FROM rate_plans LIMIT 1');
+    if (rows[0]) return { skipped: true };
+    const plans = {};
+    for (const [code, name, desc, disc, breakfast, refundable, minStay, sort] of [
+      ['BAR', 'Best available rate', 'Flexible: free cancellation until the day before arrival. Breakfast included.', 0, true, true, 1, 10],
+      ['NRF', 'Non-refundable saver', 'Save 10%. Pay in full; cannot be cancelled or changed. Breakfast included.', 10, true, false, 1, 20],
+      ['LONG', 'Stay 3+ nights', 'Save 15% on stays of three nights or more. Breakfast included.', 15, true, true, 3, 30],
+    ]) plans[code] = (await db.query('INSERT INTO rate_plans (code, name, description, discount_pct, breakfast, refundable, min_stay, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id', [code, name, desc, disc, breakfast, refundable, minStay, sort])).rows[0].id;
+    const { rows: [c] } = await db.query("INSERT INTO channels (code, name, adapter, commission_pct, secret) VALUES ('simulator', 'OTA simulator', 'simulator', 15, $1) RETURNING id", [crypto.randomBytes(24).toString('base64url')]);
+    const { rows: types } = await db.query('SELECT id, code FROM room_types');
+    for (const t of types) for (const p of ['BAR', 'NRF']) await db.query('INSERT INTO channel_mappings (channel_id, room_type_id, rate_plan_id, external_room_code, external_rate_code) VALUES ($1,$2,$3,$4,$5)', [c.id, t.id, plans[p], t.code, p]);
+    return { skipped: false };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
@@ -107,6 +125,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
   const p = await seedPos(pool);
   if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
+  const dist = await seedDistribution(pool);
+  if (!dist.skipped) console.log('Rate plans and a test (simulator) channel set up.');
   const inv = await seedInventory(pool);
   if (!inv.skipped) console.log('Stores, stock items, suppliers and recipes set up. Enter your opening stock under Purchasing.');
   if (r.skipped) console.log('Property settings already exist and were left unchanged.');
