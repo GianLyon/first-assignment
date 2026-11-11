@@ -20,6 +20,7 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+  <!-- cms:announcement --><!-- /cms:announcement -->
 
   <!-- ============ HEADER (same on every page) ============ -->
   <header class="site-header" id="top">
@@ -103,6 +104,14 @@
               <label><input type="checkbox" name="services" value="Hotel software (PMS)" data-id="pms" /><span>Hotel software (PMS)</span></label>
             </div>
           </fieldset>
+          <div class="field">
+            <label for="phone">Phone or WhatsApp <span class="optional">(optional)</span></label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+256 …" />
+          </div>
+          <div class="field hp" aria-hidden="true">
+            <label for="website">Leave this empty</label>
+            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+          </div>
           <div class="field">
             <label for="message">Anything else? <span class="optional">(optional)</span></label>
             <textarea id="message" name="message" rows="4" placeholder="Website link, number of rooms/covers, goals…"></textarea>

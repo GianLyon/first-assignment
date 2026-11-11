@@ -807,3 +807,10 @@ p { margin: 0 0 1em; }
 /* Menu mock-up: currency note */
 .m-menu .m-menu-top { display: block; }
 .m-menu .m-menu-cur { display: block; text-align: center; font-family: var(--sans); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted) !important; margin: 0 0 4px; }
+
+/* ============ Announcement banner (set in the Azeli Console) ============ */
+.announce { background: var(--ink); color: var(--cream); font-size: .92rem; text-align: center; padding: 9px 0; }
+.announce a { color: var(--gold); font-weight: 600; text-decoration: none; margin-left: 6px; white-space: nowrap; }
+.announce a:hover { text-decoration: underline; }
+.pkg-price { font-family: var(--serif); font-size: 1.35rem; color: var(--ink); margin: -4px 0 12px; }
+.contact-form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }

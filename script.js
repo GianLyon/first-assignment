@@ -94,17 +94,26 @@ if (form) {
     const services = data.getAll("services").join(", ") || "Not specified";
 
     if (FORM_ENDPOINT) {
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
       try {
         const res = await fetch(FORM_ENDPOINT, {
           method: "POST",
-          body: data,
-          headers: { Accept: "application/json" },
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            name: data.get("name"), email: data.get("email"), phone: data.get("phone") || "", business: data.get("business"),
+            type: data.get("type"), services: data.getAll("services"), message: data.get("message") || "",
+            package: pkg && /^[\w ]{1,30}$/.test(pkg) ? pkg : "", page: location.pathname, website: data.get("website") || "",
+          }),
         });
-        if (!res.ok) throw new Error();
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error || "");
         form.reset();
-        showStatus("Thank you! We'll be in touch within two working days.", true);
-      } catch {
-        showStatus(`Something went wrong. Please email us at ${CONTACT_EMAIL}.`, false);
+        showStatus(`Thank you! We'll be in touch within two working days.${out.ref ? ` Your reference: ${out.ref}.` : ""}`, true);
+      } catch (err) {
+        showStatus(err.message ? `${err.message}` : `Something went wrong. Please email us at ${CONTACT_EMAIL} or call us.`, false);
+      } finally {
+        button.disabled = false;
       }
       return;
     }

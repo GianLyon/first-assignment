@@ -1,7 +1,7 @@
 # Azeli Technologies: Hospitality Marketing Website
 
 Static multi-page site for a hospitality marketing consultancy (hotels & restaurants).
-No build step: open `index.html` in a browser. To publish the website and the PMS together, follow **[docs/GO-LIVE.md](docs/GO-LIVE.md)** (website on Vercel via `vercel.json`, PMS on Render via `render.yaml`, domain and DNS on Cloudflare; `scripts/build-site.sh` publishes only the site's own files).
+No build step: open `index.html` in a browser. To publish the website and the PMS together, follow **[docs/GO-LIVE.md](docs/GO-LIVE.md)** (website on Vercel via `vercel.json`; Azeli PMS and the Azeli Console admin panel on Render via `render.yaml`; domain and DNS on Cloudflare). Website text is edited in the Azeli Console (`console/`) and `scripts/build-site.mjs` builds it into the pages.
 
 ## Pages
 - `index.html`: Home (intro, services overview, who we help, case study teaser)

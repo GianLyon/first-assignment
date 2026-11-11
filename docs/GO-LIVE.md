@@ -1,104 +1,119 @@
-# Going live: Azeli Technologies website, Azeli PMS and team email
+# Going live: azelitech.com, the Azeli Console and Azeli PMS
 
-This takes about an afternoon. You do the account sign-ups and payments; everything else is already set up in this repository (`vercel.json` for the website, `render.yaml` for the PMS, `scripts/build-site.sh`).
+You do the account sign-ups and payments; everything else is already set up in this repository:
+`vercel.json` (website), `render.yaml` (Azeli PMS and the Azeli Console, each with a private database) and `scripts/build-site.mjs`.
 
 ## What you are setting up
 
-| Piece | Service & plan | Why | Approx. cost |
+| Address | What | Where | Approx. cost |
 |---|---|---|---|
-| Domain name + DNS | **Cloudflare** Registrar + DNS | .com at cost, best DNS. Cloudflare's paid plans add protection for traffic that passes through Cloudflare; ours goes straight to Vercel and Render, so they would add nothing | ≈ $11 / year |
-| Website | **Vercel Pro** | Required for a business site; fast worldwide, deploys itself on every change | $20 / month |
-| Azeli PMS (one per hotel) | **Render** Starter web service + **Postgres Basic-1GB**, Frankfurt | Always on (night-audit and guest emails every minute), private database with continuous backups you can restore to any moment (3-day window) | $7 + $19 = **$26 / month per hotel** |
-| Team mailboxes | **Google Workspace Business Starter** | Gmail, Calendar, Meet, Drive on your domain; works with Google Ads and Business Profile | ≈ $7 / user / month (annual), $8.40 monthly |
-| Emails the PMS sends | **Brevo Starter** | No daily sending cap (reports, guest emails, campaigns), better standing with inboxes than personal mailboxes | ≈ $9 / month for 5,000 emails |
-| Off-site backup copy | **Cloudflare R2** | A nightly copy of each hotel's data outside Render (being built next) | cents / month |
+| `azelitech.com`, `www.azelitech.com` | Azeli Technologies website | **Vercel Pro** (required for a business site) | $20 / month |
+| `admin.azelitech.com` | **Azeli Console**: your admin panel (enquiries, website editing, client hotels, team) | **Render** Starter + Postgres Basic-256MB, Frankfurt | $7 + $6 = $13 / month |
+| `amaya.azelitech.com` | Amaya's **Azeli PMS** (each hotel gets its own, e.g. `hotel2.azelitech.com`) | **Render** Starter + Postgres Basic-1GB, Frankfurt, continuous backups | $7 + $19 = $26 / month per hotel |
+| (domain and DNS) | azelitech.com | **Cloudflare** | ≈ $11 / year |
+| later: team mailboxes | `you@`, `hello@`, `sales@`… | Google Workspace Business Starter | ≈ $7 / user / month |
+| later: system email | reports, guest emails, enquiry alerts | Brevo Starter | ≈ $9 / month |
 
-**Example: 5 team mailboxes, the website and Amaya's PMS cost about $90 a month.** Each extra hotel adds about $26 a month, which you can include in your package price.
+**Website, console and Amaya's PMS: about $60 a month. With 5 mailboxes and Brevo: about $105.** Each extra hotel adds about $26.
 
-Worth paying for later, not now: Google Workspace *Business Standard* ($14 / user) if you need 2 TB storage per person or recorded meetings; Render *Standard* PMS instance ($25) if pages feel slow at busy times; Render's *Pro* account tier if you want a 7-day restore window and team access to the Render dashboard.
-
-### Is that enough capacity?
-Yes, with room to spare. A 50-room hotel with 50 staff signed in generates a few hundred requests an hour; the Starter instance (0.5 CPU, 512 MB) handles that comfortably, and a year of bookings, bills and accounts is a few tens of megabytes in the database. Move up when you see it:
-- **Pages feel slow at busy times** → change the PMS plan to *Standard* ($25) in Render, one click, no data moved.
-- **Database storage near its limit** → raise the database plan in Render.
-- **More than 5,000 system emails a month** (large campaigns) → the next Brevo band.
-- **Each new hotel** gets its own PMS + database (copy the two blocks in `render.yaml`), so one hotel's busy night never slows another, and their data is kept apart.
-
-Render has no African region; Frankfurt is the closest (≈150–200 ms from Kampala, fine for a web system). Uganda's Data Protection and Privacy Act allows storing data abroad where it is adequately protected; mention it in your client contracts.
+The PMS and the console run on Render because they must be on all the time (night-audit emails, checks every few minutes). Vercel runs code only briefly per visit, which suits the website.
 
 ---
 
+# Part A: website and systems live (do this now)
+
 ## Step 1: Domain ✅ done
-**azelitech.com** is registered at Cloudflare (renews October 2027) and its DNS is managed there.
+`azelitech.com` is registered at Cloudflare (renews October 2027). Leave Cloudflare *Email Routing* off: Google Workspace will receive your email later.
 
-Addresses used below:
-| Address | What |
-|---|---|
-| `https://azelitech.com` (and `www.`) | Azeli Technologies website (Vercel) |
-| `https://amaya.azelitech.com` | Amaya's Azeli PMS (Render); each new hotel gets its own, e.g. `hotel2.azelitech.com` |
-| `hello@azelitech.com` | Shown on the website (a Google group: reaches several people) |
-| `reports@azelitech.com` | Sender of the PMS's reports and guest emails (Brevo) |
+## Step 2: Put the code on the main branch
+Vercel and Render deploy from one branch of the `gianlyon/first-assignment` repository on GitHub. Ask Claude to open a pull request, then merge it on GitHub, so everything is on `main`. (Or choose the branch `claude/hospitality-consulting-website-0qbh0e` in Steps 3 and 4.)
 
-Do **not** switch on Cloudflare *Email Routing*: Google Workspace receives your email, and the two cannot both do it.
+## Step 3: Website on Vercel
+1. Go to **vercel.com → Sign up → Continue with GitHub**. Choose the **Pro** plan.
+2. **Add New → Project** → import `first-assignment`. Vercel reads `vercel.json`; leave *Framework* as **Other** and the root directory as it is.
+3. Before deploying, open **Environment Variables** and add:
+   `CONSOLE_URL` = `https://admin.azelitech.com`
+   (the website reads your published text from the console and sends enquiries to it).
+4. **Deploy**. Until the console is live the site is built exactly as it is in the code; nothing breaks.
+5. **Settings → Domains**: add `azelitech.com` and `www.azelitech.com`, and set `www` to redirect to `azelitech.com`. Keep the DNS records Vercel shows; you add them in Step 5.
+6. **Settings → Git → Deploy Hooks**: create a hook named `Azeli Console`, branch `main`. **Copy the address** it shows; it goes into Render next. It lets the console's **Publish** button rebuild the website.
 
-## Step 2: Team mailboxes (Google Workspace)
-1. Go to **workspace.google.com → Get started**, choose *Business Starter*, and use your new domain.
-2. Google asks you to verify the domain: choose **Cloudflare**; Google can add the records for you, or copy the TXT record into Cloudflare → *DNS → Records*.
-3. Add Google's **MX** record when asked (Google shows it; in Cloudflare it is: Type `MX`, Name `@`, Mail server `smtp.google.com`, Priority `1`).
-4. Create mailboxes, for example: `you@`, `hello@` (shown on the website), `sales@`, `support@` (clients' PMS questions). Use **groups** for shared addresses such as `hello@`, so several people receive them at no extra cost.
-5. In the Google Admin console → *Apps → Gmail → Authenticate email*, generate the **DKIM** key and add it to Cloudflare as a TXT record, then press *Start authentication*.
-
-## Step 3: System email (Brevo)
-1. Create an account at **brevo.com** and choose the **Starter** plan (check on the pricing page that SMTP sending is included at your volume).
-2. **Senders, Domains & Dedicated IPs → Domains → Add a domain**: enter your domain and add the records Brevo shows to Cloudflare (DNS only).
-3. **SMTP & API → SMTP → Generate a new SMTP key**. Note the *login* and the *key*.
-4. Your PMS email setting will be:
-   `smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587`
-   If the login or key contains `@` or `:`, replace it with `%40` or `%3A`.
-
-### SPF and DMARC (one-time, so mail is trusted)
-In Cloudflare DNS add, or edit if one exists:
-- TXT, Name `@`: `v=spf1 include:_spf.google.com include:spf.brevo.com ~all` (only **one** SPF record may exist).
-- TXT, Name `_dmarc`: `v=DMARC1; p=none; rua=mailto:you@azelitech.com` (tighten to `p=quarantine` after a few weeks of clean reports).
-
-## Step 4: Website (Vercel)
-1. Create an account at **vercel.com** and sign in **with GitHub**, allowing access to the `first-assignment` repository. Choose the **Pro** plan (business use).
-2. **Add New → Project**, import the repository. Vercel reads `vercel.json`: it builds the site with `scripts/build-site.sh` and publishes only the website's files (never the PMS code). Leave *Framework* as **Other** and the root directory as the repository root. Press **Deploy**.
-3. Under **Settings → Git**, set the *Production Branch* to the branch you deploy from (e.g. `main`).
-4. **Settings → Domains**: add `azelitech.com` and `www.azelitech.com` (choose one to redirect to the other). Vercel shows the DNS records to create; add them in Cloudflare (Step 6).
-
-## Step 5: Azeli PMS (Render)
-1. Create an account at **render.com** and sign in **with GitHub**, allowing access to the repository.
-2. **New → Blueprint**, pick the repository and branch. Render reads `render.yaml` and shows `azeli-pms` and its database `azeli-pms-db`.
+## Step 4: Azeli Console and Azeli PMS on Render
+1. Go to **render.com → Get started → GitHub**.
+2. **New → Blueprint** → choose `first-assignment` and the branch. Render shows four items: `azeli-pms`, `azeli-pms-db`, `azeli-console`, `azeli-console-db`.
 3. Fill in the values it asks for:
-   | Setting | Example |
+
+   **azeli-console**
+   | Setting | Value |
+   |---|---|
+   | `OWNER_NAME` | your name |
+   | `OWNER_EMAIL` | the email you will sign in with (your Gmail is fine until Workspace is set up) |
+   | `OWNER_PASSWORD` | a strong password, at least 10 characters |
+   | `VERCEL_DEPLOY_HOOK` | the address from Step 3.6 |
+   | `SMTP_URL`, `LEAD_NOTIFY` | leave empty for now (Part B) |
+
+   **azeli-pms**
+   | Setting | Value |
    |---|---|
    | `PROPERTY_NAME` | `Amaya Hotel & Luxury Suites` |
-   | `ADMIN_PASSWORD` | a long password for the first sign-in (change it afterwards) |
+   | `ADMIN_PASSWORD` | a strong password for Amaya's first `admin` sign-in |
    | `PUBLIC_URL` | `https://amaya.azelitech.com` |
-   | `SMTP_URL` | the Brevo line from Step 3 |
-   | `EMAIL_FROM` | `Amaya Hotel & Luxury Suites <reports@azelitech.com>` |
-4. **Apply**. The first deploy takes a few minutes. The PMS creates its database tables and sets up the property on its own.
-5. `azeli-pms` → **Settings → Custom Domains**: add `amaya.azelitech.com` (one sub-address per hotel). Render shows a DNS record for it.
+   | `SMTP_URL`, `EMAIL_FROM` | leave empty for now (Part B); emails are kept in the system meanwhile |
+4. **Apply**. The first deploy takes a few minutes. Both create their database tables and set themselves up.
+5. Custom domains: `azeli-console` → **Settings → Custom Domains** → `admin.azelitech.com`; `azeli-pms` → `amaya.azelitech.com`. Keep the DNS records Render shows.
 
-## Step 6: Point your addresses (Cloudflare DNS)
-In Cloudflare → your domain → **DNS → Records**, add exactly the records Vercel and Render showed you:
-- website: for `azelitech.com` and `www` (usually an `A` record to Vercel's address and a `CNAME` to Vercel)
-- PMS: a `CNAME` for `amaya` pointing to your `….onrender.com` address
+## Step 5: Point the addresses (Cloudflare)
+Cloudflare → `azelitech.com` → **DNS → Records → Add record**, for each record Vercel and Render showed:
+| For | Typically |
+|---|---|
+| `azelitech.com` (website) | `A` record, name `@`, to Vercel's address |
+| `www` (website) | `CNAME` to Vercel |
+| `admin` (console) | `CNAME` to `azeli-console….onrender.com` |
+| `amaya` (PMS) | `CNAME` to `azeli-pms….onrender.com` |
 
-Set each of these to **DNS only (grey cloud)**, not proxied. Vercel and Render issue the HTTPS certificates themselves, and the PMS needs to see visitors' own addresses for its sign-in protection. Within a few minutes both show the domain as verified.
+Set **every one to "DNS only" (grey cloud)**: Vercel and Render issue the HTTPS certificates, and the systems need to see visitors' own addresses for sign-in protection. Within minutes Vercel and Render show the domains as verified.
 
-## Step 7: First sign-in
-1. Open `https://amaya.azelitech.com`, sign in as `admin` with your `ADMIN_PASSWORD`, then **Password** (top right) to change it.
-2. **Settings**: rooms and room types, VAT rate. **Users**: one account per staff member.
-3. **Automatic emails**: add the hotel's Google review link; switch on the pre-arrival and thank-you emails.
-4. **Department reports → Schedules**: who gets which report.
-5. Send yourself a test: **Department reports → Run a report**, add your email, and check it arrives (and not in spam).
+## Step 6: First sign-ins
+1. **Console**: open `https://admin.azelitech.com`, sign in with `OWNER_EMAIL` / `OWNER_PASSWORD`, then **Password** to change it.
+   - **Website**: check the contact details, add prices to the packages if you want them shown, fill in Amaya's real results and quote, then **Publish**. The site updates in about a minute.
+   - **Team**: add your colleagues (owner, website editor or sales).
+2. **Amaya's PMS**: open `https://amaya.azelitech.com`, sign in as `admin` with `ADMIN_PASSWORD`, change the password, then set up rooms, users and rates (**Settings**, **Users**, **Rate plans**).
+3. Connect them: in Amaya's PMS open **Group dashboard → Create key**; in the console **Client hotels → Add a hotel**, address `https://amaya.azelitech.com`, paste the key. The console now shows whether Amaya's system is online and its occupancy and revenue for the month.
+4. Test the enquiry form: open `https://azelitech.com/contact.html`, send a test request, and see it arrive in the console under **Enquiries**.
 
-## Adding another hotel later
-In `render.yaml` copy the `azeli-pms` service and the `azeli-pms-db` database, rename both (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 5 and the PMS part of Step 6 with `hotel2.azelitech.com`, then Step 7. Link the hotels on each one's **Group dashboard** if an owner has several.
+## Step 7: Get found on Google
+1. **Google Search Console** (search.google.com/search-console) → *Add property* → **Domain** → `azelitech.com`. Google recognises Cloudflare and offers to verify automatically; accept.
+   Then **Sitemaps** → submit `https://azelitech.com/sitemap.xml`, and **URL inspection** → `https://azelitech.com/` → *Request indexing*. First pages usually appear within days.
+2. **Bing Webmaster Tools** (bing.com/webmasters) → *Import from Google Search Console*. This also covers search engines that use Bing's results.
+3. **Google Business Profile** (business.google.com) for Azeli Technologies: a *service-area business* (no shop address shown), category *Marketing agency*, your phone, WhatsApp and `https://azelitech.com`. This is what shows on Google Maps and on the right of search results.
+4. Put `https://azelitech.com` on your Instagram, Facebook, LinkedIn and WhatsApp Business profiles, and ask Amaya to link to you from their site. Links from real businesses help ranking.
+5. Keep it real: replace the bracketed Amaya results in the console with real figures as soon as you have them. Real numbers and a real quote are what convince both Google and hotel owners.
+
+---
+
+# Part B: email (when you are ready)
+
+1. **Google Workspace** (workspace.google.com) → *Business Starter* with `azelitech.com`; when it asks to verify, choose **Cloudflare** and let it add the records. Create mailboxes and a `hello@` group. In the Admin console → *Apps → Gmail → Authenticate email*, generate **DKIM** and add it in Cloudflare.
+2. **Brevo** (brevo.com) → *Starter*. **Senders, Domains & Dedicated IPs → Domains**: add `azelitech.com` and the records it shows (DNS only). **SMTP & API → SMTP**: generate a key.
+3. Cloudflare DNS, once:
+   - TXT `@`: `v=spf1 include:_spf.google.com include:spf.brevo.com ~all` (only one `v=spf1` record may exist)
+   - TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:hello@azelitech.com`
+4. Render:
+   - `azeli-pms`: `SMTP_URL` = `smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587` and `EMAIL_FROM` = `Amaya Hotel & Luxury Suites <reports@azelitech.com>`
+   - `azeli-console`: the same `SMTP_URL`, `EMAIL_FROM` = `Azeli Console <console@azelitech.com>` and `LEAD_NOTIFY` = `hello@azelitech.com` (new enquiries are emailed to the team)
+   Render restarts the services with the new settings.
+5. In Amaya's PMS: **Automatic emails** → add the review link and switch on the pre-arrival and thank-you emails; **Department reports** → schedules.
+
+---
+
+## Adding another hotel
+Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
+
+## Capacity
+A 50-room hotel with 50 staff signed in is a light load for the Starter instance, and a year of its data is tens of megabytes. If pages feel slow at busy times, change that hotel's PMS to *Standard* ($25) in Render: one click, no data moved. Render's closest region to East Africa is Frankfurt (≈150–200 ms from Kampala, fine for a web system). Uganda's Data Protection and Privacy Act allows storing data abroad with adequate protection; mention it in client contracts.
 
 ## Keeping it safe
-- Render restarts the PMS automatically if it stops, and checks `/healthz` before every new version goes live.
-- The database is not reachable from the internet (`ipAllowList: []`), only from the PMS.
-- Render keeps continuous backups of the database (restore to any moment in the last 3 days from the database's *Recovery* page). A nightly off-site copy to Cloudflare R2 is being added. Keep the admin password in a password manager.
+- Both databases are reachable only from their own system inside Render, never from the internet.
+- Render restarts a system automatically if it stops, and checks `/healthz` before each new version goes live.
+- Amaya's database is backed up continuously (restore to any moment in the last 3 days from its *Recovery* page in Render). A nightly off-site copy to Cloudflare R2 is next on the roadmap.
+- The console is hidden from search engines and locks an email for 10 minutes after 5 wrong passwords.
