@@ -1,7 +1,7 @@
 # Azeli Technologies: Hospitality Marketing Website
 
 Static multi-page site for a hospitality marketing consultancy (hotels & restaurants).
-No build step: open `index.html` in a browser, or host the folder on Netlify, Vercel, GitHub Pages or any web host.
+No build step: open `index.html` in a browser. To publish the website and the PMS together, follow **[docs/GO-LIVE.md](docs/GO-LIVE.md)** (Render blueprint in `render.yaml`; `scripts/build-site.sh` publishes only the site's own files).
 
 ## Pages
 - `index.html`: Home (intro, services overview, who we help, case study teaser)

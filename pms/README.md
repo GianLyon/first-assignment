@@ -59,6 +59,8 @@ Money is stored in whole Ugandan shillings. Each property gets its own database.
 
 ## Run it
 
+**Hosting:** see [../docs/GO-LIVE.md](../docs/GO-LIVE.md) for the recommended setup (Render, Frankfurt) and email. Production settings: `NODE_ENV=production`, `TRUST_PROXY=1` behind a hosting load balancer, `AUTO_SEED=1` with `PROPERTY_NAME` and `ADMIN_PASSWORD` to set up the property on the first start. `/healthz` reports whether the app and its database are up.
+
 Requirements: Node.js 20+ and PostgreSQL 14+.
 
 ```bash

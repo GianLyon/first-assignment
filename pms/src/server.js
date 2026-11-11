@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { createPool, migrate } from './db.js';
 import { createApp } from './app.js';
+import { seedAll } from './seed.js';
 import { processOutbox } from './services/distribution.js';
 import { generateDue, processOutbox as sendEmails } from './services/reports.js';
 import { queueGuestEmails } from './services/crm.js';
@@ -9,6 +10,10 @@ import { tx } from './db.js';
 const pool = createPool(config.databaseUrl);
 const applied = await migrate(pool);
 if (applied.length) console.log(`Migrations applied: ${applied.join(', ')}`);
+if (config.autoSeed) {
+  if (config.production && !process.env.ADMIN_PASSWORD) { console.error('AUTO_SEED needs ADMIN_PASSWORD in production.'); process.exit(1); }
+  await seedAll(pool);
+}
 const server = createApp(pool).listen(config.port, () => console.log(`Azeli PMS running on http://localhost:${config.port}`));
 
 // Push queued availability/rate changes to channels every ARI_PUSH_SECONDS (default 20; 0 = off)

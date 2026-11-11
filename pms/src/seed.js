@@ -151,23 +151,31 @@ export async function seedOperations(pool) {
   });
 }
 
+/** Set up everything that is missing; safe to run on every start (each part skips itself once done). */
+export async function seedAll(pool, env = process.env, log = console.log) {
+  const r = await seedProperty(pool, {
+    propertyName: env.PROPERTY_NAME, adminUsername: env.ADMIN_USERNAME,
+    adminPassword: env.ADMIN_PASSWORD, businessDate: env.BUSINESS_DATE,
+  });
+  const p = await seedPos(pool);
+  if (!p.skipped) log('Restaurant, bar and room service set up with a starter menu and tables.');
+  await seedHr(pool);
+  const ops = await seedOperations(pool);
+  if (!ops.skipped) log('Function rooms, event packages and an amenities price list set up.');
+  const dist = await seedDistribution(pool);
+  if (!dist.skipped) log('Rate plans and a test (simulator) channel set up.');
+  const inv = await seedInventory(pool);
+  if (!inv.skipped) log('Stores, stock items, suppliers and recipes set up. Enter your opening stock under Purchasing.');
+  // the address guests use (unsubscribe links); can be changed later under Automatic emails
+  if (env.PUBLIC_URL && /^https?:\/\//.test(env.PUBLIC_URL)) await pool.query('UPDATE settings SET public_url=$1 WHERE id=1 AND public_url IS NULL', [env.PUBLIC_URL.replace(/\/+$/, '')]);
+  if (r.skipped) log('Property settings already exist and were left unchanged.');
+  else log(`Property created. Business date ${r.businessDate}.\nSign in as "${r.username}"${r.generated ? ` with password: ${r.password}\n(Change it after your first sign-in.)` : ' with the password you provided.'}`);
+  return r;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
-  const r = await seedProperty(pool, {
-    propertyName: process.env.PROPERTY_NAME, adminUsername: process.env.ADMIN_USERNAME,
-    adminPassword: process.env.ADMIN_PASSWORD, businessDate: process.env.BUSINESS_DATE,
-  });
-  const p = await seedPos(pool);
-  if (!p.skipped) console.log('Restaurant, bar and room service set up with a starter menu and tables.');
-  await seedHr(pool);
-  const ops = await seedOperations(pool);
-  if (!ops.skipped) console.log('Function rooms, event packages and an amenities price list set up.');
-  const dist = await seedDistribution(pool);
-  if (!dist.skipped) console.log('Rate plans and a test (simulator) channel set up.');
-  const inv = await seedInventory(pool);
-  if (!inv.skipped) console.log('Stores, stock items, suppliers and recipes set up. Enter your opening stock under Purchasing.');
-  if (r.skipped) console.log('Property settings already exist and were left unchanged.');
-  else console.log(`Property created. Business date ${r.businessDate}.\nSign in as "${r.username}"${r.generated ? ` with password: ${r.password}\n(Change it after your first sign-in.)` : ' with the password you provided.'}`);
+  await seedAll(pool);
   await pool.end();
 }

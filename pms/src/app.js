@@ -1,4 +1,5 @@
 import express from 'express';
+import { config } from './config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HttpError, loadUser, requireUser } from './auth.js';
@@ -17,12 +18,18 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'pu
 export function createApp(pool) {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', config.trustProxy);
+
+  // for the hosting platform's health checks: the app is up and the database answers
+  app.get('/healthz', async (_req, res) => {
+    try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); }
+  });
 
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
+    if (config.production) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'");
     next();
   });

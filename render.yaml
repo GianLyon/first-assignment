@@ -1,0 +1,57 @@
+# Render Blueprint: deploys the Azeli Technologies website and Azeli PMS (with its database) in one go.
+# In Render: New → Blueprint → pick this repository. Values marked "sync: false" are asked for on screen.
+services:
+  # Azeli PMS (one installation per property; add another block + database for each new property)
+  - type: web
+    name: azeli-pms
+    runtime: node
+    region: frankfurt          # closest Render region to East Africa
+    plan: starter              # always on; the free plan sleeps, which would stop night-audit emails
+    rootDir: pms
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: azeli-pms-db
+          property: connectionString
+      - key: TRUST_PROXY        # Render's load balancer sits in front of the app
+        value: "1"
+      - key: AUTO_SEED          # sets up the property on the first start
+        value: "1"
+      - key: PROPERTY_NAME      # e.g. Amaya Hotel & Luxury Suites
+        sync: false
+      - key: ADMIN_PASSWORD     # first sign-in as "admin"; change it after signing in
+        sync: false
+      - key: PUBLIC_URL         # e.g. https://pms.azelitechnologies.com
+        sync: false
+      - key: EMAIL_TRANSPORT
+        value: smtp
+      - key: SMTP_URL           # from Brevo: smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587
+        sync: false
+      - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitechnologies.com>
+        sync: false
+
+  # Azeli Technologies website (static, free)
+  - type: web
+    name: azeli-website
+    runtime: static
+    buildCommand: ./scripts/build-site.sh
+    staticPublishPath: ./dist-site
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+databases:
+  - name: azeli-pms-db
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    ipAllowList: []             # reachable only from the PMS inside Render, never from the internet
