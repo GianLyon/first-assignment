@@ -109,6 +109,16 @@ Set **every one to "DNS only" (grey cloud)**: Vercel and Render issue the HTTPS 
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 
+## Forgotten password
+- **A PMS user other than `admin`**: an administrator resets it under **Users** in that hotel's PMS. **A Console team member**: an owner resets it under **Team**.
+- **The PMS `admin` password**: until it is changed inside the PMS, it is the `ADMIN_PASSWORD` value in Render → `azeli-pms` → **Environment** (click the eye icon). Changing that value later does *not* change the password; it is only used on the first start.
+- **If it was changed and forgotten** (PMS `admin`, or the Console owner): Render → the service (`azeli-pms` or `azeli-console`) → **Shell**, then type
+  - PMS: `node src/reset-password.js admin`
+  - Console: `node src/reset-password.js you@example.com`
+
+  and enter the new password twice. That user is signed out everywhere and can sign in with the new password.
+- After 5 wrong attempts, sign-in for that name pauses (PMS 5 minutes, Console 10 minutes). Wait, then try again.
+
 ## Capacity
 A 50-room hotel with 50 staff signed in is a light load for the Starter instance, and a year of its data is tens of megabytes. If pages feel slow at busy times, change that hotel's PMS to *Standard* ($25) in Render: one click, no data moved. Render's closest region to East Africa is Frankfurt (≈150–200 ms from Kampala, fine for a web system). Uganda's Data Protection and Privacy Act allows storing data abroad with adequate protection; mention it in client contracts.
 
