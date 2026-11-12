@@ -154,7 +154,7 @@ export async function cancelReservation(db, user, id, reason) {
   await audit(db, user, 'reservation.cancel', 'reservation', r.id, { reason: why });
 }
 
-export async function checkIn(db, user, id, { room_id, allow_dirty = false, guest = {} } = {}) {
+export async function checkIn(db, user, id, { room_id, allow_dirty = false, guest = {}, stay = {} } = {}) {
   const r = await getReservationForUpdate(db, id);
   const s = await getSettings(db);
   if (r.status !== 'reserved') throw new HttpError(409, 'This reservation is not waiting to check in.');
@@ -165,10 +165,7 @@ export async function checkIn(db, user, id, { room_id, allow_dirty = false, gues
   if (room.hk_status === 'dirty' && !allow_dirty) throw new HttpError(409, `Room ${room.number} has not been cleaned yet.`);
   const { rows: occ } = await db.query("SELECT code FROM reservations WHERE room_id = $1 AND status = 'in_house'", [room.id]);
   if (occ[0]) throw new HttpError(409, `Room ${room.number} is occupied.`);
-  if (guest.id_number || guest.id_type) {
-    await db.query('UPDATE guests SET id_type = COALESCE($2, id_type), id_number = COALESCE($3, id_number) WHERE id = $1',
-      [r.guest_id, text(guest.id_type, 'ID type', { max: 40 }), text(guest.id_number, 'ID number', { max: 60 })]);
-  }
+  await saveRegistration(db, r, guest, stay, { partial: true });
   // Early arrival on a later-dated booking is not allowed above; late arrival keeps the original departure.
   const arrival = r.arrival < s.business_date ? s.business_date : r.arrival;
   if (arrival >= r.departure) throw new HttpError(409, 'This stay has already ended. Update the departure date first.');
@@ -177,9 +174,91 @@ export async function checkIn(db, user, id, { room_id, allow_dirty = false, gues
   return { room: room.number };
 }
 
+const PURPOSES = ['business', 'leisure', 'conference', 'transit', 'other'];
+const ID_TYPES = ['National ID', 'Passport', 'Driving permit', 'Refugee ID', 'Other'];
+/**
+ * The registration card: the guest's identity and this stay's details. With partial, fields not sent are
+ * left as they are (check-in); otherwise the form is saved as a whole (editing the card).
+ */
+export async function saveRegistration(db, r, g = {}, st = {}, { partial = false } = {}) {
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const sets = [], vals = [r.guest_id];
+  const put = (col, v) => { vals.push(v); sets.push(`${col}=$${vals.length}`); };
+  const field = (k, label, max) => { if (!partial || has(g, k)) put(k, text(g[k], label, { max })); };
+  if (!partial || has(g, 'first_name')) put('first_name', text(g.first_name, 'First name', { required: true, max: 80 }));
+  if (!partial || has(g, 'last_name')) put('last_name', text(g.last_name, 'Last name', { max: 80 }) || '');
+  field('phone', 'Phone', 40); field('nationality', 'Nationality', 60); field('address', 'Address', 300); field('id_number', 'ID number', 60); field('id_issued_by', 'ID issued by', 60);
+  if (!partial || has(g, 'email')) {
+    const e = text(g.email, 'Email', { max: 120 })?.toLowerCase() || null;
+    if (e && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e)) throw new HttpError(400, 'That email address is not valid.');
+    put('email', e);
+  }
+  if (!partial || has(g, 'id_type')) { const t = text(g.id_type, 'ID type', { max: 40 }); if (t && !ID_TYPES.includes(t)) throw new HttpError(400, 'Choose an ID type.'); put('id_type', t); }
+  if (!partial || has(g, 'gender')) { const x = g.gender || null; if (x && !['female', 'male', 'other'].includes(x)) throw new HttpError(400, 'Unknown gender.'); put('gender', x); }
+  for (const [k, label] of [['birth_date', 'Date of birth'], ['id_expiry', 'ID expiry date']]) {
+    if (partial && !has(g, k)) continue;
+    const d = g[k] || null;
+    if (d && !isDate(d)) throw new HttpError(400, `${label} is not a valid date.`);
+    put(k, d);
+  }
+  if (sets.length) await db.query(`UPDATE guests SET ${sets.join(', ')} WHERE id=$1`, vals);
+  const rs = [], rv = [r.id];
+  const rput = (col, v) => { rv.push(v); rs.push(`${col}=$${rv.length}`); };
+  if (!partial || has(st, 'purpose')) { const pp = st.purpose || null; if (pp && !PURPOSES.includes(pp)) throw new HttpError(400, 'Unknown purpose of visit.'); rput('purpose', pp); }
+  for (const [k, label] of [['coming_from', 'Coming from'], ['going_to', 'Going to'], ['vehicle_reg', 'Vehicle registration']]) if (!partial || has(st, k)) rput(k, text(st[k], label, { max: 80 }));
+  if (rs.length) await db.query(`UPDATE reservations SET ${rs.join(', ')} WHERE id=$1`, rv);
+}
+
+export async function updateRegistration(db, user, id, body = {}) {
+  const r = await getReservationForUpdate(db, id);
+  if (['cancelled', 'no_show'].includes(r.status)) throw new HttpError(409, 'This booking is closed.');
+  await saveRegistration(db, r, body.guest || {}, body.stay || {});
+  await audit(db, user, 'reservation.registration', 'reservation', r.id, {});
+  return { ok: true };
+}
+
+/** Move an in-house guest to another room, with the reason. A different room type can keep the rate (free upgrade) or take a new one. */
+export async function moveRoom(db, user, id, { room_id, reason, rate, allow_dirty = false } = {}) {
+  const r = await getReservationForUpdate(db, id);
+  const s = await getSettings(db);
+  if (r.status !== 'in_house') throw new HttpError(409, 'Only in-house guests can change rooms.');
+  const why = text(reason, 'Reason for the move', { required: true, max: 300 });
+  const { rows: [to] } = await db.query('SELECT * FROM rooms WHERE id=$1 AND active FOR UPDATE', [Number(room_id)]);
+  if (!to) throw new HttpError(400, 'Choose the new room.');
+  if (to.id === r.room_id) throw new HttpError(400, 'The guest is already in that room.');
+  if (to.hk_status === 'out_of_order') throw new HttpError(409, `Room ${to.number} is out of order.`);
+  if (to.hk_status === 'dirty' && !allow_dirty) throw new HttpError(409, `Room ${to.number} has not been cleaned yet.`);
+  const { rows: [occ] } = await db.query("SELECT code FROM reservations WHERE room_id=$1 AND status='in_house'", [to.id]);
+  if (occ) throw new HttpError(409, `Room ${to.number} is occupied.`);
+  const { rows: [from] } = await db.query('SELECT * FROM rooms WHERE id=$1 FOR UPDATE', [r.room_id]);
+  let newRate = r.rate;
+  if (to.room_type_id !== r.room_type_id) {
+    await lockRoomType(db, to.room_type_id);
+    // the rest of the stay must fit in the new room type (this guest's own nights do not count)
+    const free = await availableCount(db, to.room_type_id, s.business_date, r.departure, r.id);
+    if (free < 1) throw new HttpError(409, 'That room type is fully booked for the rest of this stay.');
+    if (rate !== undefined && rate !== null && rate !== '') {
+      newRate = Number(rate);
+      if (!Number.isInteger(newRate) || newRate < 0) throw new HttpError(400, 'Rate must be a whole number of shillings.');
+    }
+    await db.query('UPDATE reservations SET room_type_id=$2, rate=$3 WHERE id=$1', [r.id, to.room_type_id, newRate]);
+    // nights from tonight are charged at the rate now agreed
+    if (newRate !== r.rate) await db.query('DELETE FROM reservation_nights WHERE reservation_id=$1 AND night >= $2', [r.id, s.business_date]);
+    await enqueueAri(db, r.room_type_id, s.business_date, r.departure, 'room move');
+    await enqueueAri(db, to.room_type_id, s.business_date, r.departure, 'room move');
+  }
+  await db.query('UPDATE reservations SET room_id=$2 WHERE id=$1', [r.id, to.id]);
+  await db.query("UPDATE rooms SET hk_status='dirty' WHERE id=$1 AND hk_status <> 'out_of_order'", [from.id]); // the old room needs cleaning
+  await db.query('INSERT INTO room_moves (reservation_id, from_room_id, to_room_id, reason, old_rate, new_rate, business_date, moved_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [r.id, from.id, to.id, why, r.rate, newRate, s.business_date, user.id]);
+  await audit(db, user, 'reservation.room_move', 'reservation', r.id, { from: from.number, to: to.number, reason: why, rate: newRate });
+  return { from: from.number, to: to.number, rate: newRate };
+}
+
 export async function folio(db, id) {
   const { rows: [r] } = await db.query(
-    `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality,
+    `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality, g.gender, g.address, g.id_issued_by,
+            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip,
             rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number, rp.name AS rate_plan_name, ch.name AS channel_name
      FROM reservations r JOIN guests g ON g.id = r.guest_id JOIN room_types rt ON rt.id = r.room_type_id
      LEFT JOIN rooms rm ON rm.id = r.room_id LEFT JOIN rate_plans rp ON rp.id = r.rate_plan_id LEFT JOIN channels ch ON ch.id = r.channel_id WHERE r.id = $1`, [id]);
@@ -189,7 +268,9 @@ export async function folio(db, id) {
   const totalCharges = charges.filter((c) => !c.voided).reduce((a, c) => a + c.amount, 0);
   const totalPayments = payments.filter((p) => !p.voided).reduce((a, p) => a + p.amount, 0);
   const nights = (await db.query("SELECT to_char(night,'YYYY-MM-DD') AS night, rate FROM reservation_nights WHERE reservation_id=$1 ORDER BY night", [id])).rows;
-  return { reservation: r, charges, payments, nights, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
+  const moves = (await db.query(`SELECT m.*, to_char(m.business_date,'YYYY-MM-DD') AS d, f.number AS from_room, t.number AS to_room, u.full_name AS moved_by_name
+    FROM room_moves m JOIN rooms f ON f.id=m.from_room_id JOIN rooms t ON t.id=m.to_room_id LEFT JOIN users u ON u.id=m.moved_by WHERE m.reservation_id=$1 ORDER BY m.id`, [id])).rows;
+  return { reservation: r, charges, payments, nights, moves, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
 }
 async function balanceOf(db, id) {
   const { rows: [b] } = await db.query(

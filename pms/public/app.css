@@ -250,3 +250,67 @@ fieldset { border: 0; padding: 0; margin: 0; }
 .login-brand small { display: block; margin-top: 5px; font-family: var(--sans, Inter, sans-serif); font-size: .62rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--gold-dark, #a8853f); }
 .mail-text { white-space: pre-wrap; font-size: .82rem; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; max-height: 60vh; overflow: auto; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
+/* ---------- Phase 10: charts ---------- */
+.viz-wrap { width: 100%; overflow: hidden; }
+svg.viz { width: 100%; height: auto; display: block; font-family: var(--sans, Inter, sans-serif); }
+svg.viz .grid { stroke: #ece6db; stroke-width: 1; }
+svg.viz .ax { fill: var(--muted); font-size: 11px; }
+svg.viz .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg.viz .ring { stroke: #fff; stroke-width: 2; }
+svg.viz .lbl, svg.viz .val { fill: var(--text); font-size: 12px; font-weight: 600; }
+svg.viz .cat { fill: var(--text); font-size: 12.5px; }
+svg.viz .track { fill: #f3efe8; }
+svg.viz .xh { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+svg.viz rect.hit { cursor: crosshair; }
+.viz-legend { display: flex; gap: 16px; font-size: .8rem; color: var(--text); margin: 0 0 6px; }
+.viz-legend span, .viz-tip div { display: inline-flex; align-items: center; gap: 6px; }
+i.sw { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+.viz-tip { position: fixed; z-index: 70; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(15,42,46,.15); padding: 8px 10px; font-size: .8rem; pointer-events: none; display: grid; gap: 3px; }
+.viz-tip[hidden] { display: none; }
+.sub3 { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+.mt0 { margin-top: 0; }
+.grid.mini { gap: 8px; }
+.grid.mini > div { background: #f8f5ef; border-radius: 10px; padding: 10px; display: grid; }
+.grid.mini b { font-family: var(--serif); font-size: 1.6rem; color: var(--ink); line-height: 1.1; }
+.grid.mini span { font-size: .75rem; color: var(--muted); }
+/* rooms: one hue, light (quiet) to dark (busy) */
+.room-heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+.rh { border-radius: 8px; padding: 8px; display: grid; gap: 2px; }
+.rh b { font-size: .95rem; } .rh span { font-size: .75rem; }
+.rh.l0 { background: #eaf2fc; color: #1d2a2c; } .rh.l1 { background: #c3daf5; color: #1d2a2c; } .rh.l2 { background: #86b5ea; color: #10233a; }
+.rh.l3 { background: #3c84d8; color: #fff; } .rh.l4 { background: #1c5aa3; color: #fff; }
+.heat-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.heat-legend .rh { width: 14px; height: 14px; padding: 0; border-radius: 4px; display: inline-block; margin-left: 8px; }
+details summary { cursor: pointer; color: var(--info); margin: 8px 0; }
+/* ---------- letterhead, invoices, registration card ---------- */
+.letterhead { display: none; justify-content: space-between; gap: 20px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; margin-bottom: 16px; }
+.lh-left { display: flex; gap: 14px; align-items: flex-start; }
+.lh-logo { max-height: 72px; max-width: 180px; object-fit: contain; }
+.lh-name { font-family: var(--serif); font-size: 1.5rem; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.lh-legal { font-weight: 600; font-size: .85rem; }
+.lh-addr { font-size: .78rem; color: #444; white-space: pre-line; }
+.lh-right { text-align: right; font-size: .8rem; }
+.lh-right .lh-title { font-family: var(--serif); font-size: 1.4rem; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: .04em; }
+.lh-right span { color: var(--muted); }
+.inv-footer { white-space: pre-line; font-size: .82rem; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 12px; }
+.sign-row { gap: 40px; margin-top: 46px; }
+.sign-row div { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: .78rem; }
+.logo-preview { max-height: 64px; max-width: 200px; border: 1px solid var(--line); border-radius: 6px; padding: 4px; background: #fff; }
+#prop-name.has-demo::after { content: "SAMPLE DATA"; margin-left: 10px; font: 600 .62rem/1 var(--sans, Inter, sans-serif); letter-spacing: .08em; background: #fbefd9; color: var(--warn); border-radius: 999px; padding: 4px 8px; vertical-align: 3px; }
+@media print {
+  @page { margin: 12mm; }
+  .letterhead.only-print { display: flex !important; }
+  .sign-row.only-print { display: flex !important; }
+  .tabs, details, .viz-tip, .page-head .row, .page-head .sub a { display: none !important; }
+  .card { break-inside: avoid; border: 1px solid #ddd; }
+  .grid.g4 { grid-template-columns: repeat(4, 1fr); } .grid.g2, .grid.g3 { grid-template-columns: repeat(2, 1fr); }
+  .rh.l3, .rh.l4, .rh.l2, .rh.l1, .rh.l0 { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  svg.viz { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #prop-name.has-demo::after { content: none; }
+  /* the registration card prints on its own; the invoice prints without it */
+  .no-print-unless-reg { display: none !important; }
+  body.print-reg #view > *:not(.reg-card) { display: none !important; }
+  body.print-reg .no-print-unless-reg { display: block !important; border: 0; }
+  body.print-reg .letterhead.reg-only { display: flex !important; }
+}
+@media print { #view a { color: inherit; text-decoration: none; } .letterhead ~ .page-head h1.page { display: none; } }

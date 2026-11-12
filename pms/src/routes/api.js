@@ -1,6 +1,8 @@
 import express from 'express';
 import { generateDue } from '../services/reports.js';
 import { queueGuestEmails } from '../services/crm.js';
+import { dashboardAnalytics } from '../services/analytics.js';
+import * as demo from '../services/demo.js';
 import { tx } from '../db.js';
 import {
   HttpError, requireUser, requirePerm, can, ROLES, PERMISSIONS, ALL_PERMISSIONS, hashPassword, verifyPassword, createSession, sessionCookie, clearCookie,
@@ -35,7 +37,7 @@ export function apiRouter(pool) {
   });
   r.post('/auth/logout', async (req, res) => { await destroySession(pool, req); res.setHeader('Set-Cookie', clearCookie()); res.json({ ok: true }); });
   r.get('/auth/me', requireUser, async (req, res) => {
-    const s = await fo.getSettings(pool);
+    const { group_token_hash, ...s } = await fo.getSettings(pool);
     res.json({ user: req.user, permissions: PERMISSIONS[req.user.role], settings: s });
   });
   r.post('/auth/change-password', requireUser, async (req, res) => {
@@ -50,7 +52,35 @@ export function apiRouter(pool) {
   r.use(requireUser);
 
   /* ---------- settings, room types, rooms ---------- */
-  r.get('/settings', async (_req, res) => res.json(await fo.getSettings(pool)));
+  r.get('/settings', async (_req, res) => { const { group_token_hash, ...st } = await fo.getSettings(pool); res.json(st); });
+  // letterhead on printed invoices and reports
+  r.put('/settings/letterhead', requirePerm('settings.manage'), inTx(async (db, req) => {
+    const b = req.body || {};
+    const t = (v, label, max) => { const x = String(v ?? '').trim(); if (x.length > max) throw new HttpError(400, `${label} is too long.`); return x || null; };
+    const logo = b.logo === undefined ? undefined : (b.logo || null);
+    if (logo && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo) || logo.length > 400000)) throw new HttpError(400, 'The logo must be a PNG, JPG or WebP image under about 280 KB.');
+    const email = t(b.contact_email, 'Email', 120);
+    if (email && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) throw new HttpError(400, 'That email address is not valid.');
+    await db.query(`UPDATE settings SET legal_name=$1, address=$2, contact_phone=$3, contact_email=$4, website=$5, tin=$6, invoice_footer=$7${logo === undefined ? '' : ', logo=$8'} WHERE id=1`,
+      [t(b.legal_name, 'Registered name', 150), t(b.address, 'Address', 300), t(b.contact_phone, 'Phone', 60), email, t(b.website, 'Website', 120), t(b.tin, 'TIN', 30), t(b.invoice_footer, 'Invoice note', 600), ...(logo === undefined ? [] : [logo])]);
+    await audit(db, req.user, 'settings.letterhead', 'settings', 1, { logo: logo === undefined ? 'unchanged' : logo ? 'set' : 'removed' });
+    return { ok: true };
+  }));
+  // sample data for trying the system (administrator only)
+  r.get('/demo', requirePerm('users.manage'), async (_req, res) => res.json({ ...demo.demoStatus(), demo_data: (await fo.getSettings(pool)).demo_data }));
+  r.post('/demo', requirePerm('users.manage'), async (req, res) => {
+    const days = Math.min(90, Math.max(7, Number(req.body?.days) || 45));
+    if (demo.demoStatus().running) throw new HttpError(409, 'Sample data is already being created.');
+    await demo.assertEmpty(pool); // refuse at once on a system already in use
+    const started = demo.generateDemoData(pool, req.user, { days });
+    started.catch(() => {}); // progress and errors are reported by GET /demo
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const st = demo.demoStatus();
+    if (st.error) throw new HttpError(409, st.error);
+    res.json(st);
+  });
+  r.post('/demo/remove', requirePerm('users.manage'), inTx((_db, req) => demo.removeDemoData(pool, req.user, req.body || {})));
+  r.get('/analytics', requirePerm('reports.view'), async (req, res) => res.json(await dashboardAnalytics(pool, { from: req.query.from, to: req.query.to })));
   r.put('/settings', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {};
     const name = String(b.property_name || '').trim(); const vat = Number(b.vat_rate);
@@ -146,6 +176,8 @@ export function apiRouter(pool) {
   r.put('/reservations/:id', requirePerm('reservations.manage'), inTx((db, req) => fo.updateReservation(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/cancel', requirePerm('reservations.manage'), inTx(async (db, req) => { await fo.cancelReservation(db, req.user, id(req), req.body?.reason); return { ok: true }; }));
   r.post('/reservations/:id/check-in', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.checkIn(db, req.user, id(req), req.body || {})));
+  r.put('/reservations/:id/registration', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.updateRegistration(db, req.user, id(req), req.body || {})));
+  r.post('/reservations/:id/move', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.moveRoom(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/check-out', requirePerm('frontdesk.checkout'), inTx((db, req) => fo.checkOut(db, req.user, id(req))));
   r.post('/reservations/:id/charges', requirePerm('folio.post'), inTx((db, req) => fo.postCharge(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/payments', requirePerm('payments.post'), inTx((db, req) => fo.postPayment(db, req.user, id(req), req.body || {})));
