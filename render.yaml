@@ -1,0 +1,85 @@
+# Render Blueprint: deploys Azeli PMS and the Azeli Console (admin panel), each with a private database.
+# The website itself is on Vercel (vercel.json).
+# In Render: New → Blueprint → pick this repository. Values marked "sync: false" are asked for on screen.
+services:
+  # Azeli PMS (one installation per property; add another block + database for each new property)
+  - type: web
+    name: azeli-pms
+    runtime: node
+    region: frankfurt          # closest Render region to East Africa
+    plan: starter              # always on; the free plan sleeps, which would stop night-audit emails
+    rootDir: pms
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: azeli-pms-db
+          property: connectionString
+      - key: TRUST_PROXY        # Render's load balancer sits in front of the app
+        value: "1"
+      - key: AUTO_SEED          # sets up the property on the first start
+        value: "1"
+      - key: PROPERTY_NAME      # e.g. Amaya Hotel & Luxury Suites
+        sync: false
+      - key: ADMIN_PASSWORD     # first sign-in as "admin"; change it after signing in
+        sync: false
+      - key: PUBLIC_URL         # e.g. https://amaya.azelitech.com
+        sync: false
+      - key: EMAIL_TRANSPORT
+        value: smtp
+      - key: SMTP_URL           # from Brevo: smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587
+        sync: false
+      - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitech.com>
+        sync: false
+
+  # Azeli Console: the Azeli Technologies admin panel (admin.azelitech.com)
+  - type: web
+    name: azeli-console
+    runtime: node
+    region: frankfurt
+    plan: starter
+    rootDir: console
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: azeli-console-db
+          property: connectionString
+      - key: TRUST_PROXY
+        value: "1"
+      - key: SITE_ORIGINS        # the website that may send enquiries to the console
+        value: https://azelitech.com,https://www.azelitech.com
+      - key: OWNER_NAME          # your name, as shown in the console
+        sync: false
+      - key: OWNER_EMAIL         # your sign-in for the console, e.g. you@azelitech.com
+        sync: false
+      - key: OWNER_PASSWORD      # at least 10 characters; change it after signing in
+        sync: false
+      - key: VERCEL_DEPLOY_HOOK  # Vercel → Settings → Git → Deploy Hooks; Publish uses it to rebuild the website
+        sync: false
+      - key: SMTP_URL            # optional: email the team about new enquiries (same Brevo line as the PMS)
+        sync: false
+      - key: LEAD_NOTIFY         # optional: who gets those emails, e.g. hello@azelitech.com
+        sync: false
+
+
+databases:
+  - name: azeli-pms-db
+    region: frankfurt
+    plan: basic-1gb            # 1 GB memory: room for reports and several years of data; continuous backups
+    postgresMajorVersion: "16"
+    ipAllowList: []             # reachable only from the PMS inside Render, never from the internet
+
+  - name: azeli-console-db
+    region: frankfurt
+    plan: basic-256mb           # enquiries, website text and the client list: small
+    postgresMajorVersion: "16"
+    ipAllowList: []

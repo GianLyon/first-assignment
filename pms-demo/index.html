@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Azeli PMS Demo</title>
+  <meta name="description" content="Interactive demo of Azeli PMS: front office, booking engine, POS, inventory, requisitions, HR, accounting, assets, events and automated reports." />
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="icon" type="image/svg+xml" href="../images/brand/azeli-mark.svg" />
+</head>
+<body>
+  <div class="demo-banner">
+    <span><b>Demo</b> with sample data for a fictional hotel. Changes are saved in this browser only.</span>
+    <button type="button" data-action="reset-demo">Reset demo data</button>
+    <a href="../pms.html">← Back to website</a>
+  </div>
+
+  <div class="app">
+    <aside class="side" aria-label="Modules">
+      <div class="brand"><img class="mark" src="../images/brand/azeli-mark-light.svg" alt="" width="32" height="32"><span>Azeli <em>PMS</em></span></div>
+      <nav id="side-nav"></nav>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show modules">☰</button>
+        <div class="prop">
+          <b>Lakeview Hotel &amp; Suites</b>
+          <span id="biz-date"></span>
+        </div>
+        <div class="top-actions">
+          <button class="btn btn-ghost" type="button" data-action="night-audit" title="Post tonight's room charges and move to the next business day">Run night audit</button>
+          <span class="user" title="Signed in as">GM · General Manager</span>
+        </div>
+      </header>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="modal-wrap" id="modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head"><h2 id="modal-title"></h2><button type="button" class="x" data-action="close-modal" aria-label="Close">×</button></div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

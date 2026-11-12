@@ -1,0 +1,22 @@
+{
+  "name": "azeli-pms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Azeli PMS: hotel property management system (front office, folios, night audit, accounting core).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/migrate.js",
+    "seed": "node src/seed.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "nodemailer": "10.2.1",
+    "pg": "^8.23.1"
+  }
+}

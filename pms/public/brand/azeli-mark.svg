@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Azeli">
+  <rect width="64" height="64" rx="15" fill="#0f2a2e"/>
+  <path d="M14 49 L32 15 L50 49" fill="none" stroke="#faf6ef" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M23.5 49 A8.5 8.5 0 0 1 40.5 49 Z" fill="#c9a45c"/>
+</svg>
