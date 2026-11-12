@@ -85,6 +85,7 @@
     const { r } = route();
     $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules', guest: 'guests', campaign: 'campaigns' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
     $('#prop-name').textContent = SETTINGS.property_name;
+    $('#prop-name').classList.toggle('has-demo', !!SETTINGS.demo_data);
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
   }
   async function refreshSettings() { const me = await GET('/auth/me'); SETTINGS = me.settings; }
@@ -104,7 +105,7 @@
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) $('#view').innerHTML = html;
+      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -161,21 +162,34 @@
     if (['reserved', 'in_house', 'checked_out'].includes(r.status) && CAN['payments.post'] && (r.status !== 'checked_out' || t.balance > 0)) acts.push(`<button class="btn btn-ghost" data-action="take-payment" data-id="${r.id}" data-bal="${t.balance}" data-company="${esc(r.company_name || '')}">Take payment</button>`);
     if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="edit-res" data-id="${r.id}">Edit stay</button>`);
     if (r.status === 'reserved' && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="cancel-res" data-id="${r.id}">Cancel booking</button>`);
+    if (r.status === 'in_house' && CAN['frontdesk.checkin']) acts.push(`<button class="btn btn-ghost" data-action="move-room" data-id="${r.id}">Move room</button>`);
+    if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="extend-stay" data-id="${r.id}">Extend stay</button>`);
+    if (['reserved', 'in_house', 'checked_out'].includes(r.status) && CAN['frontdesk.checkin']) acts.push(`<button class="btn btn-ghost" data-action="reg-edit" data-id="${r.id}">Registration card</button>`);
     acts.push('<button class="btn btn-ghost" data-action="print">Print invoice</button>');
+    if (r.status !== 'cancelled') acts.push('<button class="btn btn-ghost" data-action="print-reg">Print registration card</button>');
     const voidBtn = (kind, x) => !x.voided && CAN['folio.void'] ? `<button class="link small" data-action="void" data-kind="${kind}" data-id="${x.id}">Void</button>` : (x.voided ? `<span class="small muted" title="${esc(x.void_reason)}">void</span>` : '');
     return `<div class="page-head no-print"><div><p class="sub"><a href="#reservations">← Reservations</a></p><h1 class="page">${esc(guestName(r))}</h1><p class="sub">${esc(r.code)} · ${statusPill(r.status)}</p></div><div class="row">${acts.join('')}</div></div>
-      <div class="card"><div class="inv-head"><div><div class="only-print"><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Guest invoice · printed ${fdateLong(bd)}</p></div>
+      ${letterhead(t.balance > 0 ? 'Invoice' : 'Receipt', [['No.', r.code], ['Date', fdateLong(bd)], ...(r.company_name ? [['Bill to', r.company_name]] : [])])}
+      <div class="card invoice"><div class="inv-head"><div>
         <dl class="kv"><dt>Guest</dt><dd><a href="#guest/${r.guest_id}">${esc(guestName(r))}</a></dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
         <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd></dl></div>
         ${r.overbooked && r.status === 'reserved' ? '<p class="note err">Overbooked: this channel booking arrived when no room of this type was free. Move or upgrade another booking before arrival.</p>' : ''}
         ${f.nights.length ? `<p class="small muted">Nightly prices: ${f.nights.map((n) => `${fdate(n.night)} ${num(n.rate)}`).join(' · ')}</p>` : ''}
-        ${r.notes ? `<p class="note">${esc(r.notes)}</p>` : ''}
+        ${r.notes ? `<p class="note no-print">${esc(r.notes)}</p>` : ''}
         <h2 class="sec mt">Charges</h2>
         ${table(['Date', 'Description', 'Department', '#Amount', ''], f.charges.map((c) => `<tr class="${c.voided ? 'void' : ''}"><td class="nowrap">${fdate(c.business_date)}</td><td>${esc(c.description)}</td><td>${DEPT[c.department]}</td><td class="num">${num(c.amount)}</td><td class="right no-print">${voidBtn('charge', c)}</td></tr>`), 'No charges yet.')}
         <h2 class="sec mt">Payments</h2>
         ${table(['Date', 'Method', 'Reference', '#Amount', ''], f.payments.map((p) => `<tr class="${p.voided ? 'void' : ''}"><td class="nowrap">${fdate(p.business_date)}</td><td>${METHOD[p.method]}</td><td>${esc(p.reference || '')}</td><td class="num">${num(p.amount)}</td><td class="right no-print">${voidBtn('payment', p)}</td></tr>`), 'No payments yet.')}
         ${table(['Summary', '#UGX'], [`<tr><td>Total charges</td><td class="num">${num(t.charges)}</td></tr>`, `<tr><td>Total paid</td><td class="num">${num(t.payments)}</td></tr>`, `<tr class="total"><td>${t.balance < 0 ? 'Credit due to guest' : 'Balance due'}</td><td class="num">${num(Math.abs(t.balance))}</td></tr>`])}
-        <p class="small muted">Prices include VAT at ${num(SETTINGS.vat_rate)}%.</p></div>`;
+        ${(() => { const vat = Math.round(t.charges * Number(SETTINGS.vat_rate) / (100 + Number(SETTINGS.vat_rate))); return `<p class="small">Of the total charges, VAT at ${num(SETTINGS.vat_rate)}% is UGX ${num(vat)} (net UGX ${num(t.charges - vat)}).</p>`; })()}
+        ${f.moves.length ? `<div class="no-print"><h2 class="sec mt">Room moves</h2>${table(['Date', 'From', 'To', 'Reason', 'Rate', 'By'], f.moves.map((m) => `<tr><td>${fdate(m.d)}</td><td>${esc(m.from_room)}</td><td>${esc(m.to_room)}</td><td>${esc(m.reason)}</td><td>${m.new_rate !== m.old_rate ? `${num(m.old_rate)} → ${num(m.new_rate)}` : num(m.new_rate)}</td><td>${esc(m.moved_by_name || '')}</td></tr>`))}</div>` : ''}
+        ${SETTINGS.invoice_footer ? `<p class="inv-footer">${esc(SETTINGS.invoice_footer)}</p>` : ''}
+        <div class="only-print sign-row"><div>Guest signature</div><div>Cashier</div></div></div>
+      <div class="card mt reg-card no-print-unless-reg">${letterhead('Guest registration card', [['Booking', r.code]]).replace('only-print letterhead', 'letterhead reg-only')}
+        <h2 class="sec">Registration card</h2>
+        <div class="grid g2"><dl class="kv"><dt>Name</dt><dd>${esc(guestName(r))}</dd><dt>Gender</dt><dd>${esc(GENDER[r.gender] || '–')}</dd><dt>Date of birth</dt><dd>${r.birth_date ? fdateLong(r.birth_date) : '–'}</dd><dt>Nationality</dt><dd>${esc(r.nationality || '–')}</dd><dt>Address</dt><dd>${esc(r.address || '–')}</dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd></dl>
+        <dl class="kv"><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd><dt>Issued by</dt><dd>${esc(r.id_issued_by || '–')}</dd><dt>ID expires</dt><dd>${r.id_expiry ? fdateLong(r.id_expiry) : '–'}</dd><dt>Purpose</dt><dd>${esc(PURPOSE[r.purpose] || '–')}</dd><dt>Coming from</dt><dd>${esc(r.coming_from || '–')}</dd><dt>Going to</dt><dd>${esc(r.going_to || '–')}</dd><dt>Vehicle</dt><dd>${esc(r.vehicle_reg || '–')}</dd><dt>Room</dt><dd>${esc(r.room_number || '–')} · ${fdate(r.arrival)} → ${fdate(r.departure)}</dd></dl></div>
+        <div class="only-print sign-row"><div>Guest signature</div><div>Receptionist</div></div></div>`;
   };
 
   VIEWS.availability = async () => {
@@ -231,6 +245,16 @@
     const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]);
     return `<div class="page-head"><div><h1 class="page">Settings</h1><p class="sub">Property details, room types and rooms.</p></div></div>
       <div class="card"><h2 class="sec">Property</h2><form class="form" data-form="settings"><div class="two"><label>Property name<input name="property_name" value="${esc(SETTINGS.property_name)}" required></label><label>VAT rate (%)<input name="vat_rate" type="number" step="0.01" min="0" max="99" value="${SETTINGS.vat_rate}" required></label></div><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      <div class="card mt"><h2 class="sec">Letterhead (printed invoices and reports)</h2><form class="form" data-form="letterhead">
+        <div class="two"><label>Registered company name<input name="legal_name" value="${esc(SETTINGS.legal_name || '')}" maxlength="150" placeholder="e.g. Amaya Hotels Ltd"></label><label>TIN<input name="tin" value="${esc(SETTINGS.tin || '')}" maxlength="30"></label></div>
+        <label>Address<textarea name="address" rows="2" maxlength="300" placeholder="Plot, street, P.O. Box, town">${esc(SETTINGS.address || '')}</textarea></label>
+        <div class="three"><label>Phone<input name="contact_phone" value="${esc(SETTINGS.contact_phone || '')}" maxlength="60"></label><label>Email<input name="contact_email" type="email" value="${esc(SETTINGS.contact_email || '')}" maxlength="120"></label><label>Website<input name="website" value="${esc(SETTINGS.website || '')}" maxlength="120"></label></div>
+        <label>Note at the bottom of invoices (bank details, thank-you…)<textarea name="invoice_footer" rows="2" maxlength="600">${esc(SETTINGS.invoice_footer || '')}</textarea></label>
+        <div class="two"><label>Logo (PNG, JPG or WebP)<input type="file" name="logo_file" accept="image/png,image/jpeg,image/webp"></label><div>${SETTINGS.logo ? `<img class="logo-preview" src="${esc(SETTINGS.logo)}" alt="Current logo"><label class="row small"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label>` : '<p class="small muted">No logo yet.</p>'}</div></div>
+        <div class="actions"><button class="btn btn-gold">Save letterhead</button></div></form></div>
+      ${CAN['users.manage'] ? `<div class="card mt"><h2 class="sec">Sample data (for trying the system)</h2>${SETTINGS.demo_data
+        ? `<p>This system contains <b>sample data</b>: made-up guests, bookings, sales and expenses for practice. Remove it before you start using the system for real.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn btn-bad" data-action="demo-remove">Remove sample data and start fresh</button></div>`
+        : `<p>Fill a new, unused system with 45 days of realistic made-up activity (bookings, in-house guests, restaurant and bar sales, extras, expenses and closed days) so you can explore every screen with real-looking figures. It can be removed completely later.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn" data-action="demo-add">Add sample data</button></div>`}</div>` : ''}
       <div class="card mt"><div class="row between"><h2 class="sec">Room types</h2><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div>
         ${table(['Code', 'Name', '#Rate (UGX)', '#Max guests', 'Active', ''], types.map((t) => `<tr><td>${esc(t.code)}</td><td>${esc(t.name)}</td><td class="num">${num(t.base_rate)}</td><td class="num">${t.max_occupancy}</td><td>${t.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
       <div class="card mt"><div class="row between"><h2 class="sec">Rooms</h2><button class="btn btn-sm btn-gold" data-action="room-edit">+ Room</button></div>
@@ -831,10 +855,10 @@
     modal(`Check in · ${guestName(r)}`, `<form class="form" data-form="check-in">
       <dl class="kv"><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)}</dd><dt>Booked</dt><dd>${esc(r.room_type_name)} · ${ugx(r.rate)}/night</dd></dl>
       <label>Room<select name="room_id" required>${sameType.length ? `<optgroup label="${esc(r.room_type_name)}">${opts(sameType.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}${others.length ? `<optgroup label="Other types (upgrade/move)">${opts(others.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}</select></label>
-      <div class="two"><label>ID type<select name="id_type">${opts([['', '–'], ['National ID', 'National ID'], ['Passport', 'Passport'], ['Driving permit', 'Driving permit']], r.id_type || '')}</select></label><label>ID number<input name="id_number" value="${esc(r.id_number || '')}" maxlength="60"></label></div>
+      ${registrationFields(r)}
       <label class="row"><input type="checkbox" name="allow_dirty" value="1"> Allow a room that has not been cleaned yet</label>
       <div class="actions">${cancelBtn}<button class="btn btn-gold" ${free.length ? '' : 'disabled'}>Check in</button></div></form>`,
-      async (v) => { const res = await POST(`/reservations/${id}/check-in`, { room_id: Number(v.room_id), allow_dirty: !!v.allow_dirty, guest: { id_type: v.id_type || null, id_number: v.id_number || null } }); return `Checked in to room ${esc(res.room)}.`; });
+      async (v) => { const res = await POST(`/reservations/${id}/check-in`, { room_id: Number(v.room_id), allow_dirty: !!v.allow_dirty, ...regBody(v) }); return `Checked in to room ${esc(res.room)}.`; });
   }
   async function paymentForm(id, bal, company) {
     const cos = (await GET('/finance/companies').catch(() => [])).filter((c) => c.active);
@@ -1359,6 +1383,239 @@
   });
   // keep what was typed when the audience is re-checked on an unsaved campaign
   function restoreDraft(v) { const f = $('form[data-form=campaign]'); if (!f) return; for (const [k, val] of Object.entries(v)) { const el = f.elements[k]; if (el && el.type !== 'submit') el.value = val; } }
+
+  /* ---------- Phase 10: analytics, registration, room moves, letterhead printing, sample data ---------- */
+  // validated categorical palette (fixed order) — revenue arms always keep their colour
+  const VZ = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'];
+  const ARM_COLOR = { rooms: VZ[0], fnb: VZ[1], amenities: VZ[2], events: VZ[3], other: VZ[4] };
+  const pct1 = (v) => `${(Math.round((Number(v) || 0) * 1000) / 10).toFixed(1)}%`;
+  const shortUgx = (n) => { const a = Math.abs(n); return (n < 0 ? '−' : '') + (a >= 1e6 ? `${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `${Math.round(a / 1e3)}k` : String(Math.round(a))); };
+  const CHARTS = {};
+  let chartSeq = 0;
+  const niceMax = (v) => { if (v <= 0) return 1; const p = 10 ** Math.floor(Math.log10(v)); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p; };
+
+  /** Line chart (one y-axis), crosshair tooltip on hover, legend above and the last value labelled. */
+  function lineChart({ labels, series, fmt = shortUgx, fmtFull = (v) => ugx(v), max: fixedMax, height = 220, width = 640 }) {
+    const id = `c${++chartSeq}`, W = width, H = height, L = 52, Rm = 60, T = 12, B = 26;
+    const vals = series.flatMap((s) => s.values.filter((v) => v != null));
+    const max = fixedMax ?? niceMax(Math.max(0, ...vals)), n = labels.length;
+    const x = (i) => L + (n <= 1 ? (W - L - Rm) / 2 : (i * (W - L - Rm)) / (n - 1)), y = (v) => T + (H - T - B) * (1 - v / max);
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * max);
+    const every = Math.max(1, Math.ceil(n / 7));
+    let svg = `<svg class="viz" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map((s) => s.name).join(' and '))} per day">`;
+    svg += ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - Rm}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${esc(fmt(t))}</text>`).join('');
+    svg += labels.map((l, i) => (i % every === 0 || i === n - 1 ? `<text class="ax" x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(fdate(l).replace(/^\w+ /, ''))}</text>` : '')).join('');
+    for (const s of series) {
+      const pts = s.values.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`));
+      const segs = []; let cur = [];
+      for (const p of pts) { if (p) cur.push(p); else if (cur.length) { segs.push(cur); cur = []; } }
+      if (cur.length) segs.push(cur);
+      svg += segs.map((sg) => (sg.length > 1 ? `<polyline class="ln" points="${sg.join(' ')}" stroke="${s.color}"/>` : `<circle cx="${sg[0].split(',')[0]}" cy="${sg[0].split(',')[1]}" r="4" fill="${s.color}"/>`)).join('');
+      const li = s.values.map((v, i) => [v, i]).filter(([v]) => v != null).pop();
+      if (li) svg += `<circle cx="${x(li[1])}" cy="${y(li[0])}" r="4" fill="${s.color}" class="ring"/><text class="lbl" x="${x(li[1]) + 8}" y="${y(li[0]) + 4}">${esc(fmt(li[0]))}</text>`;
+    }
+    svg += `<line class="xh" id="${id}-xh" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>`;
+    svg += `<rect class="hit" data-chart="${id}" x="${L}" y="${T}" width="${W - L - Rm}" height="${H - T - B}" fill="transparent"/></svg>`;
+    CHARTS[id] = { labels, series, n, L, W, Rm, fmtFull, x };
+    const legend = series.length > 1 ? `<div class="legend viz-legend">${series.map((s) => `<span><i class="sw" data-c="${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>` : '';
+    return `${legend}<div class="viz-wrap">${svg}</div>`;
+  }
+  /** Horizontal bars with the value written beside every bar. */
+  function hBars(rows, { fmt = (v) => num(v), max: fixedMax } = {}) {
+    const W = 640, rowH = 34, L = 150, Rm = 120, H = rows.length * rowH + 4;
+    const max = fixedMax ?? Math.max(1, ...rows.map((r) => r.value));
+    const svg = rows.map((r, i) => {
+      const w = Math.max(0, ((W - L - Rm) * r.value) / max), yy = i * rowH + 6;
+      return `<text class="cat" x="${L - 10}" y="${yy + 15}" text-anchor="end">${esc(r.label)}</text>
+        <rect x="${L}" y="${yy + 2}" width="${W - L - Rm}" height="18" rx="4" class="track"/>${w > 0 ? `<rect x="${L}" y="${yy + 2}" width="${Math.max(4, w)}" height="18" rx="4" fill="${r.color}"/>` : ''}
+        <text class="val" x="${L + Math.max(4, w) + 8}" y="${yy + 15}">${esc(r.display ?? fmt(r.value))}</text>`;
+    }).join('');
+    return `<div class="viz-wrap"><svg class="viz" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(rows.map((r) => `${r.label} ${r.display ?? fmt(r.value)}`).join(', '))}">${svg}</svg></div>`;
+  }
+  // hover: crosshair + tooltip for line charts
+  document.addEventListener('mousemove', (e) => {
+    const hit = e.target.closest?.('rect.hit');
+    const tip = $('#viz-tip');
+    if (!hit) { if (tip && !tip.hidden) { tip.hidden = true; document.querySelectorAll('line.xh').forEach((l) => l.setAttribute('visibility', 'hidden')); } return; }
+    const c = CHARTS[hit.dataset.chart]; if (!c) return;
+    const svg = hit.ownerSVGElement, box = svg.getBoundingClientRect(), vx = ((e.clientX - box.left) / box.width) * c.W;
+    const i = Math.max(0, Math.min(c.n - 1, Math.round(((vx - c.L) / (c.W - c.L - c.Rm)) * (c.n - 1))));
+    const xh = svg.querySelector('line.xh'); xh.setAttribute('x1', c.x(i)); xh.setAttribute('x2', c.x(i)); xh.setAttribute('visibility', 'visible');
+    let t = tip; if (!t) { t = document.createElement('div'); t.id = 'viz-tip'; t.className = 'viz-tip'; document.body.append(t); }
+    t.innerHTML = `<b>${esc(fdate(c.labels[i]))}</b>${c.series.map((s) => `<div><i class="sw" data-c="${s.color}"></i>${esc(s.name)}: <b>${s.values[i] == null ? '—' : esc(c.fmtFull(s.values[i]))}</b></div>`).join('')}`;
+    t.querySelectorAll('i.sw').forEach((sw) => { sw.style.background = sw.dataset.c; });
+    t.hidden = false;
+    t.style.left = `${Math.min(window.innerWidth - t.offsetWidth - 8, e.clientX + 14)}px`; t.style.top = `${e.clientY + 14}px`;
+  });
+  // legend swatches take their colour from data-c (inline style attributes are blocked by the page's security policy)
+  const paintSwatches = () => document.querySelectorAll('#view i.sw[data-c]').forEach((sw) => { sw.style.background = sw.dataset.c; });
+
+  async function analyticsSection() {
+    const p = cur('an', '30');
+    const bd = SETTINGS.business_date, to = addDays(bd, -1), from = addDays(to, -(Number(p) - 1));
+    const a = await GET(`/analytics?from=${from}&to=${to}`);
+    const t = a.totals, armsTotal = a.arms.reduce((s, x) => s + x.amount, 0) || 1;
+    const lvl = (o) => (o >= 0.85 ? 4 : o >= 0.65 ? 3 : o >= 0.45 ? 2 : o >= 0.2 ? 1 : 0);
+    return `<div class="row between mt"><h2 class="sec mt0">Performance: ${fdate(a.from)} → ${fdate(a.to)}</h2>${tabs('an', [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']], '30')}</div>
+      ${!a.audited_days ? '<p class="note">No night audit has closed a day in this period yet, so there is nothing to show. Run the night audit, or add sample data under Settings to explore.</p>' : ''}
+      <div class="grid g4">
+        <div class="card kpi"><span>Revenue</span><b>${shortUgx(t.income)}</b><small>UGX ${num(t.income)} excl. VAT</small></div>
+        <div class="card kpi"><span>Expenses</span><b>${shortUgx(t.expenses)}</b><small>UGX ${num(t.expenses)}</small></div>
+        <div class="card kpi"><span>Result</span><b class="${t.net < 0 ? 'err' : ''}">${shortUgx(t.net)}</b><small>${t.income ? `${pct1(t.net / t.income)} of revenue` : 'UGX'}</small></div>
+        <div class="card kpi"><span>Money collected</span><b>${shortUgx(t.collected)}</b><small>cash, cards, mobile money, transfers</small></div>
+        <div class="card kpi"><span>Occupancy</span><b>${pct1(t.occupancy)}</b><small>${num(t.rooms_sold)} of ${num(t.available)} room nights</small></div>
+        <div class="card kpi"><span>Average room rate</span><b>${shortUgx(t.adr)}</b><small>RevPAR UGX ${num(t.revpar)}</small></div>
+        <div class="card kpi"><span>Average stay</span><b>${t.avg_stay}</b><small>nights · ${t.stays} stays, ${t.no_shows} no-shows</small></div>
+        <div class="card kpi"><span>Restaurant & bar</span><b>${shortUgx(t.fnb_avg_check)}</b><small>average bill · ${num(t.fnb_checks)} bills, ${num(t.fnb_covers)} covers</small></div>
+      </div>
+      <div class="grid g2 mt">
+        <div class="card"><h2 class="sec">Revenue by department</h2>${hBars(a.arms.map((x) => ({ label: x.label, value: x.amount, color: ARM_COLOR[x.key], display: `${shortUgx(x.amount)} · ${pct1(x.amount / armsTotal)}` })))}
+          <p class="small muted">Excluding VAT, from the accounts.</p></div>
+        <div class="card"><h2 class="sec">Rooms today</h2>
+          <div class="grid g4 mini"><div><b>${a.today.occupied}</b><span>Occupied</span></div><div><b>${a.today.vacant_clean}</b><span>Vacant, clean</span></div><div><b>${a.today.vacant_dirty}</b><span>Vacant, to clean</span></div><div><b>${a.today.ooo}</b><span>Out of order</span></div></div>
+          <p class="small">${pct1(a.today.occupancy)} occupied tonight · ${a.today.guests} guests in-house</p>
+          <h3 class="sub3">Next 7 nights (booked so far)</h3>${hBars(a.forecast.map((f) => ({ label: fdate(f.date), value: f.occupancy, color: VZ[0], display: `${pct1(f.occupancy)} · ${f.rooms} rooms` })), { max: 1 })}</div>
+      </div>
+      <div class="card mt"><h2 class="sec">Income and expenses per day</h2>
+        ${lineChart({ labels: a.daily.map((d) => d.date), series: [{ name: 'Income', color: VZ[0], values: a.daily.map((d) => d.income) }, { name: 'Expenses', color: VZ[1], values: a.daily.map((d) => d.expenses) }], width: 1200, height: 300 })}
+        <details class="no-print"><summary class="small">Show as a table</summary>${table(['Day', '#Income', '#Expenses', '#Result', '#Collected'], a.daily.slice().reverse().map((d) => `<tr><td>${fdate(d.date)}</td><td class="num">${num(d.income)}</td><td class="num">${num(d.expenses)}</td><td class="num ${d.net < 0 ? 'err' : ''}">${num(d.net)}</td><td class="num">${num(d.collected)}</td></tr>`))}</details>
+        <p class="small muted">Salaries, rent and similar monthly costs show on the day they are paid.</p></div>
+      <div class="grid g2 mt">
+        <div class="card"><h2 class="sec">Occupancy per night</h2>${lineChart({ labels: a.daily.map((d) => d.date), series: [{ name: 'Occupancy', color: VZ[0], values: a.daily.map((d) => d.occupancy) }], fmt: (v) => `${Math.round(v * 100)}%`, fmtFull: pct1, max: 1, height: 200 })}</div>
+        <div class="card"><h2 class="sec">Occupancy by room type</h2>${hBars(a.room_types.map((rt) => ({ label: rt.name, value: rt.occupancy, color: VZ[0], display: `${pct1(rt.occupancy)} · ${rt.nights} nights · ${shortUgx(rt.revenue)}` })), { max: 1 })}</div>
+      </div>
+      <div class="card mt"><h2 class="sec">Room by room</h2><p class="small muted">Share of nights each room was sold in the period. Darker = busier.</p>
+        <div class="room-heat">${a.rooms.map((r) => `<div class="rh l${lvl(r.occupancy)}" title="Room ${esc(r.number)}: ${r.nights} nights, UGX ${num(r.revenue)}"><b>${esc(r.number)}</b><span>${Math.round(r.occupancy * 100)}%</span></div>`).join('')}</div>
+        <div class="legend heat-legend small"><span class="rh l0"></span>under 20% <span class="rh l1"></span>20–45% <span class="rh l2"></span>45–65% <span class="rh l3"></span>65–85% <span class="rh l4"></span>85%+</div></div>
+      <div class="grid g3 mt">
+        <div class="card"><h2 class="sec">Where bookings come from</h2>${table(['Source', '#Stays', '#Nights'], a.sources.map((s) => `<tr><td>${esc(s.source)}</td><td class="num">${s.bookings}</td><td class="num">${s.nights}</td></tr>`))}</div>
+        <div class="card"><h2 class="sec">How guests pay</h2>${table(['Method', '#UGX'], a.methods.map((m) => `<tr><td>${esc(METHOD[m.method] || (m.method === 'room' ? 'Charged to room' : m.method))}</td><td class="num">${num(m.amount)}</td></tr>`))}</div>
+        <div class="card"><h2 class="sec">Biggest costs</h2>${table(['Account', '#UGX'], a.expenses_by_account.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${num(x.amount)}</td></tr>`))}</div>
+      </div>`;
+  }
+
+  /* ---------- letterhead for printing ---------- */
+  function letterhead(title, meta = []) {
+    const s = SETTINGS;
+    const contacts = [s.contact_phone, s.contact_email, s.website].filter(Boolean).map(esc).join(' · ');
+    return `<div class="only-print letterhead"><div class="lh-left">${s.logo ? `<img class="lh-logo" src="${esc(s.logo)}" alt="">` : ''}<div><div class="lh-name">${esc(s.property_name)}</div>
+      ${s.legal_name ? `<div class="lh-legal">${esc(s.legal_name)}</div>` : ''}${s.address ? `<div class="lh-addr">${esc(s.address)}</div>` : ''}${contacts ? `<div class="lh-addr">${contacts}</div>` : ''}${s.tin ? `<div class="lh-addr">TIN ${esc(s.tin)}</div>` : ''}</div></div>
+      <div class="lh-right"><div class="lh-title">${esc(title)}</div>${meta.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')}<div><span>Printed</span> ${esc(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} by ${esc(ME.full_name)}</div></div></div>`;
+  }
+  // views that print a report: every page except the ones that are only for working (POS, set-up forms…)
+  const NO_PRINT = new Set(['pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
+  function addPrinting(view) {
+    if (NO_PRINT.has(view)) return;
+    const head = $('#view .page-head');
+    if (!head) return;
+    if (!head.querySelector('[data-action=print]')) {
+      let row = head.querySelector(':scope > .row');
+      if (!row) { row = document.createElement('div'); row.className = 'row'; head.append(row); }
+      row.insertAdjacentHTML('beforeend', '<button class="btn btn-ghost" data-action="print">Print</button>');
+    }
+    if (!$('#view .letterhead')) $('#view').insertAdjacentHTML('afterbegin', letterhead($('#view h1.page')?.textContent?.trim() || '', [['Business date', fdateLong(SETTINGS.business_date)]]));
+  }
+
+  /* ---------- guest registration, moves, extensions ---------- */
+  const PURPOSE = { business: 'Business', leisure: 'Leisure / holiday', conference: 'Conference / event', transit: 'Transit', other: 'Other' };
+  const GENDER = { female: 'Female', male: 'Male', other: 'Other' };
+  const ID_TYPES = ['National ID', 'Passport', 'Driving permit', 'Refugee ID', 'Other'];
+  function registrationFields(r) {
+    return `<fieldset class="plain"><legend class="sub3">Guest</legend>
+      <div class="three"><label>First name<input name="first_name" value="${esc(r.first_name || '')}" required maxlength="80"></label><label>Last name<input name="last_name" value="${esc(r.last_name || '')}" maxlength="80"></label><label>Gender<select name="gender">${opts([['', '–'], ...Object.entries(GENDER)], r.gender || '')}</select></label></div>
+      <div class="three"><label>Phone<input name="phone" value="${esc(r.phone || '')}" maxlength="40"></label><label>Email<input name="email" type="email" value="${esc(r.email || '')}" maxlength="120"></label><label>Date of birth<input name="birth_date" type="date" value="${esc(r.birth_date || '')}"></label></div>
+      <div class="two"><label>Nationality<input name="nationality" value="${esc(r.nationality || '')}" maxlength="60"></label><label>Home address<input name="address" value="${esc(r.address || '')}" maxlength="300"></label></div></fieldset>
+      <fieldset class="plain"><legend class="sub3">Identification</legend>
+      <div class="two"><label>ID type<select name="id_type">${opts([['', '–'], ...ID_TYPES.map((x) => [x, x])], r.id_type || '')}</select></label><label>ID / passport number<input name="id_number" value="${esc(r.id_number || '')}" maxlength="60"></label></div>
+      <div class="two"><label>Issued by (country / authority)<input name="id_issued_by" value="${esc(r.id_issued_by || '')}" maxlength="60"></label><label>Expiry date<input name="id_expiry" type="date" value="${esc(r.id_expiry || '')}"></label></div></fieldset>
+      <fieldset class="plain"><legend class="sub3">This stay</legend>
+      <div class="two"><label>Purpose of visit<select name="purpose">${opts([['', '–'], ...Object.entries(PURPOSE)], r.purpose || '')}</select></label><label>Vehicle registration<input name="vehicle_reg" value="${esc(r.vehicle_reg || '')}" maxlength="80"></label></div>
+      <div class="two"><label>Coming from<input name="coming_from" value="${esc(r.coming_from || '')}" maxlength="80"></label><label>Going to<input name="going_to" value="${esc(r.going_to || '')}" maxlength="80"></label></div></fieldset>`;
+  }
+  const regBody = (v) => ({
+    guest: Object.fromEntries(['first_name', 'last_name', 'gender', 'phone', 'email', 'birth_date', 'nationality', 'address', 'id_type', 'id_number', 'id_issued_by', 'id_expiry'].map((k) => [k, v[k] || null])),
+    stay: Object.fromEntries(['purpose', 'vehicle_reg', 'coming_from', 'going_to'].map((k) => [k, v[k] || null])),
+  });
+
+  Object.assign(OPS_A, {
+    'reg-edit': async (d) => {
+      const f = await GET(`/reservations/${d.id}`);
+      modal(`Registration card · ${guestName(f.reservation)}`, `<form class="form" data-form="ops-modal">${registrationFields(f.reservation)}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        async (v) => { await PUT(`/reservations/${d.id}/registration`, regBody(v)); return 'Registration saved.'; });
+    },
+    'move-room': async (d) => {
+      const [f, board] = await Promise.all([GET(`/reservations/${d.id}`), GET('/room-board')]);
+      const r = f.reservation;
+      const free = board.rooms.filter((x) => !x.reservation_id && x.hk_status !== 'out_of_order');
+      const label = (x) => `${x.number} · ${x.type_name}${x.hk_status === 'dirty' ? ' (not cleaned)' : ''}`;
+      modal(`Move ${guestName(r)} from room ${r.room_number}`, `<form class="form" data-form="ops-modal">
+        <label>New room<select name="room_id" required>${opts(free.map((x) => [x.id, label(x)]))}</select></label>
+        <label>Reason for the move<input name="reason" required maxlength="300" placeholder="e.g. AC not working, guest asked for a quieter room, upgrade"></label>
+        <label>Nightly rate if the room type changes (UGX)<input name="rate" type="number" min="0" placeholder="Leave empty to keep ${num(r.rate)} (free upgrade)"></label>
+        <label class="row"><input type="checkbox" name="allow_dirty" value="1"> Allow a room that has not been cleaned yet</label>
+        <p class="small muted">Room ${esc(r.room_number)} goes to housekeeping to be cleaned. The move and reason are kept on the guest's bill history.</p>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold" ${free.length ? '' : 'disabled'}>Move guest</button></div></form>`,
+      async (v) => { const x = await POST(`/reservations/${d.id}/move`, { room_id: Number(v.room_id), reason: v.reason, rate: v.rate === '' ? undefined : Number(v.rate), allow_dirty: !!v.allow_dirty }); return `Moved from room ${esc(x.from)} to room ${esc(x.to)}.`; });
+    },
+    'extend-stay': async (d) => {
+      const f = await GET(`/reservations/${d.id}`);
+      const r = f.reservation;
+      modal(`Extend stay · ${guestName(r)}`, `<form class="form" data-form="ops-modal"><p>Now leaving <b>${fdateLong(r.departure)}</b> (${nights(r.arrival, r.departure)} nights).</p>
+        <div class="two"><label>New departure date<input type="date" name="departure" min="${addDays(r.departure, 1)}" value="${addDays(r.departure, 1)}" required></label><label>Note (optional)<input name="note" maxlength="200" placeholder="e.g. meeting extended"></label></div>
+        <p class="small muted">The extra nights are charged at ${ugx(r.rate)} per night by the night audit. Availability is checked for the extra nights.</p>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Extend</button></div></form>`,
+      async (v) => { const notes = v.note ? [r.notes, `Extended to ${v.departure}: ${v.note}`].filter(Boolean).join('\n') : undefined; await PUT(`/reservations/${d.id}`, { departure: v.departure, ...(notes ? { notes } : {}) }); return `Stay extended to ${fdate(v.departure)}.`; });
+    },
+    'print-reg': () => { document.body.classList.add('print-reg'); window.print(); setTimeout(() => document.body.classList.remove('print-reg'), 500); },
+    'demo-add': async () => {
+      if (!confirm('Add 45 days of sample bookings, sales and expenses so you can explore the system? Only possible on a new system. You can remove it all later.')) return;
+      await POST('/demo', { days: 45 }); toast('Creating sample data. This takes about a minute.'); pollDemo();
+    },
+    'demo-remove': () => modal('Remove sample data and start fresh', `<form class="form" data-form="ops-modal"><p class="note err">This deletes <b>all</b> bookings, guests, bills, payments, restaurant sales, stock movements, accounts entries, events and expenses. Rooms, rates, menus, users and settings are kept. It cannot be undone.</p>
+      <label>Type the property name to confirm: <b>${esc(SETTINGS.property_name)}</b><input name="confirm" required autocomplete="off"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Delete everything and start fresh</button></div></form>`,
+    async (v) => { const r = await POST('/demo/remove', { confirm: v.confirm }); await refreshSettings(); return `Sample data removed. The system starts fresh on ${fdate(r.business_date)}.`; }),
+  });
+  async function pollDemo() {
+    const s = await GET('/demo').catch(() => null);
+    const el = $('#demo-progress');
+    if (s && el) el.textContent = s.running ? `${s.step} (${Math.round((s.done / Math.max(1, s.total)) * 100)}%)…` : s.error ? `Stopped: ${s.error}` : '';
+    if (s?.running) setTimeout(pollDemo, 2000);
+    else if (s && !s.error) { await refreshSettings(); if (route().r === 'settings') render(); toast('Sample data ready. Open the Dashboard.'); }
+    else if (s?.error) toast(s.error, true);
+  }
+  Object.assign(OPS_FORMS, {
+    letterhead: async (v, form) => {
+      let logo;
+      const file = form.querySelector('input[name=logo_file]').files[0];
+      if (v.remove_logo) logo = null;
+      else if (file) logo = await shrinkImage(file);
+      await PUT('/settings/letterhead', { ...v, ...(logo !== undefined ? { logo } : {}) });
+      await refreshSettings(); toast('Letterhead saved.'); render();
+    },
+  });
+  // logos are resized in the browser so the stored image stays small
+  function shrinkImage(file) {
+    return new Promise((resolve, reject) => {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { reject(new Error('Choose a PNG, JPG or WebP image.')); return; }
+      const img = new Image(), reader = new FileReader();
+      reader.onload = () => { img.src = reader.result; };
+      reader.onerror = () => reject(new Error('That file could not be read.'));
+      img.onload = () => {
+        const scale = Math.min(1, 600 / img.width, 300 / img.height), c = document.createElement('canvas');
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        let data = c.toDataURL('image/png');
+        if (data.length > 380000) data = c.toDataURL('image/webp', 0.85);
+        if (data.length > 380000) reject(new Error('That image is too large even after resizing. Use a simpler logo.')); else resolve(data);
+      };
+      img.onerror = () => reject(new Error('That file could not be read as an image.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // the dashboard: today at the front desk, then performance for managers
+  const dashToday = VIEWS.dashboard;
+  VIEWS.dashboard = async () => (await dashToday()) + (CAN['reports.view'] ? await analyticsSection() : '');
 
   const A = {
 
