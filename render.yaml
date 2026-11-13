@@ -35,6 +35,21 @@ services:
         sync: false
       - key: EMAIL_FROM         # e.g. Amaya Hotel <reports@azelitech.com>
         sync: false
+      # nightly encrypted off-site backups (Cloudflare R2): see docs/GO-LIVE.md "Backups"
+      - key: BACKUP_KEY         # a long random passphrase; keep a copy in your password manager
+        sync: false
+      - key: BACKUP_S3_ENDPOINT # https://<account id>.r2.cloudflarestorage.com
+        sync: false
+      - key: BACKUP_S3_BUCKET   # e.g. azeli-backups
+        sync: false
+      - key: BACKUP_S3_ACCESS_KEY
+        sync: false
+      - key: BACKUP_S3_SECRET_KEY
+        sync: false
+      - key: BACKUP_HOUR        # Kampala time the nightly backup starts
+        value: "3"
+      - key: BACKUP_ALERT_EMAIL # who is emailed if a backup fails
+        sync: false
 
   # Azeli Console: the Azeli Technologies admin panel (admin.azelitech.com)
   - type: web
@@ -68,6 +83,8 @@ services:
       - key: SMTP_URL            # optional: email the team about new enquiries (same Brevo line as the PMS)
         sync: false
       - key: LEAD_NOTIFY         # optional: who gets those emails, e.g. hello@azelitech.com
+        sync: false
+      - key: ALERT_EMAIL         # optional: who is emailed when a client hotel's system goes down (defaults to LEAD_NOTIFY)
         sync: false
 
 

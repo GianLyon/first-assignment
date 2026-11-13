@@ -17,14 +17,14 @@
   const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar', storekeeper: 'Storekeeper', hr_officer: 'HR officer', maintenance: 'Maintenance' };
   const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
 
-  let ME = null, CAN = {}, SETTINGS = null;
+  let ME = null, CAN = {}, SETTINGS = null, MFA = {};
   const ui = { tab: {}, q: {} };
 
   /* ---------- API ---------- */
   async function api(method, path, body) {
     const res = await fetch('/api' + path, { method, credentials: 'same-origin', headers: body !== undefined || method !== 'GET' ? { 'content-type': 'application/json' } : {}, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });
     const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && path !== '/auth/login') { ME = null; renderLogin('Your session has ended. Please sign in again.'); throw new Error('Signed out'); }
+    if (res.status === 401 && !['/auth/login', '/auth/mfa'].includes(path)) { ME = null; renderLogin('Your session has ended. Please sign in again.'); throw new Error('Signed out'); }
     if (!res.ok) { const e = new Error(data.error || 'Request failed'); e.details = data.details; e.status = res.status; throw e; }
     return data;
   }
@@ -56,6 +56,51 @@
       <button class="btn btn-gold">Sign in</button></form></div>`;
   }
 
+  async function fillBackups() {
+    const b = await GET('/backups').catch((e) => ({ error: e.message }));
+    const el = $('#backups-card'); if (!el) return;
+    if (b.error) { el.innerHTML = `<h2 class="sec">Backups</h2><p class="err">${esc(b.error)}</p>`; return; }
+    const ready = b.key_set && b.storage_set;
+    el.innerHTML = `<h2 class="sec">Backups</h2>
+      <p>${ready ? `${pill('On', 'ok')} An encrypted copy of everything is stored off-site every night after ${String(b.hour).padStart(2, '0')}:00 (Kampala time), in <code class="mono">${esc(b.bucket)}</code>: one for each day of the last month, and one for every month.` : `${pill('Not set up', 'warn')} Nightly off-site backups need the storage and key settings on the server (see the go-live guide, "Backups"). ${b.key_set ? 'The key is set, so you can download a backup now.' : ''}`}</p>
+      ${b.alert_email ? '' : '<p class="small muted">Tip: set BACKUP_ALERT_EMAIL to be emailed if a backup fails.</p>'}
+      <div class="actions">${b.key_set ? '<a class="btn btn-ghost" href="/api/backups/download" download>Download a backup now</a>' : ''}${ready ? '<button class="btn btn-gold" data-action="backup-now">Back up now</button>' : ''}</div>
+      ${table(['Started', 'How', 'Status', '#Size', '#Records', 'Stored as'], b.runs.map((r) => `<tr><td class="nowrap">${ftime(r.started_at)}</td><td>${esc({ scheduled: 'Nightly', manual: `Now${r.by_name ? ' · ' + r.by_name : ''}`, download: `Downloaded${r.by_name ? ' · ' + r.by_name : ''}` }[r.trigger])}</td>
+        <td>${r.status === 'ok' ? pill('OK', 'ok') : r.status === 'failed' ? `${pill('Failed', 'bad')}<br><span class="small err">${esc(r.error || '')}</span>` : pill('Running', 'info')}</td><td class="num">${r.size_bytes ? `${num(Math.round(r.size_bytes / 1024))} KB` : ''}</td><td class="num">${r.rows ? num(r.rows) : ''}</td><td class="small">${esc(r.object_key || (r.trigger === 'download' ? 'your computer' : ''))}</td></tr>`), 'No backups yet.')}
+      <p class="small muted">Backups are encrypted with your backup key. Keep the key in a password manager as well: without it no one, not even Azeli, can open a backup.</p>`;
+  }
+  function renderMfaStep(challenge, msg = '') {
+    $('#root').innerHTML = `<div class="login-wrap"><form class="login form" data-form="login-mfa" data-challenge="${esc(challenge)}">
+      <div class="brand login-brand"><img class="mark" src="/brand/azeli-mark.svg" alt="" width="48" height="48"><span>Azeli<small>Property Management Software</small></span></div>
+      <h1>Two-step sign-in</h1><p class="muted mt0">Open your authenticator app and enter the 6-digit code for Azeli PMS. Lost your phone? Use one of your recovery codes.</p>
+      ${msg ? `<p class="note err">${esc(msg)}</p>` : ''}
+      <label>Code<input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus maxlength="12" class="code-input"></label>
+      <button class="btn btn-gold">Continue</button><button type="button" class="btn btn-ghost" data-action="back-to-login">Back</button></form></div>`;
+  }
+  // set-up: QR code, then the first code, then the recovery codes
+  async function mfaSetupHtml(forced) {
+    const st = await POST('/auth/mfa/setup');
+    return `${forced ? '<p class="note">Your administrator requires two-step sign-in for your role. Set it up to continue.</p>' : ''}
+      <ol class="steps-list"><li>Install an authenticator app on your phone: <b>Google Authenticator</b>, <b>Microsoft Authenticator</b> or <b>Authy</b> (free).</li>
+      <li>In the app, add an account and scan this code:</li></ol>
+      <div class="qr">${st.qr_svg}</div>
+      <p class="small muted center">Cannot scan? Enter this key in the app: <code class="mono">${esc(st.secret)}</code></p>
+      <form class="form" data-form="mfa-enable"><label>3. Enter the 6-digit code the app shows<input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" class="code-input"></label>
+      <div class="actions">${forced ? '<button type="button" class="btn btn-ghost" data-action="logout">Sign out</button>' : cancelBtn}<button class="btn btn-gold">Turn on two-step sign-in</button></div></form>`;
+  }
+  function showRecoveryCodes(codes, justEnabled) {
+    const html = `<p>${justEnabled ? '<b>Two-step sign-in is on.</b> ' : ''}Keep these <b>recovery codes</b> somewhere safe (print them or save them in a password manager). Each one signs you in once if you lose your phone. They are shown only now.</p>
+      <div class="recovery">${codes.map((c) => `<code class="mono">${esc(c)}</code>`).join('')}</div>
+      <div class="actions"><button type="button" class="btn btn-ghost" data-action="print">Print</button><button type="button" class="btn btn-gold" data-action="mfa-done">I have saved them</button></div>`;
+    if ($('#modal').hidden) modal('Recovery codes', html); else { $('#modal-title').textContent = 'Recovery codes'; $('#modal-body').innerHTML = html; }
+    document.body.classList.add('printing-modal');
+  }
+  async function renderForcedSetup() {
+    $('#root').innerHTML = `<div class="login-wrap"><div class="login form wide"><div class="brand login-brand"><img class="mark" src="/brand/azeli-mark.svg" alt="" width="48" height="48"><span>Azeli<small>Property Management Software</small></span></div>
+      <h1>Set up two-step sign-in</h1><div id="forced-setup"><p>Loading…</p></div></div></div>`;
+    $('#forced-setup').innerHTML = await mfaSetupHtml(true);
+  }
+
   /* ---------- shell ---------- */
   const NAV = [
     ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
@@ -78,7 +123,7 @@
         <button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show menu">☰</button>
         <div class="prop"><b id="prop-name"></b><span id="biz-date"></span></div>
         <div class="top-actions user-menu"><span class="user">${esc(ME.full_name)} · ${esc(ROLE[ME.role])}</span>
-          <button class="btn btn-ghost btn-sm" data-action="change-password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div>
+          <button class="btn btn-ghost btn-sm" data-action="mfa-manage">Two-step</button><button class="btn btn-ghost btn-sm" data-action="change-password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div>
       </header><main id="view" tabindex="-1"></main></div></div>`;
   }
   function renderNav() {
@@ -105,7 +150,7 @@
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); }
+      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -252,6 +297,11 @@
         <label>Note at the bottom of invoices (bank details, thank-you…)<textarea name="invoice_footer" rows="2" maxlength="600">${esc(SETTINGS.invoice_footer || '')}</textarea></label>
         <div class="two"><label>Logo (PNG, JPG or WebP)<input type="file" name="logo_file" accept="image/png,image/jpeg,image/webp"></label><div>${SETTINGS.logo ? `<img class="logo-preview" src="${esc(SETTINGS.logo)}" alt="Current logo"><label class="row small"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label>` : '<p class="small muted">No logo yet.</p>'}</div></div>
         <div class="actions"><button class="btn btn-gold">Save letterhead</button></div></form></div>
+      ${CAN['users.manage'] ? `<div class="card mt"><h2 class="sec">Security: two-step sign-in</h2><form class="form" data-form="security">
+        <p class="small">Require a code from an authenticator app, as well as the password, for these roles. Each person sets it up at their next sign-in. Recommended for everyone who sees money or guest data.</p>
+        <div class="chips-row">${Object.entries(ROLE).map(([k, l]) => `<label class="row small"><input type="checkbox" name="r_${k}" value="1" ${(SETTINGS.mfa_required_roles || []).includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      <div class="card mt" id="backups-card"><h2 class="sec">Backups</h2><p class="small muted">Loading…</p></div>` : ''}
       ${CAN['users.manage'] ? `<div class="card mt"><h2 class="sec">Sample data (for trying the system)</h2>${SETTINGS.demo_data
         ? `<p>This system contains <b>sample data</b>: made-up guests, bookings, sales and expenses for practice. Remove it before you start using the system for real.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn btn-bad" data-action="demo-remove">Remove sample data and start fresh</button></div>`
         : `<p>Fill a new, unused system with 45 days of realistic made-up activity (bookings, in-house guests, restaurant and bar sales, extras, expenses and closed days) so you can explore every screen with real-looking figures. It can be removed completely later.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn" data-action="demo-add">Add sample data</button></div>`}</div>` : ''}
@@ -264,7 +314,7 @@
   VIEWS.users = async () => {
     const users = await GET('/users');
     return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
-      <div class="card">${table(['Name', 'Username', 'Role', 'Status', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
+      <div class="card">${table(['Name', 'Username', 'Role', 'Status', 'Two-step', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td>${u.mfa_enabled ? pill('On', 'ok') : (SETTINGS.mfa_required_roles || []).includes(u.role) ? pill('Required, not set up', 'warn') : pill('Off')}</td><td class="right nowrap">${u.mfa_enabled ? `<button class="btn btn-sm btn-ghost" data-action="mfa-reset" data-id="${u.id}" data-name="${esc(u.full_name)}">Reset two-step</button> ` : ''}<button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
       <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen, stock levels, requisitions'], ['Storekeeper', 'Stock, deliveries, purchase orders (not approval), issuing requisitions, stock counts'], ['HR officer', 'Employees, rosters, attendance, leave records, payroll preparation (managers approve)']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
   };
 
@@ -1584,6 +1634,7 @@
     else if (s?.error) toast(s.error, true);
   }
   Object.assign(OPS_FORMS, {
+    security: async (v) => { await PUT('/settings/security', { mfa_required_roles: Object.keys(v).filter((k) => k.startsWith('r_')).map((k) => k.slice(2)) }); await refreshSettings(); toast('Saved. These roles set up two-step sign-in at their next sign-in.'); render(); },
     letterhead: async (v, form) => {
       let logo;
       const file = form.querySelector('input[name=logo_file]').files[0];
@@ -1974,6 +2025,18 @@
     tab: (d) => { ui.tab[d.key] = d.val; render(); },
     print: () => window.print(),
     logout: async () => { await POST('/auth/logout'); ME = null; renderLogin(); },
+    'back-to-login': () => renderLogin(),
+    'mfa-done': async () => { closeModal(); document.body.classList.remove('printing-modal'); toast('Two-step sign-in is ready.'); await boot(); },
+    'mfa-manage': async () => {
+      const me = await GET('/auth/me'); MFA = me.mfa || {};
+      if (!MFA.enabled) { modal('Two-step sign-in', '<p>Loading…</p>'); $('#modal-body').innerHTML = await mfaSetupHtml(false); return; }
+      modal('Two-step sign-in', `<p>${pill('On', 'ok')} You sign in with your password and a code from your authenticator app. ${MFA.recovery_codes_left} recovery code${MFA.recovery_codes_left === 1 ? '' : 's'} left.</p>
+        <form class="form" data-form="ops-modal" data-mfa="new-codes"><label>New recovery codes: enter the current code from your app<input name="code" inputmode="numeric" maxlength="6" required class="code-input"></label><div class="actions"><button class="btn">Make new recovery codes</button></div></form>
+        ${MFA.required ? '<p class="small muted">Your role requires two-step sign-in, so it cannot be turned off.</p>' : `<form class="form mt" data-form="mfa-off"><label>Turn off: enter your password<input type="password" name="password" required autocomplete="current-password"></label><div class="actions"><button class="btn btn-bad">Turn off two-step sign-in</button></div></form>`}`,
+      async (v) => { const r = await POST('/auth/mfa/recovery-codes', { code: v.code }); setTimeout(() => showRecoveryCodes(r.recovery_codes, false), 0); return ''; });
+    },
+    'mfa-reset': async (d) => { if (!confirm(`Reset two-step sign-in for ${d.name}? They will be signed out and set it up again at their next sign-in (if their role requires it) with a new phone.`)) return; await POST(`/users/${d.id}/mfa-reset`); toast('Two-step sign-in reset.'); render(); },
+    'backup-now': async () => { toast('Backing up…'); const r = await POST('/backups'); toast(`Backup stored: ${Math.round(r.size / 1024)} KB, ${num(r.rows)} records.`); render(); },
     'change-password': () => modal('Change password', `<form class="form" data-form="pw"><label>Current password<input type="password" name="current_password" required autocomplete="current-password"></label><label>New password (8+ characters)<input type="password" name="new_password" minlength="8" required autocomplete="new-password"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Change</button></div></form>`,
       async (v) => { await POST('/auth/change-password', v); return 'Password changed.'; }),
     'new-res': () => newReservation(),
@@ -2090,7 +2153,26 @@
       }
       closeModal(); if (act !== 'receive') toast(act === 'approve' ? 'Order approved.' : 'Order cancelled.'); render();
     },
-    login: async (v) => { try { const r = await POST('/auth/login', v); ME = r.user; await boot(); } catch (e) { renderLogin(e.message); } },
+    login: async (v) => {
+      try {
+        const r = await POST('/auth/login', v);
+        if (r.mfa_required) { renderMfaStep(r.challenge); return; }
+        ME = r.user; await boot();
+      } catch (e) { renderLogin(e.message); }
+    },
+    'mfa-off': async (v) => { await POST('/auth/mfa/disable', { password: v.password }); closeModal(); toast('Two-step sign-in is off.'); },
+    'login-mfa': async (v, form) => {
+      try {
+        const r = await POST('/auth/mfa', { challenge: form.dataset.challenge, code: v.code });
+        ME = r.user;
+        if (r.recovery_codes_left !== undefined) toast(`Signed in with a recovery code. ${r.recovery_codes_left} left. Make new ones under Two-step.`, r.recovery_codes_left < 3);
+        await boot();
+      } catch (e) { if (/expired|password again/.test(e.message)) renderLogin(e.message); else renderMfaStep(form.dataset.challenge, e.message); }
+    },
+    'mfa-enable': async (v) => {
+      const r = await POST('/auth/mfa/enable', { code: v.code });
+      showRecoveryCodes(r.recovery_codes, true);
+    },
     'res-search': (v) => { ui.q.res = v.q; render(); },
     avail: (v) => { ui.q.availFrom = v.from; render(); },
     rep: (v) => { ui.q.repDate = v.date; render(); },
@@ -2143,8 +2225,9 @@
 
   async function boot() {
     try {
-      const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings;
+      const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings; MFA = me.mfa || {};
       CAN = (await GET('/meta')).can;
+      if (MFA.setup_needed) { await renderForcedSetup(); return; }
       shell(); await render();
     } catch (e) { if (e.message !== 'Signed out') renderLogin(); }
   }

@@ -256,3 +256,14 @@ fieldset.pkg-edit { border: 1px solid var(--line); display: grid; gap: 10px; mar
 fieldset.pkg-edit legend { font-weight: 700; padding: 0 6px; color: var(--ink); }
 .serp { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 2px; font-family: Arial, sans-serif; max-width: 600px; }
 .serp b { color: #1a0dab; font-weight: 400; font-size: 1.1rem; } .serp span { color: #4d5156; font-size: .85rem; } .serp .serp-url { color: #202124; font-size: .8rem; }
+
+/* ---------- two-step sign-in ---------- */
+.login.form.wide { max-width: 520px; }
+.qr { display: grid; place-items: center; margin: 6px 0; }
+.qr svg { width: 200px; height: 200px; border: 1px solid var(--line); border-radius: 10px; }
+.center { text-align: center; }
+.code-input { font-size: 1.3rem !important; letter-spacing: .3em; text-align: center; }
+.steps-list { padding-left: 18px; margin: 0 0 6px; font-size: .9rem; display: grid; gap: 4px; }
+.recovery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
+.recovery code { background: #f8f5ef; border: 1px dashed var(--line); border-radius: 8px; padding: 8px; text-align: center; font-size: 1rem; letter-spacing: .08em; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }

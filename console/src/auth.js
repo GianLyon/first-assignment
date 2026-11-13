@@ -56,7 +56,8 @@ export const loadUser = (pool) => async (req, _res, next) => {
   req.user = null;
   const t = readToken(req);
   if (t) {
-    const { rows: [u] } = await pool.query(`SELECT u.id, u.email, u.full_name, u.role FROM sessions s JOIN users u ON u.id=s.user_id
+    const { rows: [u] } = await pool.query(`SELECT u.id, u.email, u.full_name, u.role, (u.totp_secret IS NOT NULL) AS mfa_enabled,
+        COALESCE(u.role = ANY(cs.mfa_required_roles), FALSE) AS mfa_required FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN console_settings cs ON cs.id=1
       WHERE s.token_hash=$1 AND s.expires_at > now() AND u.active`, [sha256(t)]);
     if (u) { req.user = u; req.sessionHash = sha256(t); }
   }

@@ -8,6 +8,8 @@ import * as A from './auth.js';
 import { DEFAULTS, SECTIONS, validate } from './content.js';
 import { checkClient, validUrl } from './clients.js';
 import { notifyLead } from './mailer.js';
+import * as totp from './totp.js';
+import crypto from 'node:crypto';
 
 const { HttpError, audit, can } = A;
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -88,13 +90,78 @@ export function createApp(pool) {
       throw new HttpError(401, 'Email or password is incorrect.');
     }
     A.clearFailures(key);
+    if (u.totp_secret) {
+      const challenge = crypto.randomBytes(24).toString('base64url');
+      await pool.query("INSERT INTO mfa_challenges (token_hash, user_id, expires_at) VALUES ($1,$2, now() + interval '5 minutes')", [totp.hashToken(challenge), u.id]);
+      await pool.query('DELETE FROM mfa_challenges WHERE expires_at < now()');
+      return res.json({ mfa_required: true, challenge });
+    }
     res.set('Set-Cookie', await A.createSession(pool, u.id));
     await audit(pool, u, 'auth.login', 'user', u.id);
     res.json({ user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role } });
   });
+  api.post('/auth/mfa', async (req, res) => {
+    const [c] = await q('SELECT * FROM mfa_challenges WHERE token_hash=$1 AND expires_at > now()', [totp.hashToken(String(req.body?.challenge || ''))]);
+    if (!c) throw new HttpError(401, 'The sign-in has expired. Enter your password again.');
+    if (c.attempts >= 5) { await pool.query('DELETE FROM mfa_challenges WHERE token_hash=$1', [c.token_hash]); throw new HttpError(429, 'Too many wrong codes. Enter your password again.'); }
+    const [u] = await q('SELECT * FROM users WHERE id=$1 AND active', [c.user_id]);
+    if (!u?.totp_secret) throw new HttpError(401, 'Enter your password again.');
+    const code = String(req.body?.code || '').trim();
+    const step = totp.verifyCode(u.totp_secret, code, u.totp_last_step);
+    const left = step == null ? totp.useRecoveryCode(u.recovery_codes, code) : null;
+    if (step == null && !left) {
+      await pool.query('UPDATE mfa_challenges SET attempts=attempts+1 WHERE token_hash=$1', [c.token_hash]);
+      await audit(pool, u, 'auth.mfa_failed', 'user', u.id);
+      throw new HttpError(401, 'That code is not right. Use the current code from your authenticator app, or a recovery code.');
+    }
+    if (step != null) await pool.query('UPDATE users SET totp_last_step=$2 WHERE id=$1', [u.id, step]);
+    else await pool.query('UPDATE users SET recovery_codes=$2 WHERE id=$1', [u.id, left]);
+    await pool.query('DELETE FROM mfa_challenges WHERE token_hash=$1', [c.token_hash]);
+    res.set('Set-Cookie', await A.createSession(pool, u.id));
+    await audit(pool, u, step != null ? 'auth.login' : 'auth.login_recovery_code', 'user', u.id);
+    res.json({ user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role }, recovery_codes_left: step != null ? undefined : left.length });
+  });
   api.post('/auth/logout', async (req, res) => { await A.destroySession(pool, req); res.set('Set-Cookie', A.clearCookie()).json({ ok: true }); });
   api.use(A.requireUser);
-  api.get('/me', (req, res) => res.json({ user: req.user, can: Object.fromEntries(A.ALL_PERMS.map((p) => [p, can(req.user, p)])), roles: A.ROLES, sections: SECTIONS, deploy_hook: !!config.deployHook }));
+  // a role that requires two-step sign-in: only the set-up works until it is done
+  api.use((req, _res, next) => {
+    if (req.user.mfa_required && !req.user.mfa_enabled && !['/me', '/auth/mfa/setup', '/auth/mfa/enable', '/me/password'].includes(req.path)) throw new HttpError(403, 'Set up two-step sign-in to continue.');
+    next();
+  });
+  api.post('/auth/mfa/setup', async (req, res) => {
+    const secret = totp.newSecret();
+    await pool.query('UPDATE users SET totp_pending=$2 WHERE id=$1', [req.user.id, secret]);
+    res.json({ secret: secret.replace(/(.{4})/g, '$1 ').trim(), qr_svg: await totp.qrSvg(totp.otpauthUrl(secret, req.user.email, 'Azeli Console')) });
+  });
+  api.post('/auth/mfa/enable', async (req, res) => {
+    const [u] = await q('SELECT totp_pending FROM users WHERE id=$1', [req.user.id]);
+    if (!u?.totp_pending) throw new HttpError(409, 'Start the set-up again.');
+    const step = totp.verifyCode(u.totp_pending, req.body?.code);
+    if (step == null) throw new HttpError(400, 'That code is not right. Check the time on your phone is automatic, and use the newest code.');
+    const rc = totp.newRecoveryCodes();
+    await pool.query('UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_enabled_at=now(), totp_last_step=$2, recovery_codes=$3 WHERE id=$1', [req.user.id, step, rc.hashes]);
+    await pool.query('DELETE FROM sessions WHERE user_id=$1 AND token_hash <> $2', [req.user.id, req.sessionHash]);
+    await audit(pool, req.user, 'auth.mfa_enabled', 'user', req.user.id);
+    res.json({ recovery_codes: rc.codes });
+  });
+  api.post('/auth/mfa/disable', async (req, res) => {
+    const [u] = await q('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    if (!u.totp_secret) throw new HttpError(409, 'Two-step sign-in is not on.');
+    if (req.user.mfa_required) throw new HttpError(409, 'Your role requires two-step sign-in.');
+    if (!(await A.verifyPassword(String(req.body?.password || ''), u.password_hash))) throw new HttpError(400, 'Your password is not right.');
+    await pool.query("UPDATE users SET totp_secret=NULL, totp_pending=NULL, totp_enabled_at=NULL, totp_last_step=NULL, recovery_codes='{}' WHERE id=$1", [u.id]);
+    await audit(pool, req.user, 'auth.mfa_disabled', 'user', u.id);
+    res.json({ ok: true });
+  });
+  api.post('/auth/mfa/recovery-codes', async (req, res) => {
+    const [u] = await q('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    if (!u.totp_secret) throw new HttpError(409, 'Two-step sign-in is not on.');
+    if (totp.verifyCode(u.totp_secret, req.body?.code, u.totp_last_step) == null) throw new HttpError(400, 'Enter the current code from your authenticator app.');
+    const rc = totp.newRecoveryCodes();
+    await pool.query('UPDATE users SET recovery_codes=$2 WHERE id=$1', [u.id, rc.hashes]);
+    res.json({ recovery_codes: rc.codes });
+  });
+  api.get('/me', async (req, res) => res.json({ mfa: { enabled: req.user.mfa_enabled, required: req.user.mfa_required, setup_needed: req.user.mfa_required && !req.user.mfa_enabled, recovery_codes_left: (await q('SELECT cardinality(recovery_codes)::int AS n FROM users WHERE id=$1', [req.user.id]))[0].n, required_roles: (await q('SELECT mfa_required_roles FROM console_settings WHERE id=1'))[0]?.mfa_required_roles || [] }, user: req.user, can: Object.fromEntries(A.ALL_PERMS.map((p) => [p, can(req.user, p)])), roles: A.ROLES, sections: SECTIONS, deploy_hook: !!config.deployHook }));
   api.post('/me/password', inTx(async (db, req) => {
     const [u] = (await db.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows;
     if (!(await A.verifyPassword(String(req.body?.current_password || ''), u.password_hash))) throw new HttpError(400, 'Current password is incorrect.');
@@ -216,7 +283,20 @@ export function createApp(pool) {
 
   /* ---- team ---- */
   const team = A.requirePerm('team.manage');
-  api.get('/users', team, async (_req, res) => res.json(await q('SELECT id, email, full_name, role, active, created_at FROM users ORDER BY active DESC, full_name')));
+  api.get('/users', team, async (_req, res) => res.json(await q('SELECT id, email, full_name, role, active, created_at, (totp_secret IS NOT NULL) AS mfa_enabled FROM users ORDER BY active DESC, full_name')));
+  api.post('/users/:id/mfa-reset', team, inTx(async (db, req) => {
+    const { rows: [u] } = await db.query("UPDATE users SET totp_secret=NULL, totp_pending=NULL, totp_enabled_at=NULL, totp_last_step=NULL, recovery_codes='{}' WHERE id=$1 RETURNING email", [id(req)]);
+    if (!u) throw new HttpError(404, 'User not found.');
+    await db.query('DELETE FROM sessions WHERE user_id=$1', [id(req)]);
+    await audit(db, req.user, 'user.mfa_reset', 'user', id(req), { email: u.email });
+    return { ok: true };
+  }));
+  api.put('/security', team, inTx(async (db, req) => {
+    const roles = [...new Set((Array.isArray(req.body?.mfa_required_roles) ? req.body.mfa_required_roles : []).filter((r) => A.ROLES[r]))];
+    await db.query('UPDATE console_settings SET mfa_required_roles=$1 WHERE id=1', [roles]);
+    await audit(db, req.user, 'settings.mfa_required_roles', 'console', 1, { roles });
+    return { mfa_required_roles: roles };
+  }));
   api.post('/users', team, inTx(async (db, req) => {
     const b = req.body || {};
     const email = String(b.email || '').trim().toLowerCase();

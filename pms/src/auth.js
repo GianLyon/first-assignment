@@ -75,7 +75,9 @@ export function loadUser(pool) {
     req.user = null;
     if (token) {
       const { rows } = await pool.query(
-        `SELECT u.id, u.username, u.full_name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+        `SELECT u.id, u.username, u.full_name, u.role, (u.totp_secret IS NOT NULL) AS mfa_enabled,
+                COALESCE(u.role = ANY(st.mfa_required_roles), FALSE) AS mfa_required
+         FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN settings st ON st.id = 1
          WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha256(token)]);
       if (rows[0]) { req.user = rows[0]; req.sessionHash = sha256(token); }
     }

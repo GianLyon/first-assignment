@@ -15,3 +15,15 @@ export async function notifyLead(l) {
   transport ??= nodemailer.createTransport(config.smtpUrl, { disableFileAccess: true, disableUrlAccess: true });
   return transport.sendMail({ ...msg, disableFileAccess: true, disableUrlAccess: true });
 }
+
+/** A client hotel's system went offline, or came back. */
+export async function notifyStatus(client, online, detail) {
+  const to = config.alertEmails.length ? config.alertEmails : config.leadNotify;
+  if (!to.length || (!config.smtpUrl && !override)) return;
+  const msg = { from: config.emailFrom, to: to.join(', '),
+    subject: online ? `Back online: ${client.name}` : `OFFLINE: ${client.name}'s Azeli PMS`,
+    text: online ? `${client.name}'s system (${client.pms_url}) is answering again.` : `${client.name}'s system (${client.pms_url}) is not answering.\n\n${detail}\n\nCheck Render (azeli-pms service of this hotel: Events and Logs) and the hotel's internet.` };
+  if (override) return override(msg);
+  transport ??= nodemailer.createTransport(config.smtpUrl, { disableFileAccess: true, disableUrlAccess: true });
+  return transport.sendMail({ ...msg, disableFileAccess: true, disableUrlAccess: true });
+}

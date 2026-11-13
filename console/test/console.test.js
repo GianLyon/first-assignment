@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/auth.js';
 import { setMailer } from '../src/mailer.js';
 import { config } from '../src/config.js';
+import * as totp from '../src/totp.js';
 
 const DB = process.env.TEST_DATABASE_URL || 'postgres://hk:hk_dev_pw@localhost:5432/azeli_console_test';
 let pool, server, base, owner, editor, sales;
@@ -154,6 +155,12 @@ test('client hotels: online check and month-to-date figures with the group key',
   await new Promise((s) => setTimeout(s, 50));
   const chk = ok(await sales.post(`/api/clients/${c.id}/check`));
   assert.match(chk.status, /Not reachable/);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(mails.some((m) => /^OFFLINE: Amaya Hotel/.test(m.subject)), 'the team is told the hotel is offline');
+  const before = mails.length;
+  await sales.post(`/api/clients/${c.id}/check`);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(mails.length, before); // told once, not on every check
   list = ok(await sales.get('/api/clients'));
   assert.equal(list[0].last_summary.occupancy, 0.72); // last known figures are kept
   assert.equal(ok(await owner.get('/api/dashboard')).clients.offline, 1);
@@ -171,4 +178,34 @@ test('team: add members, roles, never lock out the last owner', async () => {
   const log = ok(await owner.get('/api/audit'));
   assert.ok(log.some((a) => a.action === 'content.publish'));
   assert.ok(log.some((a) => a.action === 'lead.received'));
+});
+
+test('two-step sign-in for the team: set up, code at sign-in, required for owners, reset by an owner', async () => {
+  const secretOf = async (email, col) => (await pool.query(`SELECT ${col} AS s FROM users WHERE email=$1`, [email])).rows[0].s;
+  const st = ok(await editor.post('/api/auth/mfa/setup'));
+  assert.match(st.qr_svg, /^<svg/);
+  const rc = ok(await editor.post('/api/auth/mfa/enable', { code: totp.codeAt(await secretOf('editor@azelitech.com', 'totp_pending'), totp.stepNow()) }));
+  assert.equal(rc.recovery_codes.length, 10);
+  const c = client();
+  const r1 = await c.post('/api/auth/login', { email: 'editor@azelitech.com', password: 'password-1234' });
+  assert.equal(r1.data.mfa_required, true);
+  assert.equal((await c.get('/api/me')).status, 401);
+  assert.equal((await c.post('/api/auth/mfa', { challenge: r1.data.challenge, code: '000000' })).status, 401);
+  ok(await c.post('/api/auth/mfa', { challenge: r1.data.challenge, code: rc.recovery_codes[0] }));
+  ok(await c.get('/api/me'));
+  // owners must use it: an owner without it can only set it up
+  assert.equal((await editor.put('/api/security', { mfa_required_roles: ['owner'] })).status, 403);
+  ok(await owner.put('/api/security', { mfa_required_roles: ['owner'] }));
+  const me = ok(await owner.get('/api/me'));
+  assert.equal(me.mfa.setup_needed, true);
+  assert.equal((await owner.get('/api/leads')).status, 403);
+  ok(await owner.post('/api/auth/mfa/setup'));
+  ok(await owner.post('/api/auth/mfa/enable', { code: totp.codeAt(await secretOf('owner@azelitech.com', 'totp_pending'), totp.stepNow()) }));
+  ok(await owner.get('/api/leads'));
+  assert.equal((await owner.post('/api/auth/mfa/disable', { password: 'password-1234' })).status, 409);
+  const ed = ok(await owner.get('/api/users')).find((u) => u.email === 'editor@azelitech.com');
+  assert.equal(ed.mfa_enabled, true);
+  ok(await owner.post(`/api/users/${ed.id}/mfa-reset`));
+  assert.equal((await c.get('/api/me')).status, 401); // signed out everywhere
+  ok(await owner.put('/api/security', { mfa_required_roles: [] }));
 });

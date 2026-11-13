@@ -1,6 +1,7 @@
 // Client hotels: is each one's Azeli PMS online, and how is it doing this month.
 import { config } from './config.js';
 import { HttpError } from './auth.js';
+import { notifyStatus } from './mailer.js';
 
 export function validUrl(v) {
   let u;
@@ -30,5 +31,8 @@ export async function checkClient(pool, id) {
     status = e.name === 'TimeoutError' ? 'Not reachable (no answer within 8 seconds).' : e.message === 'fetch failed' || e.cause ? 'Not reachable. Check the address and that the system is running.' : String(e.message).slice(0, 200);
   }
   await pool.query('UPDATE clients SET last_check_at=now(), last_status=$2, last_summary=$3 WHERE id=$1', [id, status, summary]);
+  // a change between online and not online is emailed once (not on every 10-minute check)
+  const wasOnline = c.last_status === 'online' || (c.last_status || '').startsWith('online'), isOnline = status === 'online' || status.startsWith('online');
+  if (c.last_status && wasOnline !== isOnline && c.status === 'active') notifyStatus(c, isOnline, status).catch((e) => console.error('Alert email failed:', e.message));
   return { status, summary };
 }
