@@ -6,6 +6,7 @@ import { processOutbox } from './services/distribution.js';
 import { generateDue, processOutbox as sendEmails } from './services/reports.js';
 import { queueGuestEmails } from './services/crm.js';
 import { backupIfDue } from './backup.js';
+import { runAutomations, deliverQueued } from './services/whatsapp.js';
 import { tx } from './db.js';
 
 const pool = createPool(config.databaseUrl);
@@ -29,7 +30,9 @@ const timer = every > 0 ? setInterval(async () => {
 let mailing = false;
 const mailTimer = setInterval(async () => {
   if (mailing) return; mailing = true;
-  try { await tx(pool, (db) => generateDue(db)); await tx(pool, (db) => queueGuestEmails(db)); await backupIfDue(pool); await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
+  try { await tx(pool, (db) => generateDue(db)); await tx(pool, (db) => queueGuestEmails(db));
+    try { await tx(pool, (db) => runAutomations(db)); await deliverQueued(pool); } catch (e) { console.error('WhatsApp automations failed:', e.message); }
+    await backupIfDue(pool); await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
 }, Number(process.env.REPORT_CHECK_SECONDS || 60) * 1000);
 
 const shutdown = () => { if (timer) clearInterval(timer); clearInterval(mailTimer); server.close(() => pool.end().then(() => process.exit(0))); };

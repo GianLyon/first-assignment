@@ -151,6 +151,33 @@ Everything in the database is replaced, in one go: if anything fails, nothing ch
 
   It notices if Render or Vercel itself is down, which nothing inside them can.
 
+# Part D: WhatsApp for the front desk
+
+Until this is done, the PMS keeps WhatsApp in **practice mode** while it holds sample data: messages stay in the system, and "Reply as the guest" stands in for guests so the team can learn. On a system with real data and no connection, WhatsApp is off.
+
+**What it costs:** the WhatsApp Business Platform charges per template message delivered (business-started messages and automations). Meta has been changing how replies inside the 24 hours after a guest writes are charged (reports say some became chargeable from October 2026), so check *WhatsApp Manager → Insights → Pricing* for Uganda before switching automations on.
+
+**Use a number that is not already on the WhatsApp app**, or one you are ready to move (e.g. a new MTN or Airtel line for the front desk). Meta now also offers "coexistence" for keeping the WhatsApp Business app on the same number; follow Meta's steps if you want that.
+
+1. **Meta Business account**: go to business.facebook.com → create one for *Amaya Hotel & Luxury Suites* (or verify the existing one). Verification (*Security Center → Start verification*) needs the company documents and lifts the limit on how many guests can be messaged per day.
+2. **The app**: developers.facebook.com → **My Apps → Create app** → *Business* → add the **WhatsApp** product. Under **WhatsApp → API Setup**, add the hotel's phone number and verify it by SMS. Note the **Phone number ID**.
+3. **A permanent token**: business.facebook.com → **Settings → Users → System users → Add** (admin) → **Add assets** (the app and the WhatsApp account, full control) → **Generate token** with `whatsapp_business_messaging` and `whatsapp_business_management`, *never expires*. Copy it once.
+4. **App secret**: developers.facebook.com → the app → **App settings → Basic → App secret → Show**.
+5. **Render** → `azeli-pms` → **Environment**, add:
+   | Key | Value |
+   |---|---|
+   | `WHATSAPP_TOKEN` | the token from step 3 |
+   | `WHATSAPP_PHONE_NUMBER_ID` | from step 2 |
+   | `WHATSAPP_APP_SECRET` | from step 4 |
+   | `WHATSAPP_VERIFY_TOKEN` | any long random phrase you make up |
+   | `WHATSAPP_DISPLAY_NUMBER` | the number as guests see it, e.g. `+256 772 123456` |
+
+   Save; Render restarts the PMS. **WhatsApp set-up** in the PMS now shows *Connected*.
+6. **Webhook** (so guests' messages reach the inbox): developers.facebook.com → the app → **WhatsApp → Configuration → Webhook → Edit**. Callback URL: the *Webhook address* shown on the PMS WhatsApp set-up page (`https://amaya.azelitech.com/api/whatsapp/webhook`); Verify token: the phrase from step 5. **Verify and save**, then **Manage → messages → Subscribe**.
+7. **Templates**: WhatsApp Manager → **Message templates → Create template**. For each template on the PMS WhatsApp set-up page, use the same name, category (*Utility* or *Marketing*), language *English* and the exact wording with `{{1}}`, `{{2}}`. When Meta shows it as **Active** (minutes to a day), tick **Approved** on that template in the PMS.
+8. **Automations**: on the same page, switch on the ones you want. They only write to guests who agreed to WhatsApp messages (the tick box on the registration card), never during quiet hours, and once per stay. Guests who reply **STOP** are never written to again unless they send **START**.
+9. **Try it**: message the hotel number from your own phone. It appears in **WhatsApp inbox** within seconds; reply from there.
+
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 

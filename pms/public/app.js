@@ -103,14 +103,14 @@
 
   /* ---------- shell ---------- */
   const NAV = [
-    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['inbox', 'WhatsApp inbox', 'messages.use'], ['phonebook', 'Phone book', 'messages.use'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
     ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
-    ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage']]],
+    ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage'], ['whatsapp', 'WhatsApp set-up', 'messages.manage']]],
     ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
     ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
@@ -146,11 +146,12 @@
     if (view !== r) history.replaceState(null, '', '#' + view);
     clearInterval(ui.timer);
     if (view === 'kitchen') ui.timer = setInterval(() => { if (route().r === 'kitchen' && $('#modal').hidden) render(); }, 15000);
+    if (view === 'inbox') ui.timer = setInterval(refreshInbox, 8000);
     renderNav(); document.body.classList.remove('nav-open');
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); }
+      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'inbox') scrollWa(); else updateWaBadge(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -210,6 +211,7 @@
     if (r.status === 'in_house' && CAN['frontdesk.checkin']) acts.push(`<button class="btn btn-ghost" data-action="move-room" data-id="${r.id}">Move room</button>`);
     if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="extend-stay" data-id="${r.id}">Extend stay</button>`);
     if (['reserved', 'in_house', 'checked_out'].includes(r.status) && CAN['frontdesk.checkin']) acts.push(`<button class="btn btn-ghost" data-action="reg-edit" data-id="${r.id}">Registration card</button>`);
+    if (CAN['messages.use'] && r.phone) acts.push(`<button class="btn btn-ghost" data-action="wa-open" data-guest="${r.guest_id}">WhatsApp</button>`);
     acts.push('<button class="btn btn-ghost" data-action="print">Print invoice</button>');
     if (r.status !== 'cancelled') acts.push('<button class="btn btn-ghost" data-action="print-reg">Print registration card</button>');
     const voidBtn = (kind, x) => !x.voided && CAN['folio.void'] ? `<button class="link small" data-action="void" data-kind="${kind}" data-id="${x.id}">Void</button>` : (x.voided ? `<span class="small muted" title="${esc(x.void_reason)}">void</span>` : '');
@@ -1346,8 +1348,8 @@
     if (p.redirect) { location.replace(`#guest/${p.redirect}`); return ''; }
     const g = p.guest; ui.guest = p;
     const m = CAN['guests.manage'], mk = CAN['marketing.manage'];
-    return `<div class="page-head"><div><p class="sub"><a href="#guests">← Guest profiles</a></p><h1 class="page">${esc(guestName(g))} ${g.vip ? pill('VIP', 'warn') : ''}</h1><p class="sub">${consentPill(g)} ${g.consent_at && g.marketing_consent ? `<span class="small muted">since ${fdate(g.consent_at)} (${esc(String(g.consent_source || '').replace('_', ' '))})</span>` : ''}</p></div>
-      <div class="row">${m && !g.erased_at ? `<button class="btn btn-ghost" data-action="guest-edit">Edit</button>${g.marketing_consent && !g.unsubscribed_at ? '<button class="btn btn-ghost" data-action="guest-consent" data-c="0">Withdraw consent</button>' : '<button class="btn btn-ghost" data-action="guest-consent" data-c="1">Record consent</button>'}` : ''}
+    return `<div class="page-head"><div><p class="sub"><a href="#guests">← Guest profiles</a></p><h1 class="page">${esc(guestName(g))} ${g.vip ? pill('VIP', 'warn') : ''}</h1><p class="sub">${consentPill(g)} ${waPill(g)} ${g.consent_at && g.marketing_consent ? `<span class="small muted">since ${fdate(g.consent_at)} (${esc(String(g.consent_source || '').replace('_', ' '))})</span>` : ''}</p></div>
+      <div class="row">${m && !g.erased_at ? `<button class="btn btn-ghost" data-action="guest-edit">Edit</button>${g.marketing_consent && !g.unsubscribed_at ? '<button class="btn btn-ghost" data-action="guest-consent" data-c="0">Withdraw consent</button>' : '<button class="btn btn-ghost" data-action="guest-consent" data-c="1">Record consent</button>'}` : ''}${CAN['messages.use'] && g.phone && !g.erased_at ? `<button class="btn" data-action="wa-open" data-guest="${g.id}">WhatsApp</button>` : ''}
         ${mk && !g.erased_at ? `<a class="btn btn-ghost" href="/api/crm/guests/${g.id}/export" download>Export data</a><button class="btn btn-bad" data-action="guest-erase">Erase</button>` : ''}</div></div>
       <div class="grid g4"><div class="card kpi"><span>Stays</span><b>${g.stays}</b><small>${g.nights} nights</small></div><div class="card kpi"><span>Spend</span><b>${num(g.spend)}</b><small>UGX on their bills</small></div>
         <div class="card kpi"><span>Last stay</span><b>${g.in_house ? 'In-house now' : g.last_stay ? fdate(g.last_stay) : '—'}</b><small>${g.next_arrival ? `next arrival ${fdate(g.next_arrival)}` : ''}</small></div><div class="card kpi"><span>Average per stay</span><b>${g.stays ? num(g.spend / g.stays) : '—'}</b><small>UGX</small></div></div>
@@ -1553,7 +1555,7 @@
       <div class="lh-right"><div class="lh-title">${esc(title)}</div>${meta.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')}<div><span>Printed</span> ${esc(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} by ${esc(ME.full_name)}</div></div></div>`;
   }
   // views that print a report: every page except the ones that are only for working (POS, set-up forms…)
-  const NO_PRINT = new Set(['pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
+  const NO_PRINT = new Set(['inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
   function addPrinting(view) {
     if (NO_PRINT.has(view)) return;
     const head = $('#view .page-head');
@@ -1574,7 +1576,8 @@
     return `<fieldset class="plain"><legend class="sub3">Guest</legend>
       <div class="three"><label>First name<input name="first_name" value="${esc(r.first_name || '')}" required maxlength="80"></label><label>Last name<input name="last_name" value="${esc(r.last_name || '')}" maxlength="80"></label><label>Gender<select name="gender">${opts([['', '–'], ...Object.entries(GENDER)], r.gender || '')}</select></label></div>
       <div class="three"><label>Phone<input name="phone" value="${esc(r.phone || '')}" maxlength="40"></label><label>Email<input name="email" type="email" value="${esc(r.email || '')}" maxlength="120"></label><label>Date of birth<input name="birth_date" type="date" value="${esc(r.birth_date || '')}"></label></div>
-      <div class="two"><label>Nationality<input name="nationality" value="${esc(r.nationality || '')}" maxlength="60"></label><label>Home address<input name="address" value="${esc(r.address || '')}" maxlength="300"></label></div></fieldset>
+      <div class="two"><label>Nationality<input name="nationality" value="${esc(r.nationality || '')}" maxlength="60"></label><label>Home address<input name="address" value="${esc(r.address || '')}" maxlength="300"></label></div>
+      <label class="row small"><input type="checkbox" name="whatsapp_opt_in" value="1" ${r.whatsapp_opt_in ? 'checked' : ''}> The guest agrees to receive WhatsApp messages about their stay on this number${r.whatsapp_opt_out_at ? ' <span class="muted">(they replied STOP earlier)</span>' : ''}</label></fieldset>
       <fieldset class="plain"><legend class="sub3">Identification</legend>
       <div class="two"><label>ID type<select name="id_type">${opts([['', '–'], ...ID_TYPES.map((x) => [x, x])], r.id_type || '')}</select></label><label>ID / passport number<input name="id_number" value="${esc(r.id_number || '')}" maxlength="60"></label></div>
       <div class="two"><label>Issued by (country / authority)<input name="id_issued_by" value="${esc(r.id_issued_by || '')}" maxlength="60"></label><label>Expiry date<input name="id_expiry" type="date" value="${esc(r.id_expiry || '')}"></label></div></fieldset>
@@ -1583,7 +1586,7 @@
       <div class="two"><label>Coming from<input name="coming_from" value="${esc(r.coming_from || '')}" maxlength="80"></label><label>Going to<input name="going_to" value="${esc(r.going_to || '')}" maxlength="80"></label></div></fieldset>`;
   }
   const regBody = (v) => ({
-    guest: Object.fromEntries(['first_name', 'last_name', 'gender', 'phone', 'email', 'birth_date', 'nationality', 'address', 'id_type', 'id_number', 'id_issued_by', 'id_expiry'].map((k) => [k, v[k] || null])),
+    guest: { ...Object.fromEntries(['first_name', 'last_name', 'gender', 'phone', 'email', 'birth_date', 'nationality', 'address', 'id_type', 'id_number', 'id_issued_by', 'id_expiry'].map((k) => [k, v[k] || null])), whatsapp_opt_in: !!v.whatsapp_opt_in },
     stay: Object.fromEntries(['purpose', 'vehicle_reg', 'coming_from', 'going_to'].map((k) => [k, v[k] || null])),
   });
 
@@ -2181,6 +2184,250 @@
     settings: async (v) => { await PUT('/settings', { property_name: v.property_name, vat_rate: Number(v.vat_rate) }); toast('Settings saved.'); refresh(); },
   };
 
+  /* ---------- Phase 12: WhatsApp inbox, phone book, set-up ---------- */
+  const WA_MODE = { live: ['Connected', 'ok'], practice: ['Practice mode', 'warn'], off: ['Not connected', 'bad'] };
+  const WA_TICK = { queued: ['Sending…', ''], sent: ['Sent ✓', ''], delivered: ['Delivered ✓✓', ''], read: ['Read ✓✓', 'read'], failed: ['Not delivered', 'err'], received: ['', ''] };
+  const WA_PARAM = { first_name: 'First name', last_name: 'Last name', property: 'Hotel name', code: 'Booking number', arrival: 'Arrival date', departure: 'Departure date', nights: 'Nights', room: 'Room number', room_type: 'Room type', check_in_time: 'Check-in time', check_out_time: 'Check-out time', review_link: 'Review page' };
+  const WA_FILTERS = [['open', 'Open'], ['unread', 'Unread'], ['in_house', 'In-house'], ['done', 'Done'], ['all', 'All']];
+  const PB_KIND = { all: 'Everyone', guests: 'Guests', in_house: 'In-house guests', contacts: 'Other contacts', supplier: 'Suppliers', transport: 'Transport / drivers', partner: 'Partners / tour operators', staff: 'Staff', emergency: 'Emergency', other: 'Other' };
+  const PB_CAT = { supplier: 'Supplier', transport: 'Transport / driver', partner: 'Partner / tour operator', staff: 'Staff', emergency: 'Emergency', other: 'Other' };
+  const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`).replace(/\n/g, '<br>');
+  const waPill = (g) => (g.whatsapp_opt_out_at ? pill('WhatsApp: replied STOP', 'bad') : g.whatsapp_opt_in ? pill('WhatsApp: agreed', 'ok') : pill('WhatsApp: not asked'));
+  const hoursLeft = (iso) => Math.max(0, Math.round((new Date(iso) - Date.now()) / 36e5));
+  const modeNote = (mode) => (mode === 'practice' ? '<p class="note">Practice mode: messages are kept in the system and not sent to anyone. Use “Reply as the guest” to try conversations. An administrator connects WhatsApp in WhatsApp set-up.</p>'
+    : mode === 'off' ? '<p class="note err">WhatsApp is not connected yet, so nothing can be sent. An administrator connects it in WhatsApp set-up.</p>' : '');
+
+  function waListHtml(list, openId) {
+    if (!list.length) return '<p class="muted small pad">No conversations here.</p>';
+    return list.map((c) => `<a class="wa-item ${String(c.id) === String(openId) ? 'on' : ''}" href="#inbox/${c.id}">
+      <span class="wa-top"><b>${esc(c.display_name)}</b><span class="small muted">${c.last ? ftime(c.last.created_at) : ''}</span></span>
+      <span class="wa-sub"><span class="small muted wa-prev">${c.last ? (c.last.direction === 'out' ? 'You: ' : '') + esc(String(c.last.body || '').slice(0, 80)) : 'No messages yet'}</span>${c.unread ? `<span class="badge">${c.unread}</span>` : ''}</span>
+      <span class="small">${c.room ? pill('Room ' + c.room, 'ink') + ' ' : ''}${c.vip ? pill('VIP', 'warn') + ' ' : ''}${c.opted_out_at ? pill('STOP', 'bad') : c.window_open ? pill('Can reply', 'ok') : ''}${c.assigned_name ? ` <span class="muted">· ${esc(c.assigned_name)}</span>` : ''}</span></a>`).join('');
+  }
+  function waMsgsHtml(msgs) {
+    if (!msgs.length) return '<p class="muted small center pad">No messages yet. Send a template to start the conversation.</p>';
+    let day = '';
+    return msgs.map((m) => {
+      const d = new Date(m.created_at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      const sep = d !== day ? `<div class="wa-day">${esc((day = d))}</div>` : '';
+      const [tick, cls] = WA_TICK[m.status] || ['', ''];
+      const who = m.direction === 'out' ? (m.automation_name ? `Automation · ${esc(m.automation_name)}` : m.sent_by_name ? esc(m.sent_by_name) : 'System') : '';
+      return `${sep}<div class="wa-msg ${m.direction}"><div class="wa-bubble">${m.template_name ? `<span class="wa-tpl">Template · ${esc(m.template_name)}</span>` : ''}${linkify(m.body || '')}
+        <span class="wa-meta">${who ? who + ' · ' : ''}${new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${tick ? ` · <span class="${cls}">${tick}</span>` : ''}</span>
+        ${m.status === 'failed' && m.error ? `<span class="wa-err">${esc(m.error)}</span>` : ''}</div></div>`;
+    }).join('');
+  }
+  function tplFields(t) {
+    return t ? `${t.body.match(/\{\{\d+\}\}/g) ? [...new Set(t.body.match(/\{\{(\d+)\}\}/g))].map((ph, i) => `<label>${esc(ph)} ${t.params[i] ? `<span class="muted">${esc(WA_PARAM[t.params[i]] || t.params[i])}</span>` : ''}<input name="p_${i}" value="${esc(t.values[i] || '')}" required maxlength="300"></label>`).join('') : ''}
+      <p class="small muted">Preview</p><div class="wa-msg out"><div class="wa-bubble" id="wa-preview">${linkify(t.body.replace(/\{\{(\d+)\}\}/g, (m, n) => t.values[Number(n) - 1] || m))}</div></div>` : '';
+  }
+  function waComposer(d) {
+    const c = d.conversation;
+    if (d.mode === 'off') return '';
+    if (c.opted_out_at) return '<p class="note err">This person replied STOP and does not want WhatsApp messages. They can send START to allow them again.</p>';
+    const tpls = d.templates;
+    const tplForm = tpls.length ? `<form class="form wa-tpl-form" data-form="wa-template" data-id="${c.id}"><label>Template<select name="template_id">${opts(tpls.map((t) => [t.id, `${t.name}${t.category === 'marketing' ? ' (promotional)' : ''}`]), ui.waTpl || tpls[0].id)}</select></label>
+        <div id="wa-tpl-fields">${tplFields(tpls.find((t) => String(t.id) === String(ui.waTpl)) || tpls[0])}</div><div class="actions"><button class="btn btn-gold">Send template</button></div></form>`
+      : `<p class="note">No approved templates yet.${CAN['messages.manage'] ? ' <a href="#whatsapp">Set them up</a>.' : ' Ask a manager to set them up.'}</p>`;
+    if (!c.window_open) {
+      return `<div class="wa-compose"><p class="small muted">${c.last_inbound_at ? `More than 24 hours since ${esc(c.display_name)} last wrote` : `${esc(c.display_name)} has not written yet`}: WhatsApp only allows an approved template until they reply.${d.guest && !d.guest.whatsapp_opt_in ? ' <b>The guest has not agreed to WhatsApp messages</b>: record it on the registration card first.' : ''}</p>${tplForm}</div>`;
+    }
+    return `<div class="wa-compose"><form class="form" data-form="wa-send" data-id="${c.id}"><label class="sr">Message<textarea name="text" rows="3" maxlength="4096" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)" required></textarea></label>
+        <div class="row between"><span class="small muted">Free replies allowed for ${hoursLeft(c.window_ends)} more hour${hoursLeft(c.window_ends) === 1 ? '' : 's'}.</span><button class="btn btn-gold">Send</button></div></form>
+      ${tpls.length ? `<details class="mt"><summary class="small">Send a template instead</summary>${tplForm}</details>` : ''}</div>`;
+  }
+  function waGuestHtml(d) {
+    const c = d.conversation, g = d.guest;
+    const assign = `<div class="row mt"><button class="btn btn-sm btn-ghost" data-action="wa-assign" data-id="${c.id}">${c.assigned_to === ME.id ? 'Unassign me' : 'Assign to me'}</button><button class="btn btn-sm btn-ghost" data-action="wa-status" data-id="${c.id}" data-s="${c.status === 'done' ? 'open' : 'done'}">${c.status === 'done' ? 'Reopen' : 'Mark done'}</button></div>`;
+    if (!g) {
+      return `<h2 class="sec">${esc(c.display_name)}</h2><p class="small">${esc(c.phone)}${c.contact_company ? ` · ${esc(c.contact_company)}` : ''}</p>
+        ${c.contact_id ? '<p class="small muted">From the phone book.</p>' : `<p class="small muted">Not linked to a guest profile.</p><form class="form" data-form="wa-link" data-id="${c.id}"><label>Link to a guest (search)<input name="q" placeholder="Name or phone" required></label><button class="btn btn-sm btn-ghost">Find</button></form><div id="wa-link-results"></div>`}${assign}`;
+    }
+    return `<h2 class="sec"><a href="#guest/${g.id}">${esc(guestName(g))}</a> ${g.vip ? pill('VIP', 'warn') : ''}</h2><p class="small">${esc(c.phone)}${g.email ? `<br>${esc(g.email)}` : ''}</p><p>${waPill(g)}</p>
+      ${CAN['guests.manage'] && !g.whatsapp_opt_out_at ? `<button class="btn btn-sm btn-ghost" data-action="wa-optin" data-id="${g.id}" data-c="${g.whatsapp_opt_in ? 0 : 1}">${g.whatsapp_opt_in ? 'Withdraw WhatsApp permission' : 'Guest agreed to WhatsApp'}</button>` : ''}
+      ${d.stays.length ? `<h3 class="sub3 mt">Stays</h3>${d.stays.map((s) => `<p class="small"><a href="#res/${s.id}">${esc(s.code)}</a> ${statusPill(s.status)}<br>${fdate(s.arrival)} → ${fdate(s.departure)}${s.room ? ` · room ${esc(s.room)}` : ` · ${esc(s.room_type)}`}</p>`).join('')}` : '<p class="small muted">No stays yet.</p>'}
+      ${g.preferences ? `<h3 class="sub3">Preferences</h3><p class="small">${esc(g.preferences)}</p>` : ''}${g.notes ? `<h3 class="sub3">Notes</h3><p class="small">${esc(g.notes)}</p>` : ''}${assign}`;
+  }
+
+  VIEWS.inbox = async (id) => {
+    const f = ui.waFilter || 'open';
+    const list = await GET(`/messages/conversations?filter=${f}&q=${encodeURIComponent(ui.waQ || '')}`);
+    const d = id ? await GET(`/messages/conversations/${id}`) : null;
+    ui.waOpen = d ? { id: d.conversation.id, sig: waSig(d) } : null;
+    ui.waTplList = d?.templates || [];
+    updateWaBadge();
+    return `<div class="page-head"><div><h1 class="page">WhatsApp inbox</h1><p class="sub">Guests' WhatsApp messages, answered by the front desk from here. ${pill(...WA_MODE[list.mode])}</p></div>
+      <div class="row"><button class="btn btn-gold" data-action="wa-new">+ New chat</button><a class="btn btn-ghost" href="#phonebook">Phone book</a></div></div>${modeNote(list.mode)}
+      <div class="wa ${d ? 'has-open' : ''}"><aside class="card wa-list"><form class="form" data-form="wa-search"><input name="q" value="${esc(ui.waQ || '')}" placeholder="Search name or number" aria-label="Search conversations"></form>
+        <div class="wa-filters">${WA_FILTERS.map(([k, l]) => `<button type="button" class="${k === f ? 'on' : ''}" data-action="wa-filter" data-f="${k}">${l}</button>`).join('')}</div>
+        <div id="wa-items">${waListHtml(list.conversations, id)}</div></aside>
+      ${d ? `<section class="card wa-thread"><div class="wa-head"><a class="wa-back" href="#inbox">←</a><div><b>${esc(d.conversation.display_name)}</b><br><span class="small muted">${esc(d.conversation.phone)}${d.conversation.room ? ` · room ${esc(d.conversation.room)}` : ''}</span></div>
+          <span>${d.conversation.opted_out_at ? pill('Replied STOP', 'bad') : d.conversation.window_open ? pill(`Reply window: ${hoursLeft(d.conversation.window_ends)} h`, 'ok') : pill('Template only')}</span></div>
+          <div class="wa-msgs" id="wa-msgs">${waMsgsHtml(d.messages)}</div>${waComposer(d)}
+          ${d.mode === 'practice' ? `<form class="form row wa-practice" data-form="wa-practice" data-id="${d.conversation.id}"><input name="text" placeholder="Reply as the guest (practice)" aria-label="Reply as the guest" required><button class="btn btn-sm btn-ghost">Reply as guest</button></form>` : ''}</section>
+        <aside class="card wa-guest">${waGuestHtml(d)}</aside>`
+        : '<section class="card wa-thread wa-empty"><p class="muted center">Choose a conversation, or start a new chat with a guest from the phone book.</p></section>'}</div>`;
+  };
+  const waSig = (d) => d.messages.map((m) => m.id + m.status).join(',') + '|' + d.conversation.window_open + d.conversation.opted_out_at;
+  function scrollWa() { const m = $('#wa-msgs'); if (m) m.scrollTop = m.scrollHeight; }
+  async function refreshInbox() {
+    if (route().r !== 'inbox' || !$('#modal').hidden || !$('#wa-items')) return;
+    try {
+      const list = await GET(`/messages/conversations?filter=${ui.waFilter || 'open'}&q=${encodeURIComponent(ui.waQ || '')}`);
+      $('#wa-items').innerHTML = waListHtml(list.conversations, route().id);
+      if (ui.waOpen && String(ui.waOpen.id) === route().id) {
+        const d = await GET(`/messages/conversations/${ui.waOpen.id}`);
+        const sig = waSig(d);
+        // a new message or a change in the reply window redraws the thread; the text being typed is kept
+        if (sig !== ui.waOpen.sig) {
+          const windowChanged = sig.split('|')[1] !== ui.waOpen.sig.split('|')[1];
+          ui.waOpen.sig = sig;
+          if (windowChanged) { const draft = $('form[data-form=wa-send] textarea')?.value; await render(); const t = $('form[data-form=wa-send] textarea'); if (t && draft) t.value = draft; }
+          else { $('#wa-msgs').innerHTML = waMsgsHtml(d.messages); scrollWa(); }
+        }
+      }
+      updateWaBadge(list.conversations);
+    } catch { /* the next refresh tries again */ }
+  }
+  async function updateWaBadge(list) {
+    if (!CAN['messages.use'] || !$('#side-nav')) return;
+    const n = list ? list.reduce((a, c) => a + (c.status === 'open' ? c.unread : 0), 0) : (await GET('/messages/unread').catch(() => ({ unread: 0 }))).unread;
+    const a = $('#side-nav a[href="#inbox"]'); if (!a) return;
+    let b = a.querySelector('.badge'); if (!b) { b = document.createElement('span'); b.className = 'badge'; a.appendChild(b); }
+    b.textContent = n || ''; b.hidden = !n;
+  }
+
+  VIEWS.phonebook = async () => {
+    const f = ui.pb || { kind: 'all', q: '' };
+    const rows = await GET(`/messages/phonebook?kind=${f.kind}&q=${encodeURIComponent(f.q)}`);
+    const qs = `kind=${encodeURIComponent(f.kind)}&q=${encodeURIComponent(f.q)}`;
+    const waCell = (r) => (r.type !== 'guest' ? '' : r.whatsapp === 'yes' ? pill('Agreed', 'ok') : r.whatsapp === 'stopped' ? pill('STOP', 'bad') : pill('Not asked'));
+    return `<div class="page-head"><div><h1 class="page">Phone book</h1><p class="sub">Every guest's contacts from their profiles, plus suppliers, drivers and partners. Call or WhatsApp in one tap.</p></div>
+      <div class="row"><button class="btn btn-gold" data-action="pb-add">+ Add contact</button><a class="btn btn-ghost" href="/api/messages/phonebook/export?format=vcf&${qs}" download>Export to phone (vCard)</a><a class="btn btn-ghost" href="/api/messages/phonebook/export?format=csv&${qs}" download>Export CSV</a></div></div>
+      <div class="card"><form class="form" data-form="pb-filter"><div class="two"><label>Search<input name="q" value="${esc(f.q)}" placeholder="Name, company, email or number"></label><label>Show<select name="kind">${opts(Object.entries(PB_KIND), f.kind)}</select></label></div><div class="actions"><button class="btn btn-gold">Show</button></div></form>
+        <p class="small muted">To put these contacts on the front-desk phone: tap <b>Export to phone</b>, open the file on the phone (or import it at contacts.google.com) and they appear in the phone's contacts and in WhatsApp. Guests are labelled “(${esc(SETTINGS.property_name)} guest)”.</p></div>
+      <div class="card mt"><p class="small muted">${rows.length} contact${rows.length === 1 ? '' : 's'}</p>${table(['Name', 'Type', 'Phone', 'Email', 'WhatsApp', ''], rows.map((r) => `<tr>
+        <td>${r.type === 'guest' ? `<a href="#guest/${r.id}">${esc(r.name)}</a>${r.vip ? ' ' + pill('VIP', 'warn') : ''}${r.in_house ? ' ' + pill('Room ' + (r.room || ''), 'ink') : ''}` : `<b>${esc(r.name)}</b>${r.company ? `<br><span class="small muted">${esc(r.company)}</span>` : ''}`}</td>
+        <td class="small">${r.type === 'guest' ? `Guest${r.stays ? ` · ${r.stays} stay${r.stays === 1 ? '' : 's'}` : ''}` : esc(PB_CAT[r.category] || 'Other')}</td>
+        <td class="nowrap">${r.phone_intl ? `<a href="tel:${esc(r.phone_intl)}">${esc(r.phone_intl)}</a>` : esc(r.phone || '–')}${r.phone2 ? `<br><a class="small" href="tel:${esc(r.phone2)}">${esc(r.phone2)}</a>` : ''}</td>
+        <td class="small">${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}</td><td>${waCell(r)}</td>
+        <td class="right nowrap">${r.wa_id ? `<button class="btn btn-sm" data-action="wa-open" data-${r.type}="${r.id}" data-conv="${r.conversation_id || ''}">WhatsApp</button> ` : ''}${r.type === 'contact' ? `<button class="btn btn-sm btn-ghost" data-action="pb-edit" data-id="${r.id}">Edit</button>` : ''}</td></tr>`), 'Nobody matches.')}</div>`;
+  };
+  const contactForm = (k = {}) => `<form class="form" data-form="ops-modal"><div class="two"><label>Name<input name="name" value="${esc(k.name || '')}" required maxlength="120"></label><label>Company<input name="company" value="${esc(k.company || '')}" maxlength="120"></label></div>
+    <div class="two"><label>Category<select name="category">${opts(Object.entries(PB_CAT), k.category || 'supplier')}</select></label><label>Email<input name="email" type="email" value="${esc(k.email || '')}" maxlength="120"></label></div>
+    <div class="two"><label>Phone (mobile / WhatsApp)<input name="phone" value="${esc(k.phone || '')}" maxlength="40" placeholder="0772 123456 or +254 712 345678"></label><label>Second phone<input name="phone2" value="${esc(k.phone2 || '')}" maxlength="40"></label></div>
+    <label>Notes<input name="notes" value="${esc(k.notes || '')}" maxlength="500"></label>
+    <div class="actions">${k.id ? `<button type="button" class="btn btn-bad" data-action="pb-delete" data-id="${k.id}">Delete</button>` : ''}${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`;
+
+  VIEWS.whatsapp = async () => {
+    const d = await GET('/messages/setup');
+    ui.waSetup = d;
+    const when = (a) => (a.trigger === 'pre_arrival' ? `${a.days} day${a.days === 1 ? '' : 's'} before arrival` : a.trigger === 'mid_stay' ? `${Math.max(1, a.days)} day${Math.max(1, a.days) === 1 ? '' : 's'} after arrival` : a.trigger === 'pre_departure' ? (a.days ? `${a.days} day${a.days === 1 ? '' : 's'} before departure` : 'On departure day') : a.trigger === 'post_stay' ? `${a.days} day${a.days === 1 ? '' : 's'} after check-out` : d.triggers[a.trigger]);
+    const steps = d.connected ? '' : `<ol class="steps-list small"><li>Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add the hotel's phone number.</li>
+      <li>In the hosting dashboard (Render → azeli-pms → Environment) add <code>WHATSAPP_TOKEN</code>, <code>WHATSAPP_PHONE_NUMBER_ID</code>, <code>WHATSAPP_APP_SECRET</code>, <code>WHATSAPP_VERIFY_TOKEN</code> and <code>WHATSAPP_DISPLAY_NUMBER</code>.</li>
+      <li>In the Meta app, under WhatsApp → Configuration, paste the webhook address below and the same verify token, then subscribe to <b>messages</b>.</li><li>Submit the templates below in WhatsApp Manager with the same name and wording; tick “approved” here once they show as Active.</li></ol><p class="small muted">The go-live guide (docs/GO-LIVE.md, Part D) has every click.</p>`;
+    return `<div class="page-head"><div><h1 class="page">WhatsApp set-up</h1><p class="sub">Connection, message templates and the automations that follow guests through their stay.</p></div></div>
+      <div class="grid g2"><div class="card"><div class="row between"><h2 class="sec">Connection</h2>${pill(...WA_MODE[d.mode])}</div>
+        <dl class="kv"><dt>Number</dt><dd>${esc(d.display_number || (d.connected ? 'Connected' : '–'))}</dd><dt>Webhook address</dt><dd><code class="mono">${esc(d.webhook_url)}</code></dd>
+        <dt>Verify token</dt><dd>${d.has_verify_token ? pill('Set', 'ok') : pill('Missing', 'bad')}</dd><dt>App secret</dt><dd>${d.has_app_secret ? pill('Set', 'ok') : pill('Missing', 'bad')} <span class="small muted">needed to accept incoming messages</span></dd><dt>API version</dt><dd>${esc(d.api_version)}</dd></dl>${modeNote(d.mode)}${steps}</div>
+      <div class="card"><h2 class="sec">Numbers and quiet hours</h2><form class="form" data-form="wa-settings"><label>Country code for local numbers<input name="phone_country_code" value="${esc(d.settings.phone_country_code)}" inputmode="numeric" maxlength="4" required></label>
+        <p class="small muted">A number written as 0772 123456 becomes +${esc(d.settings.phone_country_code)} 772 123456. Foreign guests' numbers need their own code (+44 …).</p>
+        <div class="two"><label>Automations wait from (hour)<input type="number" name="wa_quiet_from" min="0" max="23" value="${d.settings.wa_quiet_from}" required></label><label>until (hour)<input type="number" name="wa_quiet_to" min="0" max="23" value="${d.settings.wa_quiet_to}" required></label></div>
+        <p class="small muted">Hotel time (${esc(d.settings.timezone)}). Nothing automatic goes out at night; it waits until the morning.</p><div class="actions"><button class="btn btn-gold">Save</button></div></form></div></div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Automations</h2><button class="btn btn-sm btn-ghost" data-action="wa-run">Run now</button></div>
+        <p class="small muted">Each one sends its template once per stay, only to guests who agreed to WhatsApp messages (promotional ones also need marketing consent). Checked every minute.</p>
+        ${table(['Automation', 'When', 'Template', 'Status', '#Sent', 'Skipped', ''], d.automations.map((a) => { const st = d.stats[a.id] || {}; return `<tr><td><b>${esc(a.name)}</b></td><td class="small">${esc(when(a))}</td><td class="small">${esc(a.template_name)}${a.approved ? '' : ' ' + pill('not approved', 'warn')}</td>
+          <td>${a.enabled ? pill('On', 'ok') : pill('Off')}</td><td class="num">${st.sent || 0}</td><td class="small">${st.skipped ? `${st.skipped}: ${(st.reasons || []).map((r) => `${esc(r.reason)} (${r.n})`).join('; ')}` : ''}</td>
+          <td class="right"><button class="btn btn-sm btn-ghost" data-action="wa-auto" data-id="${a.id}">Edit</button></td></tr>`; }))}
+        <div class="actions"><button class="btn btn-ghost" data-action="wa-auto">+ New automation</button></div></div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Message templates</h2><button class="btn btn-sm btn-ghost" data-action="wa-tpl">+ New template</button></div>
+        <p class="small muted">WhatsApp only lets a business start a conversation (or write after 24 hours of silence) with a template it approved. Create each one in WhatsApp Manager with exactly this name, language and wording, then tick “approved”. Utility templates are about the guest's booking; promotional ones are marketing.</p>
+        ${table(['Name', 'Type', 'Wording', 'Status', ''], d.templates.map((t) => `<tr><td><code class="mono nowrap">${esc(t.name)}</code><br><span class="small muted">${esc(t.language)}</span></td><td class="small">${t.category === 'marketing' ? 'Promotional' : 'Utility'}</td>
+          <td class="small">${esc(t.body)}<br><span class="muted">${t.params.map((p, i) => `{{${i + 1}}} = ${esc(d.param_keys[p] || '?')}`).join(' · ')}</span></td><td>${t.approved ? pill('Approved', 'ok') : pill('Not approved')}</td>
+          <td class="right"><button class="btn btn-sm btn-ghost" data-action="wa-tpl" data-id="${t.id}">Edit</button></td></tr>`))}</div>
+`;
+  };
+
+  Object.assign(OPS_A, {
+    'wa-filter': (d) => { ui.waFilter = d.f; render(); },
+    'wa-new': () => modal('New WhatsApp chat', `<form class="form" data-form="ops-modal"><label>Phone number<input name="phone" required maxlength="40" placeholder="0772 123456 or +44 7700 900123"></label>
+      <p class="small muted">Tip: open a guest from the <a href="#phonebook">phone book</a> or their profile to link the chat to them. A new chat starts with a template; free messages are allowed once they reply.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Open chat</button></div></form>`,
+    async (v) => { const r = await POST('/messages/conversations', { phone: v.phone }); location.hash = `#inbox/${r.id}`; }),
+    'wa-open': async (d) => {
+      if (d.conv) { location.hash = `#inbox/${d.conv}`; return; }
+      const r = await POST('/messages/conversations', d.guest ? { guest_id: Number(d.guest) } : { contact_id: Number(d.contact) });
+      location.hash = `#inbox/${r.id}`;
+    },
+    'wa-assign': async (d) => { const c = (await GET(`/messages/conversations/${d.id}?peek=1`)).conversation; await PUT(`/messages/conversations/${d.id}`, { assigned_to: c.assigned_to === ME.id ? null : ME.id }); render(); },
+    'wa-status': async (d) => { await PUT(`/messages/conversations/${d.id}`, { status: d.s }); toast(d.s === 'done' ? 'Marked done. It reopens when the guest writes again.' : 'Reopened.'); render(); },
+    'wa-optin': async (d) => { await PUT(`/messages/guests/${d.id}/whatsapp`, { opt_in: d.c === '1' }); toast(d.c === '1' ? 'Recorded: the guest agreed to WhatsApp messages.' : 'WhatsApp permission withdrawn.'); render(); },
+    'wa-link-guest': async (d) => { await PUT(`/messages/conversations/${d.conv}`, { guest_id: Number(d.id) }); toast('Linked to the guest profile.'); render(); },
+    'wa-run': async () => { const r = await POST('/messages/automations/run'); toast(`${r.queued} message${r.queued === 1 ? '' : 's'} sent${r.skipped ? `, ${r.skipped} skipped` : ''}.`); render(); },
+    'pb-add': () => modal('Add contact', contactForm(), async (v) => { await POST('/messages/contacts', v); return 'Contact saved.'; }),
+    'pb-edit': async (d) => {
+      const k = (await GET(`/messages/phonebook?kind=contacts`)).find((x) => String(x.id) === d.id);
+      modal(`Edit ${k.name}`, contactForm(k), async (v) => { await PUT(`/messages/contacts/${k.id}`, v); return 'Contact saved.'; });
+    },
+    'pb-delete': async (d) => { if (!confirm('Delete this contact?')) return; await POST(`/messages/contacts/${d.id}/delete`); closeModal(); toast('Contact deleted.'); render(); },
+    'wa-tpl': (d) => {
+      const s = ui.waSetup, t = s.templates.find((x) => String(x.id) === d.id) || { name: '', language: 'en', category: 'utility', body: '', params: [], approved: false };
+      const n = Math.max(3, (t.body.match(/\{\{\d+\}\}/g) || []).length);
+      modal(t.id ? `Template ${t.name}` : 'New template', `<form class="form" data-form="ops-modal"><div class="three"><label>Name (as in WhatsApp Manager)<input name="name" value="${esc(t.name)}" required pattern="[a-z0-9_]+" maxlength="100" placeholder="spa_offer"></label>
+        <label>Language<input name="language" value="${esc(t.language)}" required maxlength="6"></label><label>Type<select name="category">${opts([['utility', 'Utility (about their booking)'], ['marketing', 'Promotional (marketing)']], t.category)}</select></label></div>
+        <label>Wording, with {{1}}, {{2}} … for the parts that change<textarea name="body" rows="4" required maxlength="1024">${esc(t.body)}</textarea></label>
+        <div class="three">${Array.from({ length: Math.min(8, n + 1) }, (_, i) => `<label>{{${i + 1}}} is<select name="param_${i}">${opts([['', '–'], ...Object.entries(s.param_keys)], t.params[i] || '')}</select></label>`).join('')}</div>
+        <p class="small muted">Only as many as the wording uses are kept.</p><label class="row"><input type="checkbox" name="approved" value="1" ${t.approved ? 'checked' : ''}> Approved: WhatsApp Manager shows this template as Active</label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => {
+        const body = { name: v.name, language: v.language, category: v.category, body: v.body, approved: !!v.approved, params: Object.keys(v).filter((k) => k.startsWith('param_')).sort((a, b) => a.slice(6) - b.slice(6)).map((k) => v[k]) };
+        if (t.id) await PUT(`/messages/templates/${t.id}`, body); else await POST('/messages/templates', body);
+        return 'Template saved.';
+      });
+    },
+    'wa-auto': (d) => {
+      const s = ui.waSetup, a = s.automations.find((x) => String(x.id) === d.id) || { name: '', trigger: 'pre_arrival', days: 1, template_id: s.templates[0]?.id, enabled: false };
+      modal(a.id ? a.name : 'New automation', `<form class="form" data-form="ops-modal"><label>Name<input name="name" value="${esc(a.name)}" required maxlength="80"></label>
+        <div class="two"><label>When<select name="trigger">${opts(Object.entries(s.triggers), a.trigger)}</select></label><label>Days<input type="number" name="days" min="0" max="60" value="${a.days}"></label></div>
+        <label>Template<select name="template_id">${opts(s.templates.map((t) => [t.id, `${t.name}${t.approved ? '' : ' (not approved yet)'}`]), a.template_id)}</select></label>
+        <label class="row"><input type="checkbox" name="enabled" value="1" ${a.enabled ? 'checked' : ''}> On</label><p class="small muted">When switched on, it does not write to bookings made before that moment (booking confirmations) and never at night.</p>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { const body = { name: v.name, trigger: v.trigger, days: Number(v.days || 0), template_id: Number(v.template_id), enabled: !!v.enabled }; if (a.id) await PUT(`/messages/automations/${a.id}`, body); else await POST('/messages/automations', body); return 'Automation saved.'; });
+    },
+  });
+  Object.assign(OPS_FORMS, {
+    'wa-search': (v) => { ui.waQ = v.q; render(); },
+    'wa-send': async (v, form) => { await POST(`/messages/conversations/${form.dataset.id}/messages`, { text: v.text }); form.reset(); await render(); scrollWa(); $('form[data-form=wa-send] textarea')?.focus(); },
+    'wa-template': async (v, form) => {
+      const params = Object.keys(v).filter((k) => k.startsWith('p_')).sort((a, b) => a.slice(2) - b.slice(2)).map((k) => v[k]);
+      await POST(`/messages/conversations/${form.dataset.id}/messages`, { template_id: Number(v.template_id), params }); toast('Template sent.'); await render(); scrollWa();
+    },
+    'wa-practice': async (v, form) => { await POST(`/messages/conversations/${form.dataset.id}/practice-reply`, { text: v.text }); await render(); scrollWa(); $('form[data-form=wa-practice] input')?.focus(); },
+    'wa-settings': async (v) => { await PUT('/messages/settings', { phone_country_code: v.phone_country_code, wa_quiet_from: Number(v.wa_quiet_from), wa_quiet_to: Number(v.wa_quiet_to) }); toast('Saved.'); render(); },
+    'pb-filter': (v) => { ui.pb = { q: v.q, kind: v.kind }; render(); },
+    'wa-link': async (v, form) => {
+      const rows = (await GET(`/messages/phonebook?kind=guests&q=${encodeURIComponent(v.q)}`)).slice(0, 8);
+      $('#wa-link-results').innerHTML = rows.length ? rows.map((g) => `<p class="small"><button class="btn btn-sm btn-ghost" data-action="wa-link-guest" data-conv="${form.dataset.id}" data-id="${g.id}">Link</button> ${esc(g.name)} <span class="muted">${esc(g.phone || '')}</span></p>`).join('') : '<p class="small muted">No guest found.</p>';
+    },
+  });
+  // template picker: choosing a template shows its values; typing updates the preview
+  document.addEventListener('change', (e) => {
+    if (e.target.name !== 'template_id' || !e.target.closest('form[data-form=wa-template]')) return;
+    ui.waTpl = e.target.value;
+    const t = (ui.waTplList || []).find((x) => String(x.id) === e.target.value);
+    if (t) e.target.closest('form').querySelector('#wa-tpl-fields').innerHTML = tplFields(t);
+  });
+  document.addEventListener('input', (e) => {
+    const form = e.target.closest('form[data-form=wa-template]'); if (!form) return;
+    const t = (ui.waTplList || []).find((x) => String(x.id) === form.querySelector('[name=template_id]').value); if (!t) return;
+    const vals = [...form.querySelectorAll('[name^=p_]')].map((i) => i.value);
+    form.querySelector('#wa-preview').innerHTML = linkify(t.body.replace(/\{\{(\d+)\}\}/g, (m, n) => vals[Number(n) - 1] || m));
+  });
+  // Enter sends, Shift+Enter makes a new line
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || !e.target.closest('form[data-form=wa-send]') || e.target.tagName !== 'TEXTAREA') return;
+    e.preventDefault(); e.target.closest('form').requestSubmit();
+  });
+
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
@@ -2229,6 +2476,7 @@
       CAN = (await GET('/meta')).can;
       if (MFA.setup_needed) { await renderForcedSetup(); return; }
       shell(); await render();
+      clearInterval(ui.badgeTimer); if (CAN['messages.use']) ui.badgeTimer = setInterval(() => { if (ME && route().r !== 'inbox') updateWaBadge(); }, 30000);
     } catch (e) { if (e.message !== 'Signed out') renderLogin(); }
   }
   // initial load: show login if not signed in

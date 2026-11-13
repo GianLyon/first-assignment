@@ -325,3 +325,53 @@ details summary { cursor: pointer; color: var(--info); margin: 8px 0; }
 .recovery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
 .recovery code { background: #f8f5ef; border: 1px dashed var(--line); border-radius: 8px; padding: 8px; text-align: center; font-size: 1rem; letter-spacing: .08em; }
 .chips-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+
+/* ---------- WhatsApp inbox & phone book ---------- */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pad { padding: 14px; }
+#side-nav a .badge { margin-left: auto; background: #1baf7a; color: #fff; border-radius: 999px; font-size: .7rem; font-weight: 700; padding: 1px 7px; }
+.wa { display: grid; grid-template-columns: 300px minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
+.wa .card { padding: 0; }
+.wa-list form { padding: 12px 12px 0; }
+.wa-list input { width: 100%; }
+.wa-filters { display: flex; gap: 4px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.wa-filters button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 3px 10px; font-size: .76rem; cursor: pointer; }
+.wa-filters button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+#wa-items { max-height: 66vh; overflow-y: auto; }
+.wa-item { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
+.wa-item:hover { background: #faf8f4; }
+.wa-item.on { background: #f3eee4; box-shadow: inset 3px 0 0 var(--gold); }
+.wa-top, .wa-sub { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.wa-prev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-item .badge, .wa-sub .badge { background: #1baf7a; color: #fff; border-radius: 999px; font-size: .7rem; font-weight: 700; padding: 1px 7px; }
+.wa-thread { display: flex; flex-direction: column; min-height: 60vh; }
+.wa-empty { justify-content: center; }
+.wa-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.wa-head > div { flex: 1; }
+.wa-back { display: none; text-decoration: none; font-size: 1.2rem; color: var(--ink); }
+.wa-msgs { flex: 1; overflow-y: auto; max-height: 56vh; min-height: 260px; padding: 14px 16px; background: #f4efe6; }
+.wa-day { text-align: center; font-size: .72rem; color: var(--muted); margin: 10px 0; }
+.wa-msg { display: flex; margin: 4px 0; }
+.wa-msg.out { justify-content: flex-end; }
+.wa-bubble { max-width: 78%; padding: 8px 11px; border-radius: 10px; background: #fff; border: 1px solid var(--line); font-size: .9rem; line-height: 1.45; overflow-wrap: anywhere; }
+.wa-msg.out .wa-bubble { background: #dcf3e6; border-color: #c4e6d2; }
+.wa-meta { display: block; text-align: right; font-size: .68rem; color: var(--muted); margin-top: 3px; }
+.wa-meta .read { color: #2a78d6; font-weight: 600; } .wa-meta .err { color: var(--bad); font-weight: 600; }
+.wa-err { display: block; font-size: .72rem; color: var(--bad); margin-top: 3px; }
+.wa-tpl { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; }
+.wa-compose { padding: 12px 16px; border-top: 1px solid var(--line); }
+.wa-compose textarea { width: 100%; resize: vertical; }
+.wa-tpl-form .wa-msg { margin-bottom: 8px; }
+.wa-practice { padding: 8px 16px 12px; border-top: 1px dashed var(--line); }
+.wa-practice input { flex: 1; }
+.wa-guest { padding: 16px !important; }
+.wa-guest h2.sec { margin-top: 0; }
+@media (max-width: 1100px) { .wa { grid-template-columns: 260px minmax(0, 1fr); } .wa-guest { grid-column: 1 / -1; } }
+@media (max-width: 760px) {
+  .wa { grid-template-columns: 1fr; }
+  .wa.has-open .wa-list { display: none; }
+  .wa-back { display: inline; }
+  .wa-bubble { max-width: 90%; }
+  #wa-items { max-height: none; }
+}
+@media print { .wa-compose, .wa-practice, .wa-list { display: none; } }
