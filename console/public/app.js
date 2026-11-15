@@ -17,7 +17,7 @@
   async function api(method, path, body) {
     const r = await fetch('/api' + path, { method, credentials: 'same-origin', headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });
     const data = await r.json().catch(() => ({}));
-    if (r.status === 401 && path !== '/auth/login') { ME = null; login('Your session has ended. Please sign in again.'); throw new Error('Signed out'); }
+    if (r.status === 401 && !['/auth/login', '/auth/mfa'].includes(path)) { ME = null; login('Your session has ended. Please sign in again.'); throw new Error('Signed out'); }
     if (!r.ok) throw new Error(data.error || 'Request failed');
     return data;
   }
@@ -45,12 +45,32 @@
       <button class="btn btn-gold">Sign in</button></form></div>`;
   }
 
+  const brand = '<div class="brand login-brand"><img class="mark" src="/brand/azeli-mark.svg" alt="" width="48" height="48"><span>Azeli<small>Console</small></span></div>';
+  function mfaStep(challenge, msg = '') {
+    $('#root').innerHTML = `<div class="login-wrap"><form class="login form" data-form="login-mfa" data-challenge="${esc(challenge)}">${brand}
+      <h1>Two-step sign-in</h1><p class="muted">Enter the 6-digit code from your authenticator app, or a recovery code.</p>${msg ? `<p class="note err">${esc(msg)}</p>` : ''}
+      <label>Code<input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus maxlength="12" class="code-input"></label>
+      <button class="btn btn-gold">Continue</button><button type="button" class="btn btn-ghost" data-action="relogin">Back</button></form></div>`;
+  }
+  async function setupHtml(forced) {
+    const st = await POST('/auth/mfa/setup');
+    return `${forced ? '<p class="note">Two-step sign-in is required for your role. Set it up to continue.</p>' : ''}
+      <ol class="steps-list"><li>Install <b>Google Authenticator</b>, <b>Microsoft Authenticator</b> or <b>Authy</b> on your phone.</li><li>Add an account and scan:</li></ol>
+      <div class="qr">${st.qr_svg}</div><p class="small muted center">Or enter this key: <code class="mono">${esc(st.secret)}</code></p>
+      <form class="form" data-form="mfa-enable"><label>3. The 6-digit code from the app<input name="code" inputmode="numeric" maxlength="6" required class="code-input"></label>
+      <div class="actions">${forced ? '<button type="button" class="btn btn-ghost" data-action="logout">Sign out</button>' : cancelBtn}<button class="btn btn-gold">Turn on</button></div></form>`;
+  }
+  function showCodes(codes) {
+    const html = `<p><b>Keep these recovery codes safe.</b> Each signs you in once if you lose your phone. They are shown only now.</p><div class="recovery">${codes.map((c) => `<code class="mono">${esc(c)}</code>`).join('')}</div>
+      <div class="actions"><button type="button" class="btn btn-gold" data-action="mfa-done">I have saved them</button></div>`;
+    if ($('#modal').hidden) modal('Recovery codes', html); else { $('#modal-title').textContent = 'Recovery codes'; $('#modal-body').innerHTML = html; }
+  }
   const NAV = [['dashboard', 'Overview', null], ['leads', 'Enquiries', 'leads.view'], ['content', 'Website', 'content.edit'], ['clients', 'Client hotels', 'clients.view'], ['team', 'Team', 'team.manage'], ['activity', 'Activity log', 'team.manage']];
   const route = () => { const [r, id] = (location.hash.slice(1) || 'dashboard').split('/'); return { r, id }; };
   function shell() {
     $('#root').innerHTML = `<div class="app"><aside class="side"><div class="brand"><img class="mark" src="/brand/azeli-mark-light.svg" alt="" width="32" height="32"><span>Azeli <em>Console</em></span></div><nav id="side-nav"></nav></aside>
       <div class="main"><header class="topbar"><button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show menu">☰</button><div class="prop"><b>Azeli Technologies</b><span>Admin panel</span></div>
-      <div class="top-actions user-menu"><span class="user">${esc(ME.full_name)} · ${esc(META.roles[ME.role])}</span><button class="btn btn-ghost btn-sm" data-action="password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div></header>
+      <div class="top-actions user-menu"><span class="user">${esc(ME.full_name)} · ${esc(META.roles[ME.role])}</span><button class="btn btn-ghost btn-sm" data-action="mfa">Two-step</button><button class="btn btn-ghost btn-sm" data-action="password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div></header>
       <main id="view" tabindex="-1"></main></div></div>`;
   }
   const VIEWS = {};
@@ -161,9 +181,11 @@
 
   /* ---------- team & activity ---------- */
   VIEWS.team = async () => {
-    const rows = await GET('/users'); ui.users = rows;
+    const rows = await GET('/users'); ui.users = rows; META = { ...META, mfa: (await GET('/me')).mfa };
     return `<div class="page-head"><div><h1 class="page">Team</h1><p class="sub">Owner: everything · Website editor: website content and enquiries (read) · Sales: enquiries and client hotels (view).</p></div><button class="btn btn-gold" data-action="user-edit">+ Add a person</button></div>
-      <div class="card">${table(['Name', 'Email', 'Role', 'Status', ''], rows.map((u) => `<tr><td>${esc(u.full_name)}</td><td>${esc(u.email)}</td><td>${esc(META.roles[u.role])}</td><td>${u.active ? pill('Active', 'ok') : pill('Switched off')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>`;
+      <div class="card">${table(['Name', 'Email', 'Role', 'Status', 'Two-step', ''], rows.map((u) => `<tr><td>${esc(u.full_name)}</td><td>${esc(u.email)}</td><td>${esc(META.roles[u.role])}</td><td>${u.active ? pill('Active', 'ok') : pill('Switched off')}</td><td>${u.mfa_enabled ? pill('On', 'ok') : META.mfa.required_roles.includes(u.role) ? pill('Required', 'warn') : pill('Off')}</td><td class="right nowrap">${u.mfa_enabled ? `<button class="btn btn-sm btn-ghost" data-action="mfa-reset" data-id="${u.id}" data-name="${esc(u.full_name)}">Reset two-step</button> ` : ''}<button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
+      <div class="card mt"><h2 class="sec">Require two-step sign-in</h2><form class="form" data-form="security"><p class="small">These roles must use a code from an authenticator app as well as their password. Recommended for owners.</p>
+        <div class="chips-row">${Object.entries(META.roles).map(([k, l]) => `<label class="row small"><input type="checkbox" name="r_${k}" value="1" ${META.mfa.required_roles.includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`;
   };
   VIEWS.activity = async () => {
     const rows = await GET('/audit');
@@ -174,6 +196,16 @@
   /* ---------- actions ---------- */
   const A = {
     'close-modal': closeModal,
+    relogin: () => login(),
+    'mfa-done': async () => { closeModal(); toast('Two-step sign-in is ready.'); await boot(); },
+    mfa: async () => {
+      const m = await GET('/me');
+      if (!m.mfa.enabled) { modal('Two-step sign-in', '<p>Loading…</p>'); $('#modal-body').innerHTML = await setupHtml(false); return; }
+      modal('Two-step sign-in', `<p>${pill('On', 'ok')} ${m.mfa.recovery_codes_left} recovery codes left.</p>
+        <form class="form" data-form="mfa-codes"><label>New recovery codes: current code from your app<input name="code" inputmode="numeric" maxlength="6" required class="code-input"></label><div class="actions"><button class="btn">Make new codes</button></div></form>
+        ${m.mfa.required ? '<p class="small muted">Required for your role.</p>' : '<form class="form mt" data-form="mfa-off"><label>Turn off: your password<input type="password" name="password" required></label><div class="actions"><button class="btn btn-bad">Turn off</button></div></form>'}`);
+    },
+    'mfa-reset': async (d) => { if (!confirm(`Reset two-step sign-in for ${d.name}? They are signed out and set it up again with their new phone.`)) return; await POST(`/users/${d.id}/mfa-reset`); toast('Reset.'); render(); },
     'toggle-nav': () => document.body.classList.toggle('nav-open'),
     tab: (d) => { ui.tab[d.key] = d.val; ui.pkgDraft = null; render(); },
     logout: async () => { await POST('/auth/logout'); ME = null; login(); },
@@ -211,7 +243,15 @@
     },
   };
   const FORMS = {
-    login: async (v) => { try { const r = await POST('/auth/login', v); ME = r.user; await boot(); } catch (e) { login(e.message); } },
+    login: async (v) => { try { const r = await POST('/auth/login', v); if (r.mfa_required) { mfaStep(r.challenge); return; } ME = r.user; await boot(); } catch (e) { login(e.message); } },
+    'login-mfa': async (v, f) => {
+      try { const r = await POST('/auth/mfa', { challenge: f.dataset.challenge, code: v.code }); ME = r.user; if (r.recovery_codes_left !== undefined) toast(`Signed in with a recovery code: ${r.recovery_codes_left} left.`, r.recovery_codes_left < 3); await boot(); }
+      catch (e) { if (/expired|password again/.test(e.message)) login(e.message); else mfaStep(f.dataset.challenge, e.message); }
+    },
+    'mfa-enable': async (v) => { const r = await POST('/auth/mfa/enable', { code: v.code }); showCodes(r.recovery_codes); },
+    'mfa-off': async (v) => { await POST('/auth/mfa/disable', { password: v.password }); closeModal(); toast('Two-step sign-in is off.'); },
+    'mfa-codes': async (v) => { const r = await POST('/auth/mfa/recovery-codes', { code: v.code }); showCodes(r.recovery_codes); },
+    security: async (v) => { await PUT('/security', { mfa_required_roles: Object.keys(v).filter((k) => k.startsWith('r_')).map((k) => k.slice(2)) }); toast('Saved. These roles set up two-step sign-in at their next sign-in.'); render(); },
     'lead-search': (v) => { ui.q.lq = v.q; render(); },
     lead: async (v, f) => { await PUT(`/leads/${f.dataset.id}`, v); toast('Saved.'); render(); },
     'lead-note': async (v, f) => { await POST(`/leads/${f.dataset.id}/notes`, v); toast('Note added.'); render(); },
@@ -241,7 +281,11 @@
   window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 
   async function boot() {
-    try { const m = await GET('/me'); ME = m.user; CAN = m.can; META = m; shell(); await render(); } catch (e) { if (e.message !== 'Signed out') login(); }
+    try {
+      const m = await GET('/me'); ME = m.user; CAN = m.can; META = m;
+      if (m.mfa?.setup_needed) { $('#root').innerHTML = `<div class="login-wrap"><div class="login form wide">${brand}<h1>Set up two-step sign-in</h1><div id="forced"></div></div></div>`; $('#forced').innerHTML = await setupHtml(true); return; }
+      shell(); await render();
+    } catch (e) { if (e.message !== 'Signed out') login(); }
   }
   fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? boot() : login()));
 })();

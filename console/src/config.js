@@ -20,4 +20,6 @@ export const config = {
   smtpUrl: env.SMTP_URL || '',
   emailFrom: env.EMAIL_FROM || 'Azeli Console <console@azelitech.com>',
   leadNotify: list(env.LEAD_NOTIFY, ''),
+  // who is emailed when a client hotel's system goes down (defaults to LEAD_NOTIFY)
+  alertEmails: list(env.ALERT_EMAIL, ''),
 };

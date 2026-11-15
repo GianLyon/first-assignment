@@ -201,6 +201,11 @@ export async function saveRegistration(db, r, g = {}, st = {}, { partial = false
     if (d && !isDate(d)) throw new HttpError(400, `${label} is not a valid date.`);
     put(k, d);
   }
+  // WhatsApp permission: recorded with the time it was given; unticking withdraws it
+  if (!partial || has(g, 'whatsapp_opt_in')) {
+    if (g.whatsapp_opt_in === true) sets.push('whatsapp_opt_in_at = CASE WHEN whatsapp_opt_in THEN whatsapp_opt_in_at ELSE now() END', 'whatsapp_opt_in=TRUE', 'whatsapp_opt_out_at=NULL');
+    else sets.push('whatsapp_opt_in=FALSE');
+  }
   if (sets.length) await db.query(`UPDATE guests SET ${sets.join(', ')} WHERE id=$1`, vals);
   const rs = [], rv = [r.id];
   const rput = (col, v) => { rv.push(v); rs.push(`${col}=$${rv.length}`); };
@@ -258,7 +263,7 @@ export async function moveRoom(db, user, id, { room_id, reason, rate, allow_dirt
 export async function folio(db, id) {
   const { rows: [r] } = await db.query(
     `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality, g.gender, g.address, g.id_issued_by,
-            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip,
+            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.whatsapp_opt_in, g.whatsapp_opt_out_at,
             rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number, rp.name AS rate_plan_name, ch.name AS channel_name
      FROM reservations r JOIN guests g ON g.id = r.guest_id JOIN room_types rt ON rt.id = r.room_type_id
      LEFT JOIN rooms rm ON rm.id = r.room_id LEFT JOIN rate_plans rp ON rp.id = r.rate_plan_id LEFT JOIN channels ch ON ch.id = r.channel_id WHERE r.id = $1`, [id]);

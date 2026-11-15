@@ -26,12 +26,12 @@ export async function verifyPassword(password, stored) {
 /* ---------- roles & permissions ---------- */
 export const PERMISSIONS = {
   admin: ['*'],
-  manager: ['guests.manage', 'marketing.manage', 'reports.schedule', 'group.view', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
+  manager: ['guests.manage', 'marketing.manage', 'messages.use', 'messages.manage', 'reports.schedule', 'group.view', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
     'housekeeping.update', 'audit.run', 'accounts.view', 'reports.view', 'settings.manage', 'auditlog.view', 'pos.use', 'pos.void', 'pos.manage', 'pos.kitchen',
     'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count', 'distribution.manage', 'finance.view', 'hr.view', 'hr.manage', 'hr.approve', 'roster.manage', 'attendance.record', 'staff.self',
     'amenities.sell', 'amenities.manage', 'events.view', 'events.manage', 'assets.manage', 'maintenance.report', 'maintenance.work'],
-  front_office: ['guests.manage', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'housekeeping.update', 'reports.view', 'pos.use', 'requisition.create', 'staff.self', 'amenities.sell', 'events.view', 'events.manage', 'maintenance.report'],
-  night_auditor: ['reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'audit.run', 'reports.view', 'accounts.view', 'pos.use', 'staff.self', 'amenities.sell', 'events.view', 'maintenance.report'],
+  front_office: ['guests.manage', 'messages.use', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'housekeeping.update', 'reports.view', 'pos.use', 'requisition.create', 'staff.self', 'amenities.sell', 'events.view', 'events.manage', 'maintenance.report'],
+  night_auditor: ['messages.use', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'payments.post', 'audit.run', 'reports.view', 'accounts.view', 'pos.use', 'staff.self', 'amenities.sell', 'events.view', 'maintenance.report'],
   housekeeping: ['reservations.view', 'housekeeping.update', 'requisition.create', 'staff.self', 'maintenance.report'],
   accountant: ['group.view', 'reservations.view', 'folio.void', 'accounts.view', 'reports.view', 'auditlog.view', 'inventory.view', 'stock.count', 'finance.view', 'finance.manage', 'accounts.journal', 'hr.view', 'payroll.manage', 'staff.self', 'events.view', 'assets.manage', 'maintenance.report'],
   waiter: ['pos.use', 'staff.self', 'maintenance.report'],
@@ -75,7 +75,9 @@ export function loadUser(pool) {
     req.user = null;
     if (token) {
       const { rows } = await pool.query(
-        `SELECT u.id, u.username, u.full_name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+        `SELECT u.id, u.username, u.full_name, u.role, (u.totp_secret IS NOT NULL) AS mfa_enabled,
+                COALESCE(u.role = ANY(st.mfa_required_roles), FALSE) AS mfa_required
+         FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN settings st ON st.id = 1
          WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha256(token)]);
       if (rows[0]) { req.user = rows[0]; req.sessionHash = sha256(token); }
     }

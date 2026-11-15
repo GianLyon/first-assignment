@@ -27,7 +27,7 @@ export const GUEST_STATS = `
     FROM reservations r GROUP BY r.guest_id),
   sp AS (SELECT r.guest_id, SUM(c.amount)::bigint AS spend FROM folio_charges c JOIN reservations r ON r.id=c.reservation_id WHERE NOT c.voided GROUP BY r.guest_id)
   SELECT g.id, g.first_name, g.last_name, g.email, g.phone, g.nationality, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.tags, g.preferences, g.notes,
-    g.marketing_consent, g.consent_at, g.consent_source, g.unsubscribed_at, g.erased_at, g.created_at,
+    g.marketing_consent, g.consent_at, g.consent_source, g.whatsapp_opt_in, g.whatsapp_opt_in_at, g.whatsapp_opt_out_at, g.unsubscribed_at, g.erased_at, g.created_at,
     COALESCE(st.stays,0) AS stays, COALESCE(st.nights,0) AS nights, st.last_stay, st.next_arrival, COALESCE(st.in_house,FALSE) AS in_house,
     COALESCE(st.sources,'{}') AS sources, COALESCE(sp.spend,0) AS spend
   FROM guests g LEFT JOIN st ON st.guest_id=g.id LEFT JOIN sp ON sp.guest_id=g.id

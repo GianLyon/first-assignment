@@ -8,6 +8,7 @@ import * as pos from './pos.js';
 import * as fin from './finance.js';
 import * as ops from './operations.js';
 import { receive } from './inventory.js';
+import { normalizePhone } from './whatsapp.js';
 
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const dow = (d) => new Date(d + 'T00:00:00Z').getUTCDay();
@@ -225,6 +226,7 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
       await db.query("UPDATE rooms SET hk_status='clean' WHERE hk_status='dirty'");
       await db.query("UPDATE rooms SET hk_status='dirty' WHERE id IN (SELECT room_id FROM reservations WHERE status='in_house' AND room_id IS NOT NULL ORDER BY room_id LIMIT 6)");
       await db.query("UPDATE rooms SET hk_status='dirty' WHERE id IN (SELECT id FROM rooms WHERE active AND id NOT IN (SELECT room_id FROM reservations WHERE status='in_house' AND room_id IS NOT NULL) ORDER BY number DESC LIMIT 2)");
+      await sampleWhatsApp(db);
       await audit(db, user, 'demo.done', 'settings', 1, { days });
     });
     Object.assign(status, { running: false, step: 'Done', done: status.total, finished_at: new Date().toISOString() });
@@ -236,6 +238,42 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
   }
 }
 
+/** A few WhatsApp conversations with today's guests, so the inbox has something to work with. */
+async function sampleWhatsApp(db) {
+  await db.query('UPDATE guests SET whatsapp_opt_in=TRUE, whatsapp_opt_in_at=created_at WHERE phone IS NOT NULL AND id % 5 <> 0');
+  const s = await fo.getSettings(db);
+  const tpl = Object.fromEntries((await db.query('SELECT name, id FROM wa_templates')).rows.map((t) => [t.name, t.id]));
+  const { rows } = await db.query(`SELECT DISTINCT ON (g.id) g.id, g.first_name, g.phone, rm.number AS room, r.status, to_char(r.arrival,'YYYY-MM-DD') AS arrival, r.code
+    FROM reservations r JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id WHERE r.status IN ('in_house','reserved') AND g.phone IS NOT NULL ORDER BY g.id, r.arrival`);
+  const inHouse = rows.filter((r) => r.status === 'in_house'), coming = rows.filter((r) => r.status === 'reserved');
+  // [direction, text, minutes ago, template]
+  const scripts = [
+    [inHouse[0], (g) => [['in', `Hello, could we get two extra towels in room ${g.room}, please?`, 95], ['out', `Of course, ${g.first_name}! Housekeeping is on the way.`, 92], ['in', 'Thank you, that was quick!', 80]]],
+    [inHouse[1], () => [['in', 'Hi, is the restaurant open for dinner tonight? A table for 3 at 7:30 please.', 18]]],
+    [inHouse[2], (g) => [['out', `Welcome to ${s.property_name}, ${g.first_name}! You are in room ${g.room}. This is the front desk on WhatsApp: message us any time for housekeeping, room service or help.`, 1500, 'welcome_in_house'],
+      ['in', 'What time is check-out?', 600], ['out', 'Check-out is at 11:00. We can offer a late check-out until 13:00 for UGX 50,000. Shall I book it?', 590]]],
+    [coming[0], () => [['in', 'Good morning, can you arrange an airport pickup from Entebbe? My flight lands at 14:20.', 40]]],
+    [coming[1], (g) => [['out', `Hello ${g.first_name}, your booking ${g.code} at ${s.property_name} is confirmed. Reply here if you need anything before you arrive.`, 3000, 'booking_confirmed']]],
+  ];
+  for (const [g, script] of scripts) {
+    const waId = g && normalizePhone(g.phone, s.phone_country_code);
+    if (!waId) continue;
+    const { rows: [c] } = await db.query('INSERT INTO wa_conversations (wa_id, guest_id, profile_name) VALUES ($1,$2,$3) ON CONFLICT (wa_id) DO NOTHING RETURNING id', [waId, g.id, g.first_name]);
+    if (!c) continue;
+    await db.query('UPDATE guests SET whatsapp_opt_in=TRUE, whatsapp_opt_in_at=COALESCE(whatsapp_opt_in_at, now()) WHERE id=$1', [g.id]);
+    const msgs = script(g);
+    for (const [dir, body, ago, t] of msgs) {
+      await db.query(`INSERT INTO wa_messages (conversation_id, direction, kind, body, template_id, status, wa_message_id, created_at, status_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7, now() - make_interval(mins => $8), now() - make_interval(mins => $8))`,
+      [c.id, dir, t ? 'template' : 'text', body, t ? tpl[t] : null, dir === 'in' ? 'received' : 'read', `sample.${c.id}.${ago}`, ago]);
+    }
+    const lastIn = msgs.filter(([d]) => d === 'in').map(([, , a]) => a);
+    const unread = msgs.length - 1 - msgs.map(([d]) => d).lastIndexOf('out');
+    await db.query(`UPDATE wa_conversations SET last_inbound_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() - make_interval(mins => $2::int) END,
+      last_message_at = now() - make_interval(mins => $3), unread=$4 WHERE id=$1`, [c.id, lastIn.length ? Math.min(...lastIn) : null, Math.min(...msgs.map(([, , a]) => a)), msgs.at(-1)[0] === 'in' ? Math.min(unread, msgs.length) : 0]);
+  }
+}
+
 // Everything that records activity. Set-up is kept: settings, users, rooms and room types, accounts, menus and tables,
 // stores, stock items, suppliers and recipes, rate plans and calendar, channels, shift and leave types, amenities,
 // function rooms and packages, email templates, report schedules, group links and the audit log.
@@ -244,7 +282,7 @@ const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
   'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
-  'supplier_payments', 'transfers', 'work_orders'];
+  'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
 
 /** Remove the sample data and start fresh. Only when sample data was added, and the property name is typed to confirm. */
 export async function removeDemoData(pool, user, { confirm }) {

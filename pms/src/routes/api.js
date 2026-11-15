@@ -1,6 +1,9 @@
 import express from 'express';
 import { generateDue } from '../services/reports.js';
 import { queueGuestEmails } from '../services/crm.js';
+import * as totp from '../totp.js';
+import * as backup from '../backup.js';
+import crypto from 'node:crypto';
 import { dashboardAnalytics } from '../services/analytics.js';
 import * as demo from '../services/demo.js';
 import { tx } from '../db.js';
@@ -30,15 +33,84 @@ export function apiRouter(pool) {
       throw new HttpError(401, 'Wrong username or password.');
     }
     clearFailures(key);
+    if (u.totp_secret) {
+      // password correct: now the code from the authenticator app (within 5 minutes)
+      const challenge = crypto.randomBytes(24).toString('base64url');
+      await pool.query("INSERT INTO mfa_challenges (token_hash, user_id, expires_at) VALUES ($1,$2, now() + interval '5 minutes')", [totp.hashToken(challenge), u.id]);
+      await pool.query('DELETE FROM mfa_challenges WHERE expires_at < now()');
+      return res.json({ mfa_required: true, challenge });
+    }
     const { token, expires } = await createSession(pool, u.id);
     await audit(pool, u, 'auth.login', 'user', u.id);
     res.setHeader('Set-Cookie', sessionCookie(token, expires));
     res.json({ user: { id: u.id, username: u.username, full_name: u.full_name, role: u.role } });
   });
+  r.post('/auth/mfa', async (req, res) => {
+    const { rows: [c] } = await pool.query('SELECT * FROM mfa_challenges WHERE token_hash=$1 AND expires_at > now()', [totp.hashToken(String(req.body?.challenge || ''))]);
+    if (!c) throw new HttpError(401, 'The sign-in has expired. Enter your password again.');
+    if (c.attempts >= 5) { await pool.query('DELETE FROM mfa_challenges WHERE token_hash=$1', [c.token_hash]); throw new HttpError(429, 'Too many wrong codes. Enter your password again.'); }
+    const { rows: [u] } = await pool.query('SELECT * FROM users WHERE id=$1 AND active', [c.user_id]);
+    if (!u?.totp_secret) throw new HttpError(401, 'Enter your password again.');
+    const code = String(req.body?.code || '').trim();
+    const step = totp.verifyCode(u.totp_secret, code, u.totp_last_step);
+    let left = null;
+    if (step == null) left = totp.useRecoveryCode(u.recovery_codes, code);
+    if (step == null && !left) {
+      await pool.query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE token_hash=$1', [c.token_hash]);
+      await audit(pool, u, 'auth.mfa_failed', 'user', u.id);
+      throw new HttpError(401, 'That code is not right. Use the current code from your authenticator app, or a recovery code.');
+    }
+    if (step != null) await pool.query('UPDATE users SET totp_last_step=$2 WHERE id=$1', [u.id, step]);
+    else await pool.query('UPDATE users SET recovery_codes=$2 WHERE id=$1', [u.id, left]);
+    await pool.query('DELETE FROM mfa_challenges WHERE token_hash=$1', [c.token_hash]);
+    const { token, expires } = await createSession(pool, u.id);
+    await audit(pool, u, step != null ? 'auth.login' : 'auth.login_recovery_code', 'user', u.id, step != null ? {} : { recovery_codes_left: left.length });
+    res.setHeader('Set-Cookie', sessionCookie(token, expires));
+    res.json({ user: { id: u.id, username: u.username, full_name: u.full_name, role: u.role }, recovery_codes_left: step != null ? undefined : left.length });
+  });
+  // setting up two-step sign-in: a new secret shown as a QR code, confirmed by the first code
+  r.post('/auth/mfa/setup', requireUser, async (req, res) => {
+    const secret = totp.newSecret();
+    await pool.query('UPDATE users SET totp_pending=$2 WHERE id=$1', [req.user.id, secret]);
+    const s = await fo.getSettings(pool);
+    const url = totp.otpauthUrl(secret, req.user.username, `Azeli PMS (${s.property_name})`);
+    res.json({ secret: secret.replace(/(.{4})/g, '$1 ').trim(), qr_svg: await totp.qrSvg(url) });
+  });
+  r.post('/auth/mfa/enable', requireUser, async (req, res) => {
+    const { rows: [u] } = await pool.query('SELECT totp_pending FROM users WHERE id=$1', [req.user.id]);
+    if (!u?.totp_pending) throw new HttpError(409, 'Start the set-up again.');
+    const step = totp.verifyCode(u.totp_pending, req.body?.code);
+    if (step == null) throw new HttpError(400, 'That code is not right. Check the time on your phone is automatic, and use the newest code.');
+    const rc = totp.newRecoveryCodes();
+    await pool.query('UPDATE users SET totp_secret=totp_pending, totp_pending=NULL, totp_enabled_at=now(), totp_last_step=$2, recovery_codes=$3 WHERE id=$1', [req.user.id, step, rc.hashes]);
+    // other devices signed in with only a password are signed out
+    await pool.query('DELETE FROM sessions WHERE user_id=$1 AND token_hash <> $2', [req.user.id, req.sessionHash]);
+    await audit(pool, req.user, 'auth.mfa_enabled', 'user', req.user.id);
+    res.json({ recovery_codes: rc.codes });
+  });
+  r.post('/auth/mfa/disable', requireUser, async (req, res) => {
+    const { rows: [u] } = await pool.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    if (!u.totp_secret) throw new HttpError(409, 'Two-step sign-in is not on.');
+    if (req.user.mfa_required) throw new HttpError(409, 'Your role requires two-step sign-in. An administrator can change that.');
+    if (!(await verifyPassword(req.body?.password || '', u.password_hash))) throw new HttpError(400, 'Your password is not right.');
+    await pool.query("UPDATE users SET totp_secret=NULL, totp_pending=NULL, totp_enabled_at=NULL, totp_last_step=NULL, recovery_codes='{}' WHERE id=$1", [u.id]);
+    await audit(pool, req.user, 'auth.mfa_disabled', 'user', u.id);
+    res.json({ ok: true });
+  });
+  r.post('/auth/mfa/recovery-codes', requireUser, async (req, res) => {
+    const { rows: [u] } = await pool.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    if (!u.totp_secret) throw new HttpError(409, 'Two-step sign-in is not on.');
+    if (totp.verifyCode(u.totp_secret, req.body?.code, u.totp_last_step) == null) throw new HttpError(400, 'Enter the current code from your authenticator app.');
+    const rc = totp.newRecoveryCodes();
+    await pool.query('UPDATE users SET recovery_codes=$2 WHERE id=$1', [u.id, rc.hashes]);
+    await audit(pool, req.user, 'auth.recovery_codes_new', 'user', u.id);
+    res.json({ recovery_codes: rc.codes });
+  });
   r.post('/auth/logout', async (req, res) => { await destroySession(pool, req); res.setHeader('Set-Cookie', clearCookie()); res.json({ ok: true }); });
   r.get('/auth/me', requireUser, async (req, res) => {
     const { group_token_hash, ...s } = await fo.getSettings(pool);
-    res.json({ user: req.user, permissions: PERMISSIONS[req.user.role], settings: s });
+    const { rows: [m] } = await pool.query('SELECT cardinality(recovery_codes)::int AS left FROM users WHERE id=$1', [req.user.id]);
+    res.json({ user: req.user, permissions: PERMISSIONS[req.user.role], settings: s, mfa: { enabled: req.user.mfa_enabled, required: req.user.mfa_required, setup_needed: req.user.mfa_required && !req.user.mfa_enabled, recovery_codes_left: m.left } });
   });
   r.post('/auth/change-password', requireUser, async (req, res) => {
     const { rows: [u] } = await pool.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
@@ -80,6 +152,29 @@ export function apiRouter(pool) {
     res.json(st);
   });
   r.post('/demo/remove', requirePerm('users.manage'), inTx((_db, req) => demo.removeDemoData(pool, req.user, req.body || {})));
+  /* ---------- backups (administrator) ---------- */
+  r.get('/backups', requirePerm('users.manage'), async (_req, res) => {
+    const c = backup.backupConfig();
+    res.json({ key_set: !!c.passphrase, storage_set: backup.storageReady(c), bucket: c.bucket || null, hour: c.hour, alert_email: !!c.alertEmail,
+      runs: (await pool.query('SELECT b.*, u.full_name AS by_name FROM backup_runs b LEFT JOIN users u ON u.id=b.started_by ORDER BY b.id DESC LIMIT 40')).rows });
+  });
+  r.post('/backups', requirePerm('users.manage'), async (req, res) => {
+    const { rows: [running] } = await pool.query("SELECT 1 FROM backup_runs WHERE status='running' AND started_at > now() - interval '30 minutes'");
+    if (running) throw new HttpError(409, 'A backup is already running.');
+    try { res.json(await backup.runBackup(pool, { trigger: 'manual', user: req.user })); } catch (e) { throw new HttpError(e.status || 502, e.message); }
+  });
+  // a backup file straight to the administrator's computer (encrypted with the same key)
+  r.get('/backups/download', requirePerm('users.manage'), async (req, res) => {
+    const c = backup.backupConfig();
+    if (!c.passphrase) throw new HttpError(409, 'Set BACKUP_KEY on the server first: backup files are always encrypted.');
+    const { rows: [run] } = await pool.query("INSERT INTO backup_runs (trigger, started_by) VALUES ('download',$1) RETURNING id", [req.user.id]);
+    const { file, tables, rows } = await backup.createBackup(pool, c.passphrase);
+    await pool.query("UPDATE backup_runs SET status='ok', size_bytes=$2, tables=$3, rows=$4, finished_at=now() WHERE id=$1", [run.id, file.length, tables, rows]);
+    await audit(pool, req.user, 'backup.download', 'backup', run.id, { size: file.length });
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Kampala' });
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="azeli-backup-${day}.azbk"`, 'Cache-Control': 'no-store' });
+    res.send(file);
+  });
   r.get('/analytics', requirePerm('reports.view'), async (req, res) => res.json(await dashboardAnalytics(pool, { from: req.query.from, to: req.query.to })));
   r.put('/settings', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {};
@@ -254,7 +349,20 @@ export function apiRouter(pool) {
   });
 
   /* ---------- users & audit log ---------- */
-  r.get('/users', requirePerm('users.manage'), async (_req, res) => res.json((await pool.query('SELECT id, username, full_name, role, active, created_at FROM users ORDER BY id')).rows));
+  r.get('/users', requirePerm('users.manage'), async (_req, res) => res.json((await pool.query('SELECT id, username, full_name, role, active, created_at, (totp_secret IS NOT NULL) AS mfa_enabled FROM users ORDER BY id')).rows));
+  r.post('/users/:id/mfa-reset', requirePerm('users.manage'), inTx(async (db, req) => {
+    const { rows: [u] } = await db.query("UPDATE users SET totp_secret=NULL, totp_pending=NULL, totp_enabled_at=NULL, totp_last_step=NULL, recovery_codes='{}' WHERE id=$1 RETURNING username", [id(req)]);
+    if (!u) throw new HttpError(404, 'User not found.');
+    await db.query('DELETE FROM sessions WHERE user_id=$1', [id(req)]);
+    await audit(db, req.user, 'user.mfa_reset', 'user', id(req), { username: u.username });
+    return { ok: true };
+  }));
+  r.put('/settings/security', requirePerm('users.manage'), inTx(async (db, req) => {
+    const roles = [...new Set((Array.isArray(req.body?.mfa_required_roles) ? req.body.mfa_required_roles : []).filter((x) => ROLES.includes(x)))];
+    await db.query('UPDATE settings SET mfa_required_roles=$1 WHERE id=1', [roles]);
+    await audit(db, req.user, 'settings.mfa_required_roles', 'settings', 1, { roles });
+    return { mfa_required_roles: roles };
+  }));
   r.post('/users', requirePerm('users.manage'), inTx(async (db, req) => {
     const b = req.body || {}; const username = String(b.username || '').trim().toLowerCase();
     if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new HttpError(400, 'Username: 3–40 lowercase letters, numbers, dots, dashes or underscores.');

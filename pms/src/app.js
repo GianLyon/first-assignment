@@ -12,6 +12,7 @@ import { operationsRouter } from './routes/operations.js';
 import { reportingRouter, groupPublicRouter } from './routes/reporting.js';
 import { crmRouter, marketingPublicRouter } from './routes/crm.js';
 import { apiRouter } from './routes/api.js';
+import { messagingRouter, whatsappWebhookRouter } from './routes/messaging.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -44,10 +45,20 @@ export function createApp(pool) {
   // keep the raw bytes so signed channel messages can be verified exactly as sent
   app.use('/api', express.json({ limit: '1mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
   app.use('/api', loadUser(pool));
+  // a role that requires two-step sign-in: until it is set up, only the set-up and sign-out work
+  const SETUP_OPEN = new Set(['/auth/me', '/auth/logout', '/auth/mfa/setup', '/auth/mfa/enable', '/auth/change-password', '/meta']);
+  app.use('/api', (req, _res, next) => {
+    if (req.user && req.user.mfa_required && !req.user.mfa_enabled && !SETUP_OPEN.has(req.path)) {
+      throw new HttpError(403, 'Set up two-step sign-in to continue. Your administrator requires it for your role.');
+    }
+    next();
+  });
   app.use('/api/public', publicRouter(pool));
   app.use('/api/channels', inboundRouter(pool));
   app.use('/api/group', groupPublicRouter(pool));
   app.use('/api/marketing', marketingPublicRouter(pool));
+  app.use('/api/whatsapp', whatsappWebhookRouter(pool));
+  app.use('/api/messages', requireUser, messagingRouter(pool));
   app.use('/api/distribution', requireUser, distributionRouter(pool));
   app.use('/api/finance', requireUser, financeRouter(pool));
   app.use('/api/hr', requireUser, hrRouter(pool));

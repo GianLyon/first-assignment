@@ -106,6 +106,78 @@ Set **every one to "DNS only" (grey cloud)**: Vercel and Render issue the HTTPS 
 
 ---
 
+# Part C: safety (do this before real guest data goes in)
+
+## Two-step sign-in
+1. **Turn it on for yourself.** In Azeli PMS and in the Azeli Console, click **Two-step** (top right).
+   - Scan the QR code with **Google Authenticator**, **Microsoft Authenticator** or **Authy**, then enter the 6-digit code.
+   - **Save the 10 recovery codes**: print them, or keep them in a password manager. Each one signs you in once if you lose your phone.
+2. **Require it for others.**
+   - PMS: **Settings → Security** → tick Administrator, Manager and Accountant (and any role that sees money or guest data) → **Save**.
+   - Console: **Team → Require two-step sign-in** → tick Owner.
+   - Each person sets it up at their next sign-in, and can do nothing else until they have.
+3. **Someone lost their phone?**
+   - In the PMS an administrator opens **Users → Reset two-step**; in the Console an owner opens **Team → Reset two-step**.
+   - That person is signed out and sets it up again with the new phone.
+   - If the top account itself is locked out, use the reset tool in Render's **Shell** (see *Forgotten password*), then **Two-step** again.
+
+## Backups (Cloudflare R2)
+Render already keeps a 3-day restore window. This adds an encrypted copy of each hotel's whole database **every night, outside Render**: one for each day of the last month, and one for every month, kept for good.
+1. **Create the storage.** Cloudflare → **R2 Object Storage** → **Create bucket**, name it `azeli-backups`. R2's free allowance covers many hotels; after that it costs cents.
+2. **Create an access key for it.** R2 → **Manage API tokens** → **Create API token**: permission **Object Read & Write**, applied to the `azeli-backups` bucket only. Copy the **Access Key ID**, the **Secret Access Key** and the **endpoint** (`https://<account id>.r2.cloudflarestorage.com`).
+3. **Make a backup key.** It's a long random passphrase, for example from your password manager's generator (at least 20 characters). **Save it in your password manager.** Without it no one can open a backup, and if Render is ever lost, that copy is the only one.
+4. **Fill in the settings.** Render → `azeli-pms` → **Environment**:
+   - `BACKUP_KEY`: the passphrase
+   - `BACKUP_S3_ENDPOINT`: the endpoint
+   - `BACKUP_S3_BUCKET`: `azeli-backups`
+   - `BACKUP_S3_ACCESS_KEY` and `BACKUP_S3_SECRET_KEY`: from step 2
+   - `BACKUP_ALERT_EMAIL`: where to be told if a backup fails (needs Part B email)
+
+   Save; Render restarts the PMS.
+5. **Check it works.** PMS → **Settings → Backups** shows **On**. Click **Back up now**: the list shows **OK** and the file (`…/daily/13.azbk`), and it appears in the R2 bucket. You can also **Download a backup now** to keep a copy on your own computer (it is encrypted with the same key).
+
+**Restoring** (only if the database is lost or damaged), in Render → `azeli-pms` → **Shell**:
+1. Download the backup file from R2, or upload your downloaded copy.
+2. Run `BACKUP_KEY='your key' node src/restore-backup.js path/to/file.azbk` and type `RESTORE` to confirm.
+
+Everything in the database is replaced, in one go: if anything fails, nothing changes. Everyone signs in again afterwards. The backup must come from the same version of Azeli PMS, which it always is for the nightly copies.
+
+## Alerts
+- **Client hotels:** the Console checks every hotel's system every 10 minutes and emails `ALERT_EMAIL` (or `LEAD_NOTIFY`) once when one goes offline, and again when it is back. Set it on `azeli-console` in Render (needs Part B email).
+- **Your own sites:** add a free outside monitor, e.g. **UptimeRobot** or **Better Stack**, that checks these every few minutes and alerts your phone:
+  - `https://azelitech.com`
+  - `https://admin.azelitech.com/healthz`
+  - `https://amaya.azelitech.com/healthz`
+
+  It notices if Render or Vercel itself is down, which nothing inside them can.
+
+# Part D: WhatsApp for the front desk
+
+Until this is done, the PMS keeps WhatsApp in **practice mode** while it holds sample data: messages stay in the system, and "Reply as the guest" stands in for guests so the team can learn. On a system with real data and no connection, WhatsApp is off.
+
+**What it costs:** the WhatsApp Business Platform charges per template message delivered (business-started messages and automations). Meta has been changing how replies inside the 24 hours after a guest writes are charged (reports say some became chargeable from October 2026), so check *WhatsApp Manager → Insights → Pricing* for Uganda before switching automations on.
+
+**Use a number that is not already on the WhatsApp app**, or one you are ready to move (e.g. a new MTN or Airtel line for the front desk). Meta now also offers "coexistence" for keeping the WhatsApp Business app on the same number; follow Meta's steps if you want that.
+
+1. **Meta Business account**: go to business.facebook.com → create one for *Amaya Hotel & Luxury Suites* (or verify the existing one). Verification (*Security Center → Start verification*) needs the company documents and lifts the limit on how many guests can be messaged per day.
+2. **The app**: developers.facebook.com → **My Apps → Create app** → *Business* → add the **WhatsApp** product. Under **WhatsApp → API Setup**, add the hotel's phone number and verify it by SMS. Note the **Phone number ID**.
+3. **A permanent token**: business.facebook.com → **Settings → Users → System users → Add** (admin) → **Add assets** (the app and the WhatsApp account, full control) → **Generate token** with `whatsapp_business_messaging` and `whatsapp_business_management`, *never expires*. Copy it once.
+4. **App secret**: developers.facebook.com → the app → **App settings → Basic → App secret → Show**.
+5. **Render** → `azeli-pms` → **Environment**, add:
+   | Key | Value |
+   |---|---|
+   | `WHATSAPP_TOKEN` | the token from step 3 |
+   | `WHATSAPP_PHONE_NUMBER_ID` | from step 2 |
+   | `WHATSAPP_APP_SECRET` | from step 4 |
+   | `WHATSAPP_VERIFY_TOKEN` | any long random phrase you make up |
+   | `WHATSAPP_DISPLAY_NUMBER` | the number as guests see it, e.g. `+256 772 123456` |
+
+   Save; Render restarts the PMS. **WhatsApp set-up** in the PMS now shows *Connected*.
+6. **Webhook** (so guests' messages reach the inbox): developers.facebook.com → the app → **WhatsApp → Configuration → Webhook → Edit**. Callback URL: the *Webhook address* shown on the PMS WhatsApp set-up page (`https://amaya.azelitech.com/api/whatsapp/webhook`); Verify token: the phrase from step 5. **Verify and save**, then **Manage → messages → Subscribe**.
+7. **Templates**: WhatsApp Manager → **Message templates → Create template**. For each template on the PMS WhatsApp set-up page, use the same name, category (*Utility* or *Marketing*), language *English* and the exact wording with `{{1}}`, `{{2}}`. When Meta shows it as **Active** (minutes to a day), tick **Approved** on that template in the PMS.
+8. **Automations**: on the same page, switch on the ones you want. They only write to guests who agreed to WhatsApp messages (the tick box on the registration card), never during quiet hours, and once per stay. Guests who reply **STOP** are never written to again unless they send **START**.
+9. **Try it**: message the hotel number from your own phone. It appears in **WhatsApp inbox** within seconds; reply from there.
+
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 
@@ -125,5 +197,5 @@ A 50-room hotel with 50 staff signed in is a light load for the Starter instance
 ## Keeping it safe
 - Both databases are reachable only from their own system inside Render, never from the internet.
 - Render restarts a system automatically if it stops, and checks `/healthz` before each new version goes live.
-- Amaya's database is backed up continuously (restore to any moment in the last 3 days from its *Recovery* page in Render). A nightly off-site copy to Cloudflare R2 is next on the roadmap.
+- Amaya's database is backed up continuously by Render (restore to any moment in the last 3 days from its *Recovery* page), and every night to Cloudflare R2, encrypted (Part C).
 - The console is hidden from search engines and locks an email for 10 minutes after 5 wrong passwords.
