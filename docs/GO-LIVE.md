@@ -178,6 +178,35 @@ Until this is done, the PMS keeps WhatsApp in **practice mode** while it holds s
 8. **Automations**: on the same page, switch on the ones you want. They only write to guests who agreed to WhatsApp messages (the tick box on the registration card), never during quiet hours, and once per stay. Guests who reply **STOP** are never written to again unless they send **START**.
 9. **Try it**: message the hotel number from your own phone. It appears in **WhatsApp inbox** within seconds; reply from there.
 
+# Part E: the front-desk AI assistant
+
+The **Assistant** page and the to-do list on the dashboard work without this. The AI part (questions in plain words, WhatsApp reply drafts) needs an Anthropic API key.
+
+1. Go to console.anthropic.com → sign up with the company email → **Billing**: add a card and buy credit (start with $20; set a monthly limit under *Limits*).
+2. **API keys → Create key**, name it `amaya-pms`, copy it once.
+3. Render → `azeli-pms` → **Environment** → add `ANTHROPIC_API_KEY` with that key → **Save**.
+
+It uses Claude Opus 5.5 ($4 per million tokens in, $20 out; repeated instructions are cached at a tenth of the price). A typical front-desk question costs roughly **3–8 US cents** (it looks several things up); a WhatsApp draft about **1–2 cents**. Check the real figures under *Usage* in the Anthropic console after the first week. Each person can ask 40 questions an hour (`AI_HOURLY_LIMIT`). The Assistant page shows who used it and how much. Optional settings: `AI_MODEL` (e.g. `claude-sonnet-5-5` for about half the price), `AI_EFFORT` (`low` by default).
+
+The assistant only reads. It cannot check anyone in or out, take payments or send messages: WhatsApp drafts wait for a receptionist to press Send.
+
+# Part F: Booking.com, Expedia and Agoda (through Channex)
+
+Booking.com, Expedia and Agoda only connect to systems they have certified, and new certifications take a year or more. So Azeli connects to **Channex**, a channel manager already certified with all three (and Airbnb, Trip.com, Hotelbeds and others). Bookings, changes and cancellations reach Reservations within a minute, each room sold is taken off every site straight away, and prices, minimum stays and stop-sells go out from **Rates & availability**.
+
+**Cost:** Channex bills per property (check channex.io/pricing for a single hotel; the white-label partner plan is $130 a month plus $7 per hotel, worth it once Azeli runs several hotels). Each OTA still charges its own commission.
+
+1. **Try it free first**: sign up at staging.channex.io (no card needed). In Render → `azeli-pms` → Environment add `CHANNEX_API_KEY` (Channex → *Profile → API key*) and `CHANNEX_API_BASE` = `https://staging.channex.io/api/v1`.
+2. In Channex, create the property **Amaya Hotel & Luxury Suites** with currency **UGX**, its room types (Standard, Deluxe, Suite …) and rate plans (Flexible, Non-refundable …). Copy the **property id**.
+3. In the PMS → **Channels (OTAs) → + Channel**: code `channex`, name `Channex`, connector **Channex**, the property id, commission 15%. Note the secret it shows once.
+4. **Mapping** on that channel: for each room type and rate plan, paste the Channex room type id and rate plan id.
+5. In Channex → **Webhooks → Create**: URL `https://amaya.azelitech.com/api/channels/channex/channex`, events *booking*, header `X-Azeli-Token` = the channel secret. (Bookings are also checked every minute, so a missed call is not lost.)
+6. In the PMS press **More → Push all** on the channel: every date's availability and prices go to Channex.
+7. Make a test booking in Channex's test channel. It appears in **Reservations** (source = the OTA's name) and the room's availability drops everywhere.
+8. **Go live**: change `CHANNEX_API_BASE` to `https://app.channex.io/api/v1` with the production key, repeat steps 2–6 on the live account, then in Channex → **Channels** connect **Booking.com**, **Expedia** and **Agoda**. Channex shows the steps for each: on each OTA's own extranet you choose Channex as your connectivity provider, and Channex maps their rooms to yours.
+
+If a booking cannot be saved (usually a room type that is not mapped), it is not acknowledged: it stays in Channex, the channel shows **Error** with the reason in **Log**, and Channex emails the hotel after 30 minutes. Fix the mapping and press **Get bookings**.
+
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 

@@ -13,6 +13,7 @@ import { reportingRouter, groupPublicRouter } from './routes/reporting.js';
 import { crmRouter, marketingPublicRouter } from './routes/crm.js';
 import { apiRouter } from './routes/api.js';
 import { messagingRouter, whatsappWebhookRouter } from './routes/messaging.js';
+import { assistantRouter } from './routes/assistant.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -59,6 +60,7 @@ export function createApp(pool) {
   app.use('/api/marketing', marketingPublicRouter(pool));
   app.use('/api/whatsapp', whatsappWebhookRouter(pool));
   app.use('/api/messages', requireUser, messagingRouter(pool));
+  app.use('/api/assistant', requireUser, assistantRouter(pool));
   app.use('/api/distribution', requireUser, distributionRouter(pool));
   app.use('/api/finance', requireUser, financeRouter(pool));
   app.use('/api/hr', requireUser, hrRouter(pool));

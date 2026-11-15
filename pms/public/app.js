@@ -103,7 +103,7 @@
 
   /* ---------- shell ---------- */
   const NAV = [
-    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['board', 'Room board', 'reservations.view'], ['inbox', 'WhatsApp inbox', 'messages.use'], ['phonebook', 'Phone book', 'messages.use'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['assistant', 'Assistant', 'assistant.use'], ['board', 'Room board', 'reservations.view'], ['inbox', 'WhatsApp inbox', 'messages.use'], ['phonebook', 'Phone book', 'messages.use'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
     ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
@@ -151,7 +151,7 @@
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'inbox') scrollWa(); else updateWaBadge(); }
+      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'events') { const th = $('.cal thead th.today'), w = $('.cal-wrap'); if (th && w) w.scrollLeft = Math.max(0, th.offsetLeft - 190); } if (view === 'inbox') { scrollWa(); const t = $('form[data-form=wa-send] textarea'); if (ui.waDraft && t && ui.waDraft.id === route().id) { t.value = ui.waDraft.text; t.focus(); } ui.waDraft = null; } else updateWaBadge(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -162,7 +162,8 @@
     const occPct = d.rooms.sellable ? Math.round((d.in_house / d.rooms.sellable) * 100) : 0;
     return `<div class="page-head"><div><h1 class="page">Today at ${esc(d.property_name)}</h1><p class="sub">${fdateLong(d.business_date)}</p></div>
       <div class="row">${CAN['reservations.manage'] ? '<button class="btn btn-gold" data-action="new-res">+ New reservation</button>' : ''}<a class="btn btn-ghost" href="#board">Room board</a></div></div>
-      <div class="grid g4">
+      ${CAN['assistant.use'] ? await todoCard(6) : ''}
+      <div class="grid g4 mt">
         <div class="card kpi"><span>In-house</span><b>${d.in_house}</b><small>${occPct}% of ${d.rooms.sellable} sellable rooms</small></div>
         <div class="card kpi"><span>Arrivals</span><b>${d.arrivals.length}</b><small>still to check in</small></div>
         <div class="card kpi"><span>Departures</span><b>${d.departures.length}</b><small>still to check out</small></div>
@@ -580,9 +581,13 @@
     const d = await GET('/distribution/channels');
     return `<div class="page-head"><div><h1 class="page">Channels (OTAs)</h1><p class="sub">Availability and prices are pushed automatically when they change. Bookings from channels arrive in Reservations.</p></div>
       <div class="row"><button class="btn btn-ghost" data-action="sync-now">Push changes now${d.pending_changes ? ` (${d.pending_changes} waiting)` : ''}</button><button class="btn btn-gold" data-action="channel-edit">+ Channel</button></div></div>
-      <div class="card">${table(['Channel', 'Connector', '#Commission', 'Mapped', 'Active bookings', 'Last push', 'Status', ''], d.channels.map((c) => `<tr><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.code)}</span></td><td>${esc((d.adapters.find((a) => a.id === c.adapter) || {}).label || c.adapter)}</td><td class="num">${num(c.commission_pct)}%</td><td>${c.mappings} rate(s)</td><td>${c.active_bookings}</td><td>${c.last_push_at ? ftime(c.last_push_at) : 'never'}</td>
+      <div class="card">${table(['Channel', 'Connector', '#Commission', 'Mapped', 'Active bookings', 'Last push', 'Status', ''], d.channels.map((c) => `<tr><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.code)}</span></td><td>${esc((d.adapters.find((a) => a.id === c.adapter) || {}).label || c.adapter)}</td><td class="num">${num(c.commission_pct)}%</td><td>${c.mappings} rate(s)</td><td>${c.active_bookings}</td><td>${c.last_push_at ? ftime(c.last_push_at) : 'never'}${c.adapter === 'channex' ? `<br><span class="small muted">bookings checked ${c.last_pull_at ? ftime(c.last_pull_at) : 'never'}</span>` : ''}</td>
         <td>${!c.active ? pill('Paused') : c.last_error ? `<span class="pill bad" title="${esc(c.last_error)}">Error</span>` : pill('OK', 'ok')}</td>
-        <td class="right nowrap"><button class="btn btn-sm btn-ghost" data-action="channel-map" data-id="${c.id}" data-name="${esc(c.name)}">Mapping</button> <button class="btn btn-sm btn-ghost" data-action="channel-log" data-id="${c.id}" data-name="${esc(c.name)}">Log</button> <button class="btn btn-sm btn-ghost" data-action="channel-more" data-id="${c.id}">More</button></td></tr>`), 'No channels yet.')}</div>
+        <td class="right nowrap"><button class="btn btn-sm btn-ghost" data-action="channel-map" data-id="${c.id}" data-name="${esc(c.name)}">Mapping</button> <button class="btn btn-sm btn-ghost" data-action="channel-log" data-id="${c.id}" data-name="${esc(c.name)}">Log</button> ${c.adapter === 'channex' ? ` <button class="btn btn-sm" data-action="channel-pull" data-id="${c.id}">Get bookings</button>` : ''} <button class="btn btn-sm btn-ghost" data-action="channel-more" data-id="${c.id}">More</button></td></tr>`), 'No channels yet.')}</div>
+      <div class="card mt"><h2 class="sec">Booking.com, Expedia and Agoda through Channex</h2>
+        <p>These OTAs only open their systems to certified partners, so Azeli connects to them through <b>Channex</b>, one channel manager certified with all of them (and Airbnb, Trip.com, Hotelbeds and more). Bookings, changes and cancellations arrive in Reservations within a minute, each sold room is taken off every site at once, and prices and stop-sells go out from Rates &amp; availability.</p>
+        <ol class="steps-list small"><li>In Channex, create the hotel's property with its room types and rate plans, and connect Booking.com, Expedia and Agoda there.</li><li>Add a channel here with the <b>Channex</b> connector and the property id. Map each room type and rate plan to the Channex ids (Mapping).</li>
+        <li>In Channex, add a webhook to <code class="mono">${esc(location.origin)}/api/channels/&lt;code&gt;/channex</code> with the header <code class="mono">X-Azeli-Token</code> set to the channel secret. Bookings are also checked every minute.</li><li>Press <b>Push all</b> (More) once to send every date. Full steps: go-live guide, Part F.</li></ol></div>
       <div class="card mt"><h2 class="sec">How channels connect</h2><p>Booking.com, Expedia and Airbnb only connect through certified partners. Add your provider as a <b>Webhook</b> channel: the PMS sends signed availability and price updates to the provider's address, and the provider sends bookings back to:</p>
         <p><code class="mono">${esc(location.origin)}/api/channels/&lt;channel code&gt;/inbound</code></p><p class="small muted">Every message in both directions is signed with the channel's secret (HMAC-SHA256 in the X-Azeli-Signature header). Use the <b>simulator</b> channel to try everything before going live.</p></div>`;
   };
@@ -958,10 +963,11 @@
   };
 
   VIEWS.events = async () => {
-    const t = cur('ev', 'upcoming');
+    const t = cur('ev', 'calendar');
     const head = `<div class="page-head"><div><h1 class="page">Events &amp; banqueting</h1><p class="sub">Conferences, weddings and functions: quote, hold the room, take deposits, print the event order and bill.</p></div>
       <div class="row">${CAN['events.manage'] ? '<a class="btn btn-gold" href="#eventedit/new">+ New event</a>' : ''}</div></div>
-      ${tabs('ev', [['upcoming', 'Upcoming'], ['enquiries', 'Enquiries & tentative'], ['due', 'To bill'], ['past', 'Past'], ['setup', 'Rooms & packages']], 'upcoming')}`;
+      ${tabs('ev', [['calendar', 'Calendar'], ['upcoming', 'Upcoming'], ['enquiries', 'Enquiries & tentative'], ['due', 'To bill'], ['past', 'Past'], ['setup', 'Rooms & packages']], 'calendar')}`;
+    if (t === 'calendar') return head + await eventCalendar();
     if (t === 'setup') {
       const s = await GET('/ops/events/setup'); ui.evSetup = s;
       const m = CAN['events.manage'];
@@ -975,10 +981,39 @@
       <td><a href="#event/${e.id}">${esc(e.title)}</a><br><span class="small muted">${esc(e.code)} · ${esc(e.company_name || e.contact_name)}</span></td><td>${esc(e.room_name)}</td><td class="num">${e.pax}</td><td class="num">${num(e.total)}</td><td class="num">${num(e.deposits)}</td><td>${pill(...EV_ST[e.status])}</td></tr>`), t === 'due' ? 'No confirmed events waiting to be billed.' : 'No events here.')}</div>`;
   };
 
+  /* events calendar: function rooms down the side, the days of the month across; free cells start a booking */
+  const calMonthStart = (d) => d.slice(0, 8) + '01';
+  const addMonths = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCMonth(t.getUTCMonth() + n, 1); return t.toISOString().slice(0, 10); };
+  const daysIn = (d) => new Date(Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)), 0)).getUTCDate();
+  async function eventCalendar() {
+    const from = ui.evMonth || calMonthStart(SETTINGS.business_date), n = daysIn(from);
+    const c = await GET(`/ops/events/calendar?from=${from}&days=${n}`);
+    const dates = Array.from({ length: n }, (_, i) => addDays(from, i));
+    const byCell = new Map();
+    for (const e of c.events) { const k = `${e.function_room_id}|${e.d}`; if (!byCell.has(k)) byCell.set(k, []); byCell.get(k).push(e); }
+    const m = CAN['events.manage'], today = String(c.business_date).slice(0, 10);
+    const free = c.rooms.length * dates.filter((d) => d >= today).length - new Set(c.events.filter((e) => e.d >= today && e.status !== 'enquiry').map((e) => `${e.function_room_id}|${e.d}`)).size;
+    const title = new Date(from + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const cell = (r, d) => {
+      const list = byCell.get(`${r.id}|${d}`) || [];
+      const wk = [0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay());
+      const past = d < today;
+      const inner = list.map((e) => `<a class="cal-ev st-${e.status}" href="#event/${e.id}" title="${esc(`${e.title} · ${e.start}–${e.end} · ${e.pax} guests · ${EV_ST[e.status][0]}`)}"><b>${esc(e.start)}</b> ${esc(e.title)}</a>`).join('');
+      const add = !list.some((e) => e.status !== 'enquiry') && !past && m ? `<button type="button" class="cal-add" data-action="ev-new-at" data-room="${r.id}" data-date="${d}" aria-label="Book ${esc(r.name)} on ${fdate(d)}">+</button>` : '';
+      return `<td class="cal-cell ${wk ? 'wk' : ''} ${past ? 'past' : ''} ${d === today ? 'today' : ''} ${list.some((e) => e.status !== 'enquiry') ? 'busy' : 'free'}">${inner}${add}</td>`;
+    };
+    return `<div class="card"><div class="row between cal-nav"><div class="row"><button class="btn btn-sm btn-ghost" data-action="ev-month" data-m="-1" aria-label="Previous month">←</button><h2 class="sec m0">${esc(title)}</h2><button class="btn btn-sm btn-ghost" data-action="ev-month" data-m="1" aria-label="Next month">→</button><button class="btn btn-sm btn-ghost" data-action="ev-month" data-m="0">This month</button></div>
+        <div class="cal-legend small"><span class="cal-ev st-confirmed">Confirmed</span><span class="cal-ev st-tentative">Tentative (held)</span><span class="cal-ev st-enquiry">Enquiry (not held)</span><span class="cal-ev st-completed">Completed</span><span class="muted">${free} room-days still free this month</span></div></div>
+      <div class="cal-wrap"><table class="cal"><thead><tr><th class="cal-room">Room</th>${dates.map((d) => { const x = new Date(d + 'T00:00:00Z'); return `<th class="${d === today ? 'today' : ''} ${[0, 6].includes(x.getUTCDay()) ? 'wk' : ''}"><span>${x.toLocaleDateString('en-GB', { weekday: 'narrow', timeZone: 'UTC' })}</span>${x.getUTCDate()}</th>`; }).join('')}</tr></thead>
+        <tbody>${c.rooms.map((r) => `<tr><th class="cal-room">${esc(r.name)}<span class="small muted">up to ${r.capacity}</span></th>${dates.map((d) => cell(r, d)).join('')}</tr>`).join('') || `<tr><td colspan="${n + 1}" class="muted">Add function rooms under “Rooms & packages”.</td></tr>`}</tbody></table></div>
+      <p class="small muted">Tentative and confirmed events hold the room; enquiries do not. ${m ? 'Click + in a free day to start a booking for that room.' : ''}</p></div>`;
+  }
+
   VIEWS.eventedit = async (id) => {
     const s = await GET('/ops/events/setup');
     const x = id && id !== 'new' ? await GET(`/ops/events/${id}`) : null;
-    const e = x?.event || { event_type: 'conference', status: 'enquiry', d: SETTINGS.business_date, start: '09:00', end: '17:00', hire_type: 'full_day', beo_notes: {} };
+    const pre = !x && ui.evPrefill ? ui.evPrefill : {}; ui.evPrefill = null;
+    const e = x?.event || { event_type: 'conference', status: 'enquiry', d: pre.date || SETTINGS.business_date, start: '09:00', end: '17:00', hire_type: 'full_day', beo_notes: {}, function_room_id: pre.room ? Number(pre.room) : undefined };
     const extras = [...(x?.extras || []), {}, {}, {}].slice(0, Math.max(3, (x?.extras?.length || 0) + 1));
     return `<div class="page-head"><div><h1 class="page">${x ? `Edit ${esc(e.code)}` : 'New event'}</h1><p class="sub">The function room is held once the event is tentative or confirmed. Enquiries do not block the room.</p></div><a class="btn btn-ghost" href="${x ? `#event/${e.id}` : '#events'}">Back</a></div>
       <form class="form" data-form="event" data-id="${x ? e.id : ''}">
@@ -1555,7 +1590,7 @@
       <div class="lh-right"><div class="lh-title">${esc(title)}</div>${meta.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')}<div><span>Printed</span> ${esc(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} by ${esc(ME.full_name)}</div></div></div>`;
   }
   // views that print a report: every page except the ones that are only for working (POS, set-up forms…)
-  const NO_PRINT = new Set(['inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
+  const NO_PRINT = new Set(['assistant', 'inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
   function addPrinting(view) {
     if (NO_PRINT.has(view)) return;
     const head = $('#view .page-head');
@@ -1831,15 +1866,17 @@
         async (v) => { const b = { code: v.code, name: v.name, description: v.description, discount_pct: Number(v.discount_pct), min_stay: Number(v.min_stay), sort: Number(v.sort), breakfast: !!v.breakfast, refundable: !!v.refundable, on_website: !!v.on_website, on_channels: !!v.on_channels, active: !!v.active };
           if (p) await PUT(`/distribution/rate-plans/${p.id}`, b); else await POST('/distribution/rate-plans', b); return 'Rate plan saved.'; });
     },
+    'channel-pull': async (d) => { const r = await POST(`/distribution/channels/${d.id}/pull`); const x = r[0] || {}; toast(x.error ? `Could not get bookings: ${esc(x.error)}` : `${x.saved || 0} booking update${x.saved === 1 ? '' : 's'} saved${x.failed ? `, ${x.failed} need attention (see Log)` : ''}.`, !!(x.error || x.failed)); render(); },
     'sync-now': async () => { const r = await POST('/distribution/sync'); toast(r.results ? r.results.map((x) => `${esc(x.channel)}: ${x.error ? 'error' : x.pushed + ' updates'}`).join(' · ') || 'Nothing to push.' : 'Nothing waiting.'); render(); },
     'channel-edit': async (d) => {
       const all = await GET('/distribution/channels'); const c = d.id ? all.channels.find((x) => String(x.id) === d.id) : null;
       modal(c ? `Edit ${c.name}` : 'New channel', `<form class="form" data-form="channel"><div class="two"><label>Code (used in the inbound address)<input name="code" value="${esc(c?.code || '')}" ${c ? 'disabled' : 'required'} pattern="[a-z0-9\\-]{2,30}"></label><label>Name<input name="name" value="${esc(c?.name || '')}" required placeholder="Booking.com"></label></div>
         <div class="two"><label>Connector<select name="adapter">${opts(all.adapters.map((a) => [a.id, a.label]), c?.adapter || 'webhook')}</select></label><label>Commission (%)<input name="commission_pct" type="number" min="0" max="99" step="0.5" value="${c?.commission_pct ?? 15}"></label></div>
         <label>Endpoint URL (webhook connector)<input name="endpoint_url" value="${esc(c?.endpoint_url || '')}" placeholder="https://provider.example.com/ari"></label>
+        <label>Channex property id (Channex connector)<input name="external_property_id" value="${esc(c?.external_property_id || '')}" placeholder="e.g. 716305c4-561a-4561-a187-7f5b8aeb5920" maxlength="64"></label>
         ${c ? `<label class="row"><input type="checkbox" name="active" value="1" ${c.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
         async (v) => {
-          const b = { name: v.name, adapter: v.adapter, commission_pct: Number(v.commission_pct), endpoint_url: v.endpoint_url || null, active: c ? !!v.active : true };
+          const b = { name: v.name, adapter: v.adapter, commission_pct: Number(v.commission_pct), endpoint_url: v.endpoint_url || null, external_property_id: v.external_property_id || null, active: c ? !!v.active : true };
           if (c) { await PUT(`/distribution/channels/${c.id}`, b); return 'Channel saved.'; }
           const r = await POST('/distribution/channels', { ...b, code: v.code });
           setTimeout(() => showSecret(r.code, r.secret), 50); return null;
@@ -2233,7 +2270,7 @@
       return `<div class="wa-compose"><p class="small muted">${c.last_inbound_at ? `More than 24 hours since ${esc(c.display_name)} last wrote` : `${esc(c.display_name)} has not written yet`}: WhatsApp only allows an approved template until they reply.${d.guest && !d.guest.whatsapp_opt_in ? ' <b>The guest has not agreed to WhatsApp messages</b>: record it on the registration card first.' : ''}</p>${tplForm}</div>`;
     }
     return `<div class="wa-compose"><form class="form" data-form="wa-send" data-id="${c.id}"><label class="sr">Message<textarea name="text" rows="3" maxlength="4096" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)" required></textarea></label>
-        <div class="row between"><span class="small muted">Free replies allowed for ${hoursLeft(c.window_ends)} more hour${hoursLeft(c.window_ends) === 1 ? '' : 's'}.</span><button class="btn btn-gold">Send</button></div></form>
+        <div class="row between"><span class="small muted">Free replies allowed for ${hoursLeft(c.window_ends)} more hour${hoursLeft(c.window_ends) === 1 ? '' : 's'}.</span><span class="row">${CAN['assistant.use'] && ui.aiStatus?.ai_enabled ? `<button type="button" class="btn btn-ghost" data-action="wa-suggest" data-id="${c.id}">Suggest a reply</button>` : ''}<button class="btn btn-gold">Send</button></span></div></form>
       ${tpls.length ? `<details class="mt"><summary class="small">Send a template instead</summary>${tplForm}</details>` : ''}</div>`;
   }
   function waGuestHtml(d) {
@@ -2252,6 +2289,7 @@
   VIEWS.inbox = async (id) => {
     const f = ui.waFilter || 'open';
     const list = await GET(`/messages/conversations?filter=${f}&q=${encodeURIComponent(ui.waQ || '')}`);
+    if (CAN['assistant.use'] && !ui.aiStatus) ui.aiStatus = await GET('/assistant/status').catch(() => ({}));
     const d = id ? await GET(`/messages/conversations/${id}`) : null;
     ui.waOpen = d ? { id: d.conversation.id, sig: waSig(d) } : null;
     ui.waTplList = d?.templates || [];
@@ -2425,6 +2463,75 @@
   // Enter sends, Shift+Enter makes a new line
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.shiftKey || !e.target.closest('form[data-form=wa-send]') || e.target.tagName !== 'TEXTAREA') return;
+    e.preventDefault(); e.target.closest('form').requestSubmit();
+  });
+
+  Object.assign(OPS_A, {
+    'ev-month': (d) => { ui.evMonth = d.m === '0' ? null : addMonths(ui.evMonth || calMonthStart(SETTINGS.business_date), Number(d.m)); render(); },
+    'ev-new-at': (d) => { ui.evPrefill = { room: d.room, date: d.date }; location.hash = '#eventedit/new'; },
+  });
+  /* ---------- Phase 13: front-desk assistant ---------- */
+  const PRI = { urgent: ['Now', 'bad'], high: ['Soon', 'warn'], normal: ['Today', ''] };
+  const KIND_ICON = { checkout: '⇥', payment: '◎', arrivals: '⇤', housekeeping: '✦', overbooking: '!', reconcile: '≡', pos: '☕', whatsapp: '✉', event: '◆', audit: '☾', plan: '▦' };
+  const todoList = (tasks) => (tasks.length ? `<ul class="todo">${tasks.map((t) => `<li class="todo-${t.priority}"><span class="todo-ic" aria-hidden="true">${KIND_ICON[t.kind] || '•'}</span><div><a href="${esc(t.link || '#assistant')}"><b>${esc(t.title)}</b></a> ${pill(...PRI[t.priority])}<br><span class="small muted">${esc(t.detail)}</span></div></li>`).join('')}</ul>`
+    : '<p class="muted">Nothing waiting. All guests are checked in or out, bills are settled and messages answered.</p>');
+  async function todoCard(limit) {
+    const d = await GET('/assistant/tasks').catch(() => null); if (!d) return '';
+    const urgent = d.tasks.filter((t) => t.priority === 'urgent').length;
+    return `<div class="card"><div class="row between"><h2 class="sec m0">To do now ${urgent ? pill(`${urgent} urgent`, 'bad') : ''}</h2><a class="btn btn-sm btn-ghost" href="#assistant">All ${d.tasks.length} · Ask the assistant</a></div>${todoList(d.tasks.slice(0, limit))}</div>`;
+  }
+  const fcChart = (fc) => {
+    const W = 1200, H = 170, pad = 28, bw = (W - pad * 2) / fc.length;
+    const bars = fc.map((d, i) => { const h = Math.round((d.occupancy / 100) * (H - 46)), x = pad + i * bw, y = H - 26 - h, c = d.occupancy >= 85 ? '#eb6834' : '#2a78d6';
+      return `<g><title>${esc(fdate(d.date))}: ${d.occupancy}% (${d.sold}/${d.rooms} rooms), ${d.arrivals} arrivals, ${d.departures} departures${d.events ? ', ' + d.events : ''}</title><rect x="${x + 4}" y="${y}" width="${bw - 8}" height="${h}" rx="3" fill="${c}"/>
+        <text x="${x + bw / 2}" y="${y - 5}" text-anchor="middle" font-size="13" fill="currentColor">${d.occupancy}%</text><text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="12" fill="currentColor" opacity=".7">${esc(fdate(d.date).split(' ').slice(0, 2).join(' '))}</text></g>`; }).join('');
+    return `<svg class="fc-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Occupancy forecast for the next ${fc.length} days"><line x1="${pad}" x2="${W - pad}" y1="${H - 26 - (H - 46) * 0.85}" y2="${H - 26 - (H - 46) * 0.85}" stroke="#eb6834" stroke-dasharray="4 4" opacity=".6"/>${bars}</svg>`;
+  };
+  VIEWS.assistant = async () => {
+    const [d, st] = await Promise.all([GET('/assistant/tasks'), GET('/assistant/status')]);
+    ui.aiStatus = st; ui.aiChat = ui.aiChat || [];
+    const chat = st.ai_enabled ? `<div class="ai-log" id="ai-log">${aiLogHtml()}</div>
+        <form class="form ai-ask" data-form="ai-ask"><label class="sr" for="ai-q">Ask the assistant</label><textarea id="ai-q" name="q" rows="2" maxlength="2000" placeholder="e.g. Who still owes money today?  ·  Plan Friday for me  ·  Draft a reply to the latest WhatsApp" required></textarea>
+          <div class="row between"><span class="small muted">It reads the system but never changes anything: drafts wait for you to send.</span><span class="row">${ui.aiChat.length ? '<button type="button" class="btn btn-sm btn-ghost" data-action="ai-clear">New chat</button>' : ''}<button class="btn btn-gold">Ask</button></span></div></form>
+        <div class="ai-chips">${['What should I do first?', 'Who still owes money?', 'Which WhatsApps need a reply? Draft them.', 'How busy is the next week? Plan staffing.'].map((q) => `<button type="button" class="btn btn-sm btn-ghost" data-action="ai-quick" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
+      : `<p class="note">The AI part of the assistant is not connected yet. The to-do list works without it.${CAN['settings.manage'] ? ' To switch it on, add an Anthropic API key (ANTHROPIC_API_KEY) in Render → azeli-pms → Environment; see the go-live guide, Part E.' : ' Ask an administrator to connect it.'}</p>`;
+    return `<div class="page-head"><div><h1 class="page">Front-desk assistant</h1><p class="sub">What needs doing now, worked out from the system, and an AI helper that answers questions about the day and drafts WhatsApp replies.</p></div><button class="btn btn-ghost" data-action="refresh-view">Refresh</button></div>
+      <div class="grid ai-grid"><div class="card"><h2 class="sec">To do · ${esc(fdate(d.business_date))}, ${esc(d.local_time)}</h2>${todoList(d.tasks)}</div>
+        <div class="card"><h2 class="sec">Ask the assistant</h2>${chat}</div></div>
+      <div class="card mt"><h2 class="sec">Next 14 days</h2>${fcChart(d.forecast)}<p class="small muted">Bars above the dashed line (85%) are busy days. Hover a bar for arrivals, departures and events.</p>
+        ${table(['Date', '#Rooms sold', '#Occupancy', '#Arrivals', '#Departures', 'Events'], d.forecast.map((x) => `<tr><td>${fdate(x.date)}</td><td class="num">${x.sold}/${x.rooms}</td><td class="num">${x.occupancy}%</td><td class="num">${x.arrivals}</td><td class="num">${x.departures}</td><td class="small">${esc(x.events || '')}</td></tr>`))}</div>
+      ${st.usage ? `<div class="card mt"><h2 class="sec">Assistant use, last 30 days</h2>${table(['Staff', '#Questions', '#Tokens in', '#Tokens out', '#From cache'], st.usage.map((u) => `<tr><td>${esc(u.full_name || '')}</td><td class="num">${u.requests}</td><td class="num">${num(u.input_tokens)}</td><td class="num">${num(u.output_tokens)}</td><td class="num">${num(u.cached_tokens)}</td></tr>`), 'Not used yet.')}<p class="small muted">Model: ${esc(st.model)} · limit ${st.hourly_limit} questions per person per hour.</p></div>` : ''}`;
+  };
+  function aiLogHtml() {
+    if (!ui.aiChat.length) return '<p class="muted small">Ask about today’s arrivals and departures, balances, WhatsApps or the week ahead.</p>';
+    return ui.aiChat.map((m) => `<div class="ai-msg ${m.role}">${m.role === 'assistant' ? aiFormat(m.text) : esc(m.text)}${(m.drafts || []).map((dr, i) => `<div class="ai-draft"><span class="small muted">WhatsApp draft to ${esc(dr.to)}</span><p>${esc(dr.text)}</p><button class="btn btn-sm btn-gold" data-action="ai-use-draft" data-m="${ui.aiChat.indexOf(m)}" data-i="${i}">Review &amp; send</button></div>`).join('')}</div>`).join('') + (ui.aiBusy ? '<div class="ai-msg assistant muted">Thinking…</div>' : '');
+  }
+  // light formatting for the assistant's answers: paragraphs, bullet lists, **bold**
+  function aiFormat(t) {
+    return esc(t).split(/\n{2,}/).map((p) => (/^\s*([-*•]|\d+\.)\s/m.test(p) ? `<ul>${p.split('\n').filter((l) => l.trim()).map((l) => `<li>${l.replace(/^\s*([-*•]|\d+\.)\s*/, '')}</li>`).join('')}</ul>` : `<p>${p.replace(/\n/g, '<br>')}</p>`)).join('').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  }
+  async function aiAsk(q) {
+    ui.aiChat.push({ role: 'user', text: q }); ui.aiBusy = true; $('#ai-log').innerHTML = aiLogHtml();
+    try { const r = await POST('/assistant/chat', { messages: ui.aiChat.map((m) => ({ role: m.role, text: m.text })) }); ui.aiChat.push({ role: 'assistant', text: r.reply, drafts: r.drafts }); }
+    catch (e) { ui.aiChat.pop(); if (e.message !== 'Signed out') toast(esc(e.message), true); }
+    finally { ui.aiBusy = false; if ($('#ai-log')) { $('#ai-log').innerHTML = aiLogHtml(); $('#ai-log').scrollTop = $('#ai-log').scrollHeight; } }
+  }
+  Object.assign(OPS_A, {
+    'refresh-view': () => render(),
+    'ai-clear': () => { ui.aiChat = []; render(); },
+    'ai-quick': (d) => { if (!ui.aiBusy) aiAsk(d.q); },
+    'ai-use-draft': (d) => { const dr = ui.aiChat[Number(d.m)].drafts[Number(d.i)]; ui.waDraft = { id: String(dr.conversation_id), text: dr.text }; location.hash = `#inbox/${dr.conversation_id}`; },
+    'wa-suggest': async (d, e) => {
+      const btn = e.target.closest('button'); btn.disabled = true; btn.textContent = 'Drafting…';
+      try { const r = await POST(`/assistant/whatsapp-draft/${d.id}`); const t = $('form[data-form=wa-send] textarea'); if (t) { t.value = r.text; t.focus(); } }
+      finally { btn.disabled = false; btn.textContent = 'Suggest a reply'; }
+    },
+  });
+  Object.assign(OPS_FORMS, {
+    'ai-ask': async (v, form) => { if (ui.aiBusy) return; form.reset(); await aiAsk(v.q.trim()); $('#ai-q')?.focus(); },
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.target.id !== 'ai-q') return;
     e.preventDefault(); e.target.closest('form').requestSubmit();
   });
 

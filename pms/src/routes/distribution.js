@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express from 'express';
 import { tx } from '../db.js';
 import { HttpError, requirePerm, audit } from '../auth.js';
@@ -50,6 +51,14 @@ export function publicRouter(pool) {
 export function inboundRouter(pool) {
   const r = express.Router();
   r.post('/:code/inbound', limiter(120, 60e3), async (req, res) => res.json(await dist.receiveInbound(pool, req.params.code, req.rawBody, req.headers['x-azeli-signature'])));
+  // Channex calls this when a booking arrives, changes or is cancelled; we then fetch it from the feed (the call
+  // itself carries nothing we trust). It must send the channel secret in the X-Azeli-Token header.
+  r.post('/:code/channex', limiter(120, 60e3), async (req, res) => {
+    const { rows: [c] } = await pool.query("SELECT * FROM channels WHERE code=$1 AND adapter='channex' AND active", [String(req.params.code)]);
+    const tok = Buffer.from(String(req.headers['x-azeli-token'] || '')), sec = Buffer.from(c?.secret || '');
+    if (!c || tok.length !== sec.length || !crypto.timingSafeEqual(tok, sec)) throw new HttpError(401, 'Unknown channel or token.');
+    res.json({ ok: true, results: await dist.pullChannex(pool, c.id) });
+  });
   return r;
 }
 
@@ -75,7 +84,7 @@ export function distributionRouter(pool) {
 
   r.get('/channels', manage, async (_req, res) => res.json({
     adapters: Object.entries(adapters).map(([k, a]) => ({ id: k, label: a.label })),
-    channels: await q(`SELECT c.id, c.code, c.name, c.adapter, c.endpoint_url, c.commission_pct, c.active, c.last_push_at, c.last_error,
+    channels: await q(`SELECT c.id, c.code, c.name, c.adapter, c.endpoint_url, c.external_property_id, c.last_pull_at, c.commission_pct, c.active, c.last_push_at, c.last_error,
         (SELECT count(*) FROM channel_mappings m WHERE m.channel_id=c.id)::int AS mappings,
         (SELECT count(*) FROM reservations r WHERE r.channel_id=c.id AND r.status IN ('reserved','in_house'))::int AS active_bookings
       FROM channels c ORDER BY c.id`),
@@ -88,20 +97,23 @@ export function distributionRouter(pool) {
     if (!(out.commission_pct >= 0 && out.commission_pct < 100)) throw new HttpError(400, 'Commission must be 0–99%.');
     out.endpoint_url = b.endpoint_url ? (() => { try { return validateEndpoint(String(b.endpoint_url).trim()); } catch (e) { throw new HttpError(400, e.message); } })() : null;
     if (out.adapter === 'webhook' && !out.endpoint_url) throw new HttpError(400, 'The webhook connector needs an endpoint URL.');
+    out.external_property_id = String(b.external_property_id || '').trim() || null;
+    if (out.external_property_id && !/^[A-Za-z0-9-]{6,64}$/.test(out.external_property_id)) throw new HttpError(400, 'The Channex property id looks wrong: copy it from Channex (Properties → the hotel).');
+    if (out.adapter === 'channex' && !out.external_property_id) throw new HttpError(400, "The Channex connector needs the hotel's Channex property id.");
     if (isNew) { out.code = String(b.code || '').trim().toLowerCase(); if (!/^[a-z0-9-]{2,30}$/.test(out.code)) throw new HttpError(400, 'Code: 2–30 lowercase letters, numbers or dashes.'); }
     return out;
   };
   r.post('/channels', manage, inTx(async (db, req) => {
     const b = channelBody(req.body || {}, true), secret = dist.newSecret();
-    const { rows: [c] } = await db.query('INSERT INTO channels (code, name, adapter, endpoint_url, commission_pct, active, secret) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, code, name',
-      [b.code, b.name, b.adapter, b.endpoint_url, b.commission_pct, b.active, secret]);
+    const { rows: [c] } = await db.query('INSERT INTO channels (code, name, adapter, endpoint_url, commission_pct, active, secret, external_property_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, code, name',
+      [b.code, b.name, b.adapter, b.endpoint_url, b.commission_pct, b.active, secret, b.external_property_id]);
     await audit(db, req.user, 'distribution.channel_create', 'channel', c.id, { code: c.code, adapter: b.adapter });
     return { ...c, secret }; // shown once
   }));
   r.put('/channels/:id', manage, inTx(async (db, req) => {
     const b = channelBody(req.body || {}, false);
-    const { rows: [c] } = await db.query('UPDATE channels SET name=$2, adapter=$3, endpoint_url=$4, commission_pct=$5, active=$6 WHERE id=$1 RETURNING id, code, name, active',
-      [id(req), b.name, b.adapter, b.endpoint_url, b.commission_pct, b.active]);
+    const { rows: [c] } = await db.query('UPDATE channels SET name=$2, adapter=$3, endpoint_url=$4, commission_pct=$5, active=$6, external_property_id=$7 WHERE id=$1 RETURNING id, code, name, active',
+      [id(req), b.name, b.adapter, b.endpoint_url, b.commission_pct, b.active, b.external_property_id]);
     if (!c) throw new HttpError(404, 'Channel not found.');
     await audit(db, req.user, 'distribution.channel_update', 'channel', c.id, { active: c.active, adapter: b.adapter });
     return c;
@@ -126,6 +138,7 @@ export function distributionRouter(pool) {
     return { ok: true };
   }));
   r.get('/channels/:id/log', manage, async (req, res) => res.json(await q('SELECT id, direction, kind, status, summary, created_at FROM channel_log WHERE channel_id=$1 ORDER BY id DESC LIMIT 100', [id(req)])));
+  r.post('/channels/:id/pull', manage, async (req, res) => res.json(await dist.pullChannex(pool, id(req))));
   r.post('/channels/:id/full-sync', manage, async (req, res) => res.json(await dist.fullSync(pool, id(req), Number(req.body?.days) || null)));
   r.post('/sync', manage, async (_req, res) => res.json(await dist.processOutbox(pool)));
   /** Send a test booking through the full inbound path (signature check included) — for the simulator. */

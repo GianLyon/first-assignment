@@ -5,6 +5,7 @@ import { tx } from '../db.js';
 import { getSettings, availableCount, availabilityGrid, createReservation, cancelReservation } from './frontoffice.js';
 import { enqueueAri } from './ari.js';
 import { adapters } from '../channels/index.js';
+import { pullBookings } from '../channels/channex.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (d) => typeof d === 'string' && DATE_RE.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
@@ -203,7 +204,7 @@ export async function buildAri(db, channel, roomTypeIds, from, toInclusive) {
   return items;
 }
 
-async function logChannel(db, channelId, direction, kind, status, summary, payload) {
+export async function logChannel(db, channelId, direction, kind, status, summary, payload) {
   await db.query('INSERT INTO channel_log (channel_id, direction, kind, status, summary, payload) VALUES ($1,$2,$3,$4,$5,$6)', [channelId, direction, kind, status, summary, payload ?? null]);
 }
 
@@ -341,3 +342,22 @@ export async function receiveInbound(pool, code, rawBody, signature) {
 }
 
 export const newSecret = () => crypto.randomBytes(24).toString('base64url');
+
+/** Fetch new OTA bookings from every active Channex channel (or one). Errors are kept on the channel, not thrown. */
+export async function pullChannex(pool, channelId = null) {
+  const { rows } = await pool.query("SELECT * FROM channels WHERE adapter='channex' AND active AND ($1::int IS NULL OR id=$1) ORDER BY id", [channelId]);
+  const out = [];
+  for (const c of rows) {
+    try {
+      const r = await pullBookings(pool, c, { handleInbound, logChannel });
+      if (!r.failed) await pool.query('UPDATE channels SET last_error=NULL WHERE id=$1 AND last_error LIKE $2', [c.id, 'Bookings:%']);
+      else await pool.query('UPDATE channels SET last_error=$2 WHERE id=$1', [c.id, `Bookings: ${r.failed} could not be saved; see the log.`]);
+      out.push({ channel: c.code, ...r });
+    } catch (e) {
+      await pool.query('UPDATE channels SET last_error=$2 WHERE id=$1', [c.id, `Bookings: ${String(e.message).slice(0, 280)}`]);
+      await logChannel(pool, c.id, 'in', 'channex.pull', 'error', String(e.message).slice(0, 300), null);
+      out.push({ channel: c.code, error: e.message });
+    }
+  }
+  return out;
+}
