@@ -295,7 +295,7 @@ export async function moveRoom(db, user, id, { room_id, reason, rate, allow_dirt
 export async function folio(db, id) {
   const { rows: [r] } = await db.query(
     `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality, g.gender, g.address, g.id_issued_by,
-            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.whatsapp_opt_in, g.whatsapp_opt_out_at, g.title, g.preferences,
+            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.whatsapp_opt_in, g.whatsapp_opt_out_at, g.title, g.preferences, g.room_prefs, g.dietary, g.allergies, g.language,
             rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number, rp.name AS rate_plan_name, ch.name AS channel_name
      FROM reservations r JOIN guests g ON g.id = r.guest_id JOIN room_types rt ON rt.id = r.room_type_id
      LEFT JOIN rooms rm ON rm.id = r.room_id LEFT JOIN rate_plans rp ON rp.id = r.rate_plan_id LEFT JOIN channels ch ON ch.id = r.channel_id WHERE r.id = $1`, [id]);

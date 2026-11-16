@@ -2,7 +2,7 @@
 // priced per night from the rate plan (and the company's negotiated discount), with an optional deposit.
 import { HttpError, audit } from '../auth.js';
 import { getSettings, availableCount, createReservation, postPayment } from './frontoffice.js';
-import { nightlyGrid, planRate, saveNights } from './distribution.js';
+import { nightlyGrid, planRate, saveNights, planRule } from './distribution.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const nightsBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5);
@@ -37,7 +37,8 @@ export async function staffQuote(db, { arrival, departure, company_id = null }) 
         const nightly = nights.map((n) => ({ night: n.night, rate: discounted(planRate(n.rate, p.discount_pct), co?.discount_pct) }));
         const minStay = Math.max(p.min_stay, nights[0]?.min_stay || 1);
         return { id: p.id, code: p.code, name: p.name, breakfast: p.breakfast, refundable: p.refundable, nightly, total: nightly.reduce((a, n) => a + n.rate, 0),
-          min_stay: minStay, warning: nights.length < minStay ? `Minimum stay ${minStay} nights` : stop ? 'Stop-sell on some nights' : null };
+          meal_plan: p.meal_plan, deposit_pct: p.deposit_pct, cancel_days: p.cancel_days,
+          min_stay: minStay, warning: nights.length < minStay ? `Minimum stay ${minStay} nights` : stop ? 'Stop-sell on some nights' : planRule(p, arrival, departure, s.business_date) };
       }),
     });
   }

@@ -614,3 +614,13 @@ td a:hover { text-decoration: underline; }
 @media (max-width: 860px) { .bk-sum { position: static; } .bk-rooms td:nth-child(1), .bk-rooms td:nth-child(2) { min-width: 120px; } }
 @media (max-width: 520px) { .bk-sec .three, .bk-sec .two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .bk-sec .three > label:first-child { grid-column: span 2; } .modal-body { padding: 10px; } }
 .bk > * { min-width: 0; }
+
+/* tick-box chips (preferences, amenities, features, weekdays) */
+.chipset { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { display: inline-flex !important; align-items: center; cursor: pointer; font-size: .78rem !important; font-weight: 500; color: var(--text) !important; }
+.chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chip span { border: 1px solid #cdd5de; border-radius: 4px; padding: 3px 8px; background: #fff; user-select: none; }
+.chip:hover span { border-color: #aab5c2; }
+.chip input:checked + span { background: var(--accent-l); border-color: var(--accent); color: var(--accent-d); }
+.chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.modal:has(form[data-form=guest-form]), .modal:has(form[data-form=rt-form]), .modal:has(form[data-form=plan-form]) { width: min(1000px, 100%); }

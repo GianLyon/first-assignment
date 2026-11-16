@@ -222,6 +222,8 @@
       <div class="card invoice"><div class="inv-head"><div>
         <dl class="kv"><dt>Guest</dt><dd><a href="#guest/${r.guest_id}">${esc(guestName(r))}</a></dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
         <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd>${r.eta ? `<dt>Arrival time</dt><dd>${esc(r.eta)}</dd>` : ''}${r.market_segment ? `<dt>Segment</dt><dd>${esc(SEG_L[r.market_segment] || r.market_segment)}</dd>` : ''}<dt>Guarantee</dt><dd>${esc(GUAR_L[r.guarantee] || 'Not guaranteed')}${r.booker_reference ? ` · ref ${esc(r.booker_reference)}` : ''}</dd>${r.travel_agent ? `<dt>Booked by</dt><dd>${esc(r.travel_agent)}</dd>` : ''}</dl></div>
+        ${r.allergies ? `<p class="note err no-print"><b>Allergies:</b> ${esc(r.allergies)}</p>` : ''}
+        ${prefSummary(r) ? `<p class="note no-print"><b>Usually likes:</b> ${esc(prefSummary(r))}</p>` : ''}
         ${r.special_requests ? `<p class="note"><b>Guest requests:</b> ${esc(r.special_requests)}</p>` : ''}
         ${f.group?.length > 1 ? `<p class="note no-print">Booking ${esc(r.group_code)}, ${f.group.length} rooms: ${f.group.map((x) => x.id === r.id ? `<b>${esc(x.code)}</b>` : `<a href="#res/${x.id}">${esc(x.code)}</a>`).map((h, i) => `${h} ${esc(f.group[i].room_number ? 'room ' + f.group[i].room_number : f.group[i].room_type_name)}`).join(' · ')}</p>` : ''}
         ${r.overbooked && r.status === 'reserved' ? '<p class="note err">Overbooked: this channel booking arrived when no room of this type was free. Move or upgrade another booking before arrival.</p>' : ''}
@@ -294,8 +296,9 @@
 
   VIEWS.settings = async () => {
     const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]);
-    return `<div class="page-head"><div><h1 class="page">Settings</h1><p class="sub">Property details, room types and rooms.</p></div></div>
-      <div class="card"><h2 class="sec">Property</h2><form class="form" data-form="settings"><div class="two"><label>Property name<input name="property_name" value="${esc(SETTINGS.property_name)}" required></label><label>VAT rate (%)<input name="vat_rate" type="number" step="0.01" min="0" max="99" value="${SETTINGS.vat_rate}" required></label></div><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+    const t = cur('set', 'property');
+    const parts = {
+      property: () => `<div class="card"><h2 class="sec">Property</h2><form class="form" data-form="settings"><div class="two"><label>Property name<input name="property_name" value="${esc(SETTINGS.property_name)}" required></label><label>VAT rate (%)<input name="vat_rate" type="number" step="0.01" min="0" max="99" value="${SETTINGS.vat_rate}" required></label></div><div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
       <div class="card mt"><h2 class="sec">Letterhead (printed invoices and reports)</h2><form class="form" data-form="letterhead">
         <div class="two"><label>Registered company name<input name="legal_name" value="${esc(SETTINGS.legal_name || '')}" maxlength="150" placeholder="e.g. Amaya Hotels Ltd"></label><label>TIN<input name="tin" value="${esc(SETTINGS.tin || '')}" maxlength="30"></label></div>
         <label>Address<textarea name="address" rows="2" maxlength="300" placeholder="Plot, street, P.O. Box, town">${esc(SETTINGS.address || '')}</textarea></label>
@@ -303,24 +306,31 @@
         <label>Note at the bottom of invoices (bank details, thank-you…)<textarea name="invoice_footer" rows="2" maxlength="600">${esc(SETTINGS.invoice_footer || '')}</textarea></label>
         <div class="two"><label>Logo (PNG, JPG or WebP)<input type="file" name="logo_file" accept="image/png,image/jpeg,image/webp"></label><div>${SETTINGS.logo ? `<img class="logo-preview" src="${esc(SETTINGS.logo)}" alt="Current logo"><label class="row small"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label>` : '<p class="small muted">No logo yet.</p>'}</div></div>
         <div class="actions"><button class="btn btn-gold">Save letterhead</button></div></form></div>
-      ${CAN['users.manage'] ? `<div class="card mt"><h2 class="sec">Security: two-step sign-in</h2><form class="form" data-form="security">
+      `,
+      rooms: () => `<div class="card"><div class="row between"><h2 class="sec">Room types</h2><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div>
+        ${table(['Code', 'Name', 'Bed', '#m²', '#Rate (UGX)', '#Guests', '#Extra bed', 'Rooms', 'On sale', ''], types.map((t) => `<tr><td><code>${esc(t.code)}</code></td><td><b>${esc(t.name)}</b>${t.amenities?.length ? `<br><span class="small muted">${t.amenities.map((a) => AMEN_L[a] || a).join(', ')}</span>` : ''}</td><td>${esc(BED_L[t.bed_type] || '')}</td><td class="num">${t.size_sqm ?? ''}</td><td class="num">${num(t.base_rate)}</td><td class="num">${t.max_occupancy}${t.max_adults ? `<span class="small muted"> (${t.max_adults}A${t.max_children != null ? `+${t.max_children}C` : ''})</span>` : ''}</td><td class="num">${t.extra_bed_rate != null ? num(t.extra_bed_rate) : '–'}</td><td>${rooms.filter((r) => r.room_type_id === t.id && r.active).length}</td><td>${t.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Rooms</h2><button class="btn btn-sm btn-gold" data-action="room-edit">+ Room</button></div>
+        ${table(['Room', 'Type', 'Floor', 'View', 'Beds', 'Features', 'Housekeeping', 'In service', ''], rooms.map((r) => `<tr><td><code>${esc(r.number)}</code></td><td>${esc(r.type_name)}</td><td>${esc(r.floor || '')}</td><td>${esc(VIEW_L[r.view] || '')}</td><td>${esc(BED_L[r.bed_setup] || '')}</td><td class="small">${[...(r.features || []).map((f) => FEAT_L[f] || f), r.connects_to ? `connects to ${r.connects_to}` : ''].filter(Boolean).map(esc).join(', ')}</td><td>${HK[r.hk_status]}</td><td>${r.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-edit" data-id="${r.id}">Edit</button></td></tr>`))}</div>`,
+      security: () => `${CAN['users.manage'] ? `<div class="card"><h2 class="sec">Security: two-step sign-in</h2><form class="form" data-form="security">
         <p class="small">Require a code from an authenticator app, as well as the password, for these roles. Each person sets it up at their next sign-in. Recommended for everyone who sees money or guest data.</p>
         <div class="chips-row">${Object.entries(ROLE).map(([k, l]) => `<label class="row small"><input type="checkbox" name="r_${k}" value="1" ${(SETTINGS.mfa_required_roles || []).includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
         <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
       <div class="card mt" id="backups-card"><h2 class="sec">Backups</h2><p class="small muted">Loading…</p></div>` : ''}
-      ${CAN['users.manage'] ? `<div class="card mt"><h2 class="sec">Sample data (for trying the system)</h2>${SETTINGS.demo_data
+      `,
+      data: () => `${CAN['users.manage'] ? `<div class="card"><h2 class="sec">Sample data (for trying the system)</h2>${SETTINGS.demo_data
         ? `<p>This system contains <b>sample data</b>: made-up guests, bookings, sales and expenses for practice. Remove it before you start using the system for real.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn btn-bad" data-action="demo-remove">Remove sample data and start fresh</button></div>`
         : `<p>Fill a new, unused system with 45 days of realistic made-up activity (bookings, in-house guests, restaurant and bar sales, extras, expenses and closed days) so you can explore every screen with real-looking figures. It can be removed completely later.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn" data-action="demo-add">Add sample data</button></div>`}</div>` : ''}
-      <div class="card mt"><div class="row between"><h2 class="sec">Room types</h2><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div>
-        ${table(['Code', 'Name', '#Rate (UGX)', '#Max guests', 'Active', ''], types.map((t) => `<tr><td>${esc(t.code)}</td><td>${esc(t.name)}</td><td class="num">${num(t.base_rate)}</td><td class="num">${t.max_occupancy}</td><td>${t.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
-      <div class="card mt"><div class="row between"><h2 class="sec">Rooms</h2><button class="btn btn-sm btn-gold" data-action="room-edit">+ Room</button></div>
-        ${table(['Room', 'Type', 'Floor', 'Housekeeping', 'Active', ''], rooms.map((r) => `<tr><td><b>${esc(r.number)}</b></td><td>${esc(r.type_name)}</td><td>${esc(r.floor || '')}</td><td>${HK[r.hk_status]}</td><td>${r.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-edit" data-id="${r.id}">Edit</button></td></tr>`))}</div>`;
+      `,
+    };
+    const list = [['property', 'Property & letterhead'], ['rooms', `Room types & rooms (${rooms.length})`], ...(CAN['users.manage'] ? [['security', 'Security & backups'], ['data', 'Sample data']] : [])];
+    return `<div class="page-head"><div><h1 class="page">Settings</h1><p class="sub">Property details, letterhead, rooms, security and data.</p></div></div>
+      ${tabs('set', list, 'property')}` + (parts[t] || parts.property)();
   };
 
   VIEWS.users = async () => {
     const users = await GET('/users');
     return `<div class="page-head"><div><h1 class="page">Users</h1><p class="sub">Each person gets their own account. Roles control what they can see and do.</p></div><button class="btn btn-gold" data-action="user-edit">+ New user</button></div>
-      <div class="card">${table(['Name', 'Username', 'Role', 'Status', 'Two-step', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.username)}</td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td>${u.mfa_enabled ? pill('On', 'ok') : (SETTINGS.mfa_required_roles || []).includes(u.role) ? pill('Required, not set up', 'warn') : pill('Off')}</td><td class="right nowrap">${u.mfa_enabled ? `<button class="btn btn-sm btn-ghost" data-action="mfa-reset" data-id="${u.id}" data-name="${esc(u.full_name)}">Reset two-step</button> ` : ''}<button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
+      <div class="card">${table(['Name', 'Department', 'Contact', 'Username', 'Role', 'Status', 'Two-step', ''], users.map((u) => `<tr><td><b>${esc(u.full_name)}</b>${u.job_title ? `<br><span class="small muted">${esc(u.job_title)}</span>` : ''}</td><td>${esc(u.department || '')}</td><td class="small">${esc([u.phone, u.email].filter(Boolean).join(' · '))}</td><td><code>${esc(u.username)}</code></td><td>${ROLE[u.role]}</td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td><td>${u.mfa_enabled ? pill('On', 'ok') : (SETTINGS.mfa_required_roles || []).includes(u.role) ? pill('Required, not set up', 'warn') : pill('Off')}</td><td class="right nowrap">${u.mfa_enabled ? `<button class="btn btn-sm btn-ghost" data-action="mfa-reset" data-id="${u.id}" data-name="${esc(u.full_name)}">Reset two-step</button> ` : ''}<button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`))}</div>
       <div class="card mt"><h2 class="sec">What each role can do</h2>${table(['Role', 'Access'], [['Administrator', 'Everything, including users'], ['Manager', 'All operations, voids, night audit, accounts, settings'], ['Front office', 'Reservations, check-in/out, charges and payments'], ['Night auditor', 'Front office plus the night audit and accounts'], ['Housekeeping', 'Room status only'], ['Accountant', 'Accounts, reports, voids and the audit log'], ['Waiter / cashier', 'Point of sale only: bills, sending orders, payments, own shift'], ['Kitchen / bar', 'Kitchen and bar ticket screen, stock levels, requisitions'], ['Storekeeper', 'Stock, deliveries, purchase orders (not approval), issuing requisitions, stock counts'], ['HR officer', 'Employees, rosters, attendance, leave records, payroll preparation (managers approve)']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`))}</div>`;
   };
 
@@ -577,7 +587,7 @@
   VIEWS.plans = async () => {
     const plans = await GET('/distribution/rate-plans');
     return `<div class="page-head"><div><h1 class="page">Rate plans</h1><p class="sub">Ways to sell each room: flexible, non-refundable, long stay… Prices are the standard rate minus the plan discount.</p></div><button class="btn btn-gold" data-action="plan-edit">+ Rate plan</button></div>
-      <div class="card">${table(['Code', 'Plan', '#Discount', 'Breakfast', 'Cancellation', '#Min stay', 'Sold on', 'Active', ''], plans.map((p) => `<tr><td>${esc(p.code)}</td><td><b>${esc(p.name)}</b><br><span class="small muted">${esc(p.description || '')}</span></td><td class="num">${num(p.discount_pct)}%</td><td>${p.breakfast ? 'Included' : '–'}</td><td>${p.refundable ? 'Free cancellation' : pill('Non-refundable', 'warn')}</td><td class="num">${p.min_stay}</td><td>${[p.on_website && 'Website', p.on_channels && 'Channels'].filter(Boolean).join(', ') || '–'}</td><td>${p.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="plan-edit" data-id="${p.id}">Edit</button></td></tr>`))}</div>`;
+      <div class="card">${table(['Code', 'Plan', '#Discount', 'Meals', 'Cancellation', '#Deposit', 'Stay', 'Sold on', 'Active', ''], plans.map((p) => `<tr><td><code>${esc(p.code)}</code></td><td><b>${esc(p.name)}</b><br><span class="small muted">${esc(p.description || '')}${p.valid_from || p.valid_to ? ` · ${p.valid_from ? fdate(String(p.valid_from).slice(0, 10)) : '…'} – ${p.valid_to ? fdate(String(p.valid_to).slice(0, 10)) : '…'}` : ''}</span></td><td class="num">${num(p.discount_pct)}%</td><td>${esc(MEAL_L[p.meal_plan] || '')}</td><td>${p.refundable ? `Free until ${p.cancel_days ?? 0} day${p.cancel_days === 1 ? '' : 's'} before` : pill('Non-refundable', 'warn')}</td><td class="num">${p.deposit_pct ? p.deposit_pct + '%' : '–'}</td><td class="small">${p.min_stay}${p.max_stay ? `–${p.max_stay}` : '+'} nights${(p.arrival_days || []).length < 7 ? `<br>arrive ${(p.arrival_days || []).map((d) => DOW[d]).join(', ')}` : ''}${p.min_advance ? `<br>${p.min_advance}+ days ahead` : ''}</td><td>${[p.on_website && 'Website', p.on_channels && 'Channels'].filter(Boolean).join(', ') || '–'}</td><td>${p.active ? 'Yes' : 'No'}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="plan-edit" data-id="${p.id}">Edit</button></td></tr>`))}</div>`;
   };
 
   VIEWS.channels = async () => {
@@ -1364,8 +1374,10 @@
         ${mk && !g.erased_at ? `<a class="btn btn-ghost" href="/api/crm/guests/${g.id}/export" download>Export data</a><button class="btn btn-bad" data-action="guest-erase">Erase</button>` : ''}</div></div>
       <div class="grid g4"><div class="card kpi"><span>Stays</span><b>${g.stays}</b><small>${g.nights} nights</small></div><div class="card kpi"><span>Spend</span><b>${num(g.spend)}</b><small>UGX on their bills</small></div>
         <div class="card kpi"><span>Last stay</span><b>${g.in_house ? 'In-house now' : g.last_stay ? fdate(g.last_stay) : '—'}</b><small>${g.next_arrival ? `next arrival ${fdate(g.next_arrival)}` : ''}</small></div><div class="card kpi"><span>Average per stay</span><b>${g.stays ? num(g.spend / g.stays) : '—'}</b><small>UGX</small></div></div>
-      <div class="grid g2 mt"><div class="card"><h2 class="sec">Details</h2><dl class="kv"><dt>Email</dt><dd>${esc(g.email || '–')}</dd><dt>Phone</dt><dd>${esc(g.phone || '–')}</dd><dt>Nationality</dt><dd>${esc(g.nationality || '–')}</dd>
-        <dt>Birthday</dt><dd>${g.birth_date ? fdate(g.birth_date) : '–'}</dd><dt>Tags</dt><dd>${g.tags.length ? g.tags.map(esc).join(', ') : '–'}</dd><dt>Preferences</dt><dd>${esc(g.preferences || '–')}</dd><dt>Notes</dt><dd>${esc(g.notes || '–')}</dd></dl></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Details</h2>${g.allergies ? `<p class="note err"><b>Allergies:</b> ${esc(g.allergies)}</p>` : ''}<dl class="kv"><dt>Name</dt><dd>${esc([g.title, g.first_name, g.last_name].filter(Boolean).join(' '))}</dd><dt>Email</dt><dd>${esc(g.email || '–')}</dd><dt>Phone</dt><dd>${esc([g.phone, g.phone2].filter(Boolean).join(' · ') || '–')}</dd>
+        <dt>Address</dt><dd>${esc([g.address, g.city, g.country].filter(Boolean).join(', ') || '–')}</dd><dt>Work</dt><dd>${esc([g.occupation, g.employer].filter(Boolean).join(', ') || '–')}</dd><dt>Language</dt><dd>${esc(g.language || '–')}</dd>
+        <dt>Contact by</dt><dd>${(g.contact_prefs || []).map((k) => CONTACT_L[k]).join(', ') || '–'}</dd><dt>Stay preferences</dt><dd>${esc(prefSummary(g) || '–')}</dd><dt>Anniversary</dt><dd>${g.anniversary ? fdate(g.anniversary) : '–'}</dd><dt>Nationality</dt><dd>${esc(g.nationality || '–')}</dd>
+        <dt>Birthday</dt><dd>${g.birth_date ? fdate(g.birth_date) : '–'}</dd><dt>Tags</dt><dd>${g.tags.length ? g.tags.map(esc).join(', ') : '–'}</dd><dt>Notes</dt><dd>${esc(g.notes || '–')}</dd></dl></div>
         <div class="card"><h2 class="sec">Stays</h2>${table(['Booking', 'Dates', 'Room', '#Spend'], p.stays.map((s) => `<tr><td><a href="#res/${s.id}">${esc(s.code)}</a><br>${statusPill(s.status)} <span class="small muted">${esc(s.source)}</span></td><td>${fdate(s.arrival)} → ${fdate(s.departure)}</td><td>${esc(s.room ? `${s.room} · ` : '')}${esc(s.room_type)}</td><td class="num">${num(s.spend)}</td></tr>`), 'No stays yet.')}</div></div>
       ${p.possible_duplicates.length && m ? `<div class="card mt"><h2 class="sec">Possible duplicates</h2><p class="small muted">Same name, email or phone. Merging moves their stays and missing details into this profile.</p>
         ${table(['Profile', 'Email', 'Phone', ''], p.possible_duplicates.map((d) => `<tr><td><a href="#guest/${d.id}">${esc(guestName(d))}</a></td><td>${esc(d.email || '')}</td><td>${esc(d.phone || '')}</td><td class="right"><button class="btn btn-sm" data-action="guest-merge" data-id="${d.id}">Merge into this profile</button></td></tr>`))}</div>` : ''}
@@ -2776,6 +2788,112 @@
           <section class="bk-sec"><h3>Notes</h3><textarea name="notes" rows="5" maxlength="1000" aria-label="Notes" placeholder="Delivery days, minimum order…">${esc(x?.notes || '')}</textarea>${x ? `<label class="row mt"><input type="checkbox" name="active" value="1" ${x.active ? 'checked' : ''}> Active</label>` : ''}</section>
           <div class="actions">${cancelBtn}<button class="btn btn-gold">Save supplier</button></div></aside></div></form>`,
       async (v) => { const b = { ...v, terms_days: Number(v.terms_days), active: x ? !!v.active : true }; if (x) await PUT(`/inventory/suppliers/${x.id}`, b); else await POST('/inventory/suppliers', b); INVS = null; return 'Supplier saved.'; });
+    },
+  });
+
+  /* ---------- Phase 15: fuller guest profile and set-up forms ---------- */
+  const PREF_L = { high_floor: 'High floor', low_floor: 'Low floor', quiet: 'Quiet room', near_lift: 'Near the lift', away_from_lift: 'Away from the lift', twin_beds: 'Twin beds', king_bed: 'King bed', extra_pillows: 'Extra pillows', feather_free: 'Feather-free bedding', non_smoking: 'Non-smoking', accessible: 'Accessible room', connecting: 'Connecting rooms', early_checkin: 'Early check-in', late_checkout: 'Late check-out' };
+  const CONTACT_L = { whatsapp: 'WhatsApp', email: 'Email', sms: 'SMS', phone: 'Phone call' };
+  const AMEN_L = { wifi: 'Wi-Fi', ac: 'Air conditioning', tv: 'TV', minibar: 'Minibar', safe: 'Safe', kettle: 'Tea & coffee', desk: 'Desk', balcony: 'Balcony', bathtub: 'Bathtub', rain_shower: 'Rain shower', hairdryer: 'Hairdryer', iron: 'Iron', kitchenette: 'Kitchenette', sofa: 'Sofa', bathrobes: 'Bathrobes' };
+  const FEAT_L = { balcony: 'Balcony', bathtub: 'Bathtub', connecting: 'Connecting', accessible: 'Accessible', smoking: 'Smoking allowed', quiet: 'Quiet side', near_lift: 'Near lift', corner: 'Corner room', renovated: 'Recently renovated' };
+  const VIEW_L = { garden: 'Garden', pool: 'Pool', city: 'City', lake: 'Lake', mountain: 'Mountain', courtyard: 'Courtyard', none: 'No view' };
+  const BED_L = { king: 'King', queen: 'Queen', double: 'Double', twin: 'Twin', single: 'Single', triple: 'Triple', family: 'Family' };
+  const MEAL_L = { room_only: 'Room only', bb: 'Bed & breakfast', hb: 'Half board', fb: 'Full board', ai: 'All inclusive' };
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const DEPTS = ['Front office', 'Housekeeping', 'Food & beverage', 'Kitchen', 'Finance', 'Stores', 'Maintenance', 'Sales & marketing', 'Management', 'Security', 'HR'];
+  const TITLE_L = ['Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Prof', 'Rev', 'Hon', 'Eng', 'Sir', 'Madam'];
+  // a set of tick boxes laid out as chips; values come back as name=on for each ticked one
+  const chips = (name, labels, chosen = []) => `<div class="chipset">${Object.entries(labels).map(([k, l]) => `<label class="chip"><input type="checkbox" name="${name}__${k}" value="1" ${chosen.includes(k) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`;
+  const chipsFrom = (v, name) => Object.keys(v).filter((k) => k.startsWith(name + '__')).map((k) => k.slice(name.length + 2));
+  const prefSummary = (g) => [...(g.room_prefs || []).map((k) => PREF_L[k] || k), g.dietary ? `Diet: ${g.dietary}` : '', g.preferences || ''].filter(Boolean).join(' · ');
+
+  Object.assign(OPS_A, {
+    'guest-edit': () => {
+      const g = ui.guest.guest;
+      modal(`Guest · ${guestName(g)}`, `<form class="form" data-form="guest-form"><div class="bk"><div>
+        <section class="bk-sec"><h3>Person</h3><div class="three"><label>Title<select name="title">${opts([['', '–'], ...TITLE_L.map((t) => [t, t])], g.title || '')}</select></label><label>First name *<input name="first_name" value="${esc(g.first_name)}" required maxlength="80"></label><label>Last name<input name="last_name" value="${esc(g.last_name)}" maxlength="80"></label></div>
+          <div class="three"><label>Gender<select name="gender">${opts([['', '–'], ['female', 'Female'], ['male', 'Male'], ['other', 'Other']], g.gender || '')}</select></label><label>Date of birth<input type="date" name="birth_date" value="${esc(g.birth_date || '')}"></label><label>Anniversary<input type="date" name="anniversary" value="${esc(g.anniversary || '')}"></label></div>
+          <div class="three"><label>Nationality<input name="nationality" value="${esc(g.nationality || '')}" maxlength="60"></label><label>Language<input name="language" value="${esc(g.language || '')}" maxlength="40" list="lang-list" placeholder="English"></label><label class="row"><input type="checkbox" name="vip" value="1" ${g.vip ? 'checked' : ''}> VIP</label></div>
+          <datalist id="lang-list">${['English', 'Luganda', 'Swahili', 'French', 'Arabic', 'German', 'Chinese', 'Kinyarwanda', 'Runyankole', 'Acholi'].map((x) => `<option value="${x}">`).join('')}</datalist></section>
+        <section class="bk-sec"><h3>Contact</h3><div class="three"><label>Mobile / WhatsApp<input name="phone" value="${esc(g.phone || '')}" maxlength="40"></label><label>Other phone<input name="phone2" value="${esc(g.phone2 || '')}" maxlength="40"></label><label>Email<input type="email" name="email" value="${esc(g.email || '')}" maxlength="120"></label></div>
+          <label>Address<input name="address" value="${esc(g.address || '')}" maxlength="300" placeholder="Plot, street, P.O. Box"></label><div class="two"><label>City / town<input name="city" value="${esc(g.city || '')}" maxlength="80"></label><label>Country<input name="country" value="${esc(g.country || '')}" maxlength="80"></label></div>
+          <label>Prefers to be contacted by</label>${chips('contact_prefs', CONTACT_L, g.contact_prefs)}</section>
+        <section class="bk-sec"><h3>Work</h3><div class="two"><label>Employer / company<input name="employer" value="${esc(g.employer || '')}" maxlength="120"></label><label>Occupation<input name="occupation" value="${esc(g.occupation || '')}" maxlength="80"></label></div></section></div>
+        <aside><section class="bk-sec"><h3>Stay preferences</h3>${chips('room_prefs', PREF_L, g.room_prefs)}
+          <label class="mt">Dietary needs<input name="dietary" value="${esc(g.dietary || '')}" maxlength="200" placeholder="Vegetarian, halal, no pork…"></label>
+          <label>Allergies (shown as a warning at the desk)<input name="allergies" value="${esc(g.allergies || '')}" maxlength="300" placeholder="Peanuts, penicillin…"></label>
+          <label>Other preferences<textarea name="preferences" rows="2" maxlength="1000">${esc(g.preferences || '')}</textarea></label></section>
+        <section class="bk-sec"><h3>For staff</h3><label>Tags (comma separated)<input name="tags" value="${esc(g.tags.join(', '))}" placeholder="corporate, honeymoon, repeat"></label><label>Internal notes<textarea name="notes" rows="3" maxlength="1000">${esc(g.notes || '')}</textarea></label></section>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save profile</button></div></aside></div></form>`,
+      async (v) => { await PUT(`/crm/guests/${g.id}`, { ...v, vip: !!v.vip, room_prefs: chipsFrom(v, 'room_prefs'), contact_prefs: chipsFrom(v, 'contact_prefs') }); return 'Profile saved.'; });
+      $('#modal .modal').classList.add('wide');
+    },
+    'room-type': async (d) => {
+      const t = d.id ? (await GET('/room-types')).find((x) => String(x.id) === d.id) : null;
+      modal(t ? `Room type · ${t.name}` : 'New room type', `<form class="form" data-form="rt-form"><div class="bk"><div>
+        <section class="bk-sec"><h3>Room type</h3><div class="three"><label>Code *<input name="code" value="${esc(t?.code || '')}" ${t ? 'disabled' : 'required'} maxlength="10" placeholder="DLX"></label><label>Name *<input name="name" value="${esc(t?.name || '')}" required maxlength="80"></label><label>Display order<input name="sort" type="number" value="${t?.sort ?? 0}"></label></div>
+          <label>Description (website and booking confirmations)<textarea name="description" rows="3" maxlength="1000" placeholder="Spacious room with a lake view, king bed and rain shower.">${esc(t?.description || '')}</textarea></label>
+          <div class="three"><label>Bed<select name="bed_type">${opts([['', '–'], ...Object.entries(BED_L)], t?.bed_type || '')}</select></label><label>Size (m²)<input name="size_sqm" type="number" min="5" max="1000" value="${t?.size_sqm ?? ''}"></label><label>Standard rate (UGX) *<input name="base_rate" type="number" min="0" step="1000" value="${t?.base_rate ?? ''}" required></label></div></section>
+        <section class="bk-sec"><h3>In the room</h3>${chips('amenities', AMEN_L, t?.amenities || [])}</section></div>
+        <aside><section class="bk-sec"><h3>Occupancy</h3><label>Max guests in total *<input name="max_occupancy" type="number" min="1" max="20" value="${t?.max_occupancy ?? 2}" required></label><div class="two"><label>Max adults<input name="max_adults" type="number" min="1" max="20" value="${t?.max_adults ?? ''}"></label><label>Max children<input name="max_children" type="number" min="0" max="20" value="${t?.max_children ?? ''}"></label></div>
+          <label>Extra bed (UGX / night)<input name="extra_bed_rate" type="number" min="0" step="1000" value="${t?.extra_bed_rate ?? ''}" placeholder="Not offered"></label>${t ? `<label class="row mt"><input type="checkbox" name="active" value="1" ${t.active ? 'checked' : ''}> On sale</label>` : ''}</section>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save room type</button></div></aside></div></form>`,
+      async (v) => {
+        const body = { code: v.code, name: v.name, base_rate: Number(v.base_rate), max_occupancy: Number(v.max_occupancy), description: v.description, bed_type: v.bed_type, size_sqm: v.size_sqm, max_adults: v.max_adults, max_children: v.max_children, extra_bed_rate: v.extra_bed_rate, sort: v.sort, amenities: chipsFrom(v, 'amenities') };
+        if (t) { body.active = !!v.active; await PUT(`/room-types/${t.id}`, body); } else await POST('/room-types', body); return 'Room type saved.';
+      });
+      $('#modal .modal').classList.add('wide');
+    },
+    'room-edit': async (d) => {
+      const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]); const r = d.id ? rooms.find((x) => String(x.id) === d.id) : null;
+      modal(r ? `Room ${r.number}` : 'New room', `<form class="form" data-form="room-form">
+        <div class="three"><label>Room number *<input name="number" value="${esc(r?.number || '')}" ${r ? 'disabled' : 'required'} maxlength="10"></label><label>Room type *<select name="room_type_id">${opts(types.map((t) => [t.id, t.name]), r?.room_type_id)}</select></label><label>Floor<input name="floor" value="${esc(r?.floor || '')}" maxlength="10"></label></div>
+        <div class="three"><label>View<select name="view">${opts([['', '–'], ...Object.entries(VIEW_L)], r?.view || '')}</select></label><label>Bed set-up<select name="bed_setup">${opts([['', 'As the room type'], ...Object.entries(BED_L)], r?.bed_setup || '')}</select></label><label>Connects to room<select name="connects_to">${opts([['', '–'], ...rooms.filter((x) => x.id !== r?.id).map((x) => [x.number, x.number])], r?.connects_to || '')}</select></label></div>
+        <label>Features</label>${chips('features', FEAT_L, r?.features || [])}
+        <label>Notes for staff<input name="notes" value="${esc(r?.notes || '')}" maxlength="500" placeholder="e.g. door sticks, AC remote kept at reception"></label>
+        ${r ? `<label class="row"><input type="checkbox" name="active" value="1" ${r.active ? 'checked' : ''}> In service</label>` : ''}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save room</button></div></form>`,
+      async (v) => {
+        const body = { room_type_id: Number(v.room_type_id), floor: v.floor, view: v.view, bed_setup: v.bed_setup, connects_to: v.connects_to, notes: v.notes, features: chipsFrom(v, 'features') };
+        if (r) await PUT(`/rooms/${r.id}`, { ...body, active: !!v.active }); else await POST('/rooms', { ...body, number: v.number }); return 'Room saved.';
+      });
+    },
+    'plan-edit': async (d) => {
+      const p = d.id ? (await GET('/distribution/rate-plans')).find((x) => String(x.id) === d.id) : null;
+      const ymd = (x) => (x ? String(x).slice(0, 10) : '');
+      const days = p?.arrival_days || [0, 1, 2, 3, 4, 5, 6];
+      modal(p ? `Rate plan · ${p.name}` : 'New rate plan', `<form class="form" data-form="plan-form"><div class="bk"><div>
+        <section class="bk-sec"><h3>Plan</h3><div class="three"><label>Code *<input name="code" value="${esc(p?.code || '')}" ${p ? 'disabled' : 'required'} maxlength="20" placeholder="BB-FLEX"></label><label>Name *<input name="name" value="${esc(p?.name || '')}" required maxlength="80"></label><label>Display order<input name="sort" type="number" value="${p?.sort ?? 0}"></label></div>
+          <label>Description for guests<input name="description" value="${esc(p?.description || '')}" maxlength="300" placeholder="Breakfast included, free cancellation until 3 days before arrival."></label>
+          <div class="three"><label>Meals<select name="meal_plan">${opts(Object.entries(MEAL_L), p?.meal_plan || 'bb')}</select></label><label>Discount off standard rate (%)<input name="discount_pct" type="number" min="0" max="99" step="0.5" value="${p?.discount_pct ?? 0}"></label><label>Deposit to confirm (%)<input name="deposit_pct" type="number" min="0" max="100" value="${p?.deposit_pct ?? 0}"></label></div></section>
+        <section class="bk-sec"><h3>Cancellation</h3><div class="two"><label>Policy<select name="cancel_mode"><option value="free" ${!p || p.refundable ? 'selected' : ''}>Free cancellation until…</option><option value="nonref" ${p && !p.refundable ? 'selected' : ''}>Non-refundable</option></select></label><label>Days before arrival<input name="cancel_days" type="number" min="0" max="365" value="${p?.cancel_days ?? 1}"></label></div></section>
+        <section class="bk-sec"><h3>When it can be sold</h3><div class="two"><label>Valid for arrivals from<input type="date" name="valid_from" value="${ymd(p?.valid_from)}"></label><label>to<input type="date" name="valid_to" value="${ymd(p?.valid_to)}"></label></div>
+          <label>Arrival days</label><div class="chipset">${DOW.map((n, i) => `<label class="chip"><input type="checkbox" name="dow__${i}" value="1" ${days.includes(i) ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
+          <div class="three mt"><label>Minimum stay (nights)<input name="min_stay" type="number" min="1" value="${p?.min_stay ?? 1}"></label><label>Maximum stay (nights)<input name="max_stay" type="number" min="1" value="${p?.max_stay ?? ''}" placeholder="No limit"></label><label>Book at least … days ahead<input name="min_advance" type="number" min="0" max="365" value="${p?.min_advance ?? 0}"></label></div></section></div>
+        <aside><section class="bk-sec"><h3>Where it is sold</h3>${[['on_website', 'Website booking engine', p ? p.on_website : true], ['on_channels', 'Channels (OTAs)', p ? p.on_channels : true], ['active', 'Active', p ? p.active : true]].map(([k, l, c]) => `<label class="row"><input type="checkbox" name="${k}" value="1" ${c ? 'checked' : ''}> ${l}</label>`).join('')}
+          <p class="small muted mt">The front desk can always use active plans. Outside these rules the booking form shows a warning; the website and channels do not offer the plan.</p></section>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Save rate plan</button></div></aside></div></form>`,
+      async (v) => {
+        const free = v.cancel_mode === 'free';
+        const b = { code: v.code, name: v.name, description: v.description, sort: Number(v.sort), meal_plan: v.meal_plan, discount_pct: Number(v.discount_pct), deposit_pct: Number(v.deposit_pct || 0),
+          refundable: free, cancel_days: free ? Number(v.cancel_days || 0) : null, valid_from: v.valid_from || null, valid_to: v.valid_to || null,
+          arrival_days: chipsFrom(v, 'dow').map(Number), min_stay: Number(v.min_stay), max_stay: v.max_stay || null, min_advance: Number(v.min_advance || 0), on_website: !!v.on_website, on_channels: !!v.on_channels, active: !!v.active };
+        if (p) await PUT(`/distribution/rate-plans/${p.id}`, b); else await POST('/distribution/rate-plans', b); return 'Rate plan saved.';
+      });
+      $('#modal .modal').classList.add('wide');
+    },
+    'user-edit': async (d) => {
+      const u = d.id ? (await GET('/users')).find((x) => String(x.id) === d.id) : null;
+      modal(u ? `Staff account · ${u.full_name}` : 'New staff account', `<form class="form" data-form="user-form">
+        <div class="two"><label>Full name *<input name="full_name" value="${esc(u?.full_name || '')}" required maxlength="120"></label><label>Username *<input name="username" value="${esc(u?.username || '')}" ${u ? 'disabled' : 'required'} pattern="[a-z0-9._\\-]{3,40}" title="3–40 lowercase letters, numbers, dots, dashes or underscores" autocomplete="off"></label></div>
+        <div class="three"><label>Department<select name="department">${opts([['', '–'], ...DEPTS.map((x) => [x, x])], u?.department || '')}</select></label><label>Job title<input name="job_title" value="${esc(u?.job_title || '')}" maxlength="80" placeholder="Receptionist"></label><label>Role (what they can do) *<select name="role">${opts(Object.entries(ROLE), u?.role || 'front_office')}</select></label></div>
+        <div class="two"><label>Work email<input name="email" type="email" value="${esc(u?.email || '')}" maxlength="120"></label><label>Phone<input name="phone" value="${esc(u?.phone || '')}" maxlength="40"></label></div>
+        <label>${u ? 'Reset password (optional)' : 'Password (8+ characters) *'}<input name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label>
+        ${u ? `<label class="row"><input type="checkbox" name="active" value="1" ${u.active ? 'checked' : ''}> Account active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => {
+        const extra = { email: v.email, phone: v.phone, department: v.department, job_title: v.job_title };
+        if (u) await PUT(`/users/${u.id}`, { full_name: v.full_name, role: v.role, active: !!v.active, password: v.password || undefined, ...extra }); else await POST('/users', v); return 'Staff account saved.';
+      });
     },
   });
 

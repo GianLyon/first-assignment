@@ -2,6 +2,7 @@
 import { HttpError, audit } from '../auth.js';
 import { getSettings } from './frontoffice.js';
 import { parseRecipients } from './reports.js';
+import { ROOM_PREFS, CONTACT_PREFS, pick } from '../lists.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[a-z]{2,}$/i;
@@ -26,7 +27,8 @@ export const GUEST_STATS = `
       array_agg(DISTINCT r.source) AS sources
     FROM reservations r GROUP BY r.guest_id),
   sp AS (SELECT r.guest_id, SUM(c.amount)::bigint AS spend FROM folio_charges c JOIN reservations r ON r.id=c.reservation_id WHERE NOT c.voided GROUP BY r.guest_id)
-  SELECT g.id, g.first_name, g.last_name, g.email, g.phone, g.nationality, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.tags, g.preferences, g.notes,
+  SELECT g.id, g.title, g.first_name, g.last_name, g.email, g.phone, g.phone2, g.gender, g.nationality, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.tags, g.preferences, g.notes,
+    g.address, g.city, g.country, g.employer, g.occupation, g.language, g.room_prefs, g.dietary, g.allergies, to_char(g.anniversary,'YYYY-MM-DD') AS anniversary, g.contact_prefs, g.id_type, g.id_number,
     g.marketing_consent, g.consent_at, g.consent_source, g.whatsapp_opt_in, g.whatsapp_opt_in_at, g.whatsapp_opt_out_at, g.unsubscribed_at, g.erased_at, g.created_at,
     COALESCE(st.stays,0) AS stays, COALESCE(st.nights,0) AS nights, st.last_stay, st.next_arrival, COALESCE(st.in_house,FALSE) AS in_house,
     COALESCE(st.sources,'{}') AS sources, COALESCE(sp.spend,0) AS spend
@@ -77,18 +79,25 @@ export async function guestProfile(db, id) {
   return { guest: g, stays, emails, possible_duplicates: dupes };
 }
 
+const TITLES = ['Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Prof', 'Rev', 'Hon', 'Eng', 'Sir', 'Madam'];
 export async function updateGuest(db, user, id, b) {
   const { rows: [cur] } = await db.query('SELECT * FROM guests WHERE id=$1 AND merged_into IS NULL FOR UPDATE', [id]);
   if (!cur) throw new HttpError(404, 'Guest not found.');
   if (cur.erased_at) throw new HttpError(409, 'This profile was erased.');
   const email = text(b.email, 'Email', { max: 120 })?.toLowerCase() || null;
   if (email && !EMAIL_RE.test(email)) throw new HttpError(400, 'That email address is not valid.');
-  if (b.birth_date && !DATE_RE.test(b.birth_date)) throw new HttpError(400, 'Birthday must be a date.');
+  for (const [k, l] of [['birth_date', 'Birthday'], ['anniversary', 'Anniversary']]) if (b[k] && !DATE_RE.test(b[k])) throw new HttpError(400, `${l} must be a date.`);
+  if (b.title && !TITLES.includes(b.title)) throw new HttpError(400, 'Choose a title from the list.');
+  if (b.gender && !['female', 'male', 'other'].includes(b.gender)) throw new HttpError(400, 'Unknown gender.');
   const tags = [...new Set((Array.isArray(b.tags) ? b.tags : String(b.tags || '').split(',')).map((t) => String(t).trim().toLowerCase()).filter(Boolean))].slice(0, 20);
   if (tags.some((t) => t.length > 40)) throw new HttpError(400, 'Tags must be short.');
-  await db.query(`UPDATE guests SET first_name=$2, last_name=$3, email=$4, phone=$5, nationality=$6, birth_date=$7, vip=$8, tags=$9, preferences=$10, notes=$11 WHERE id=$1`,
-    [id, text(b.first_name, 'First name', { required: true, max: 80 }), text(b.last_name, 'Last name', { max: 80 }) || '', email, text(b.phone, 'Phone', { max: 40 }),
-      text(b.nationality, 'Nationality', { max: 60 }), b.birth_date || null, !!b.vip, tags, text(b.preferences, 'Preferences', { max: 1000 }), text(b.notes, 'Notes', { max: 1000 })]);
+  const t = (k, l, max) => text(b[k], l, { max });
+  await db.query(`UPDATE guests SET first_name=$2, last_name=$3, email=$4, phone=$5, nationality=$6, birth_date=$7, vip=$8, tags=$9, preferences=$10, notes=$11,
+      title=$12, phone2=$13, gender=$14, address=$15, city=$16, country=$17, employer=$18, occupation=$19, language=$20, room_prefs=$21, dietary=$22, allergies=$23, anniversary=$24, contact_prefs=$25 WHERE id=$1`,
+    [id, text(b.first_name, 'First name', { required: true, max: 80 }), t('last_name', 'Last name', 80) || '', email, t('phone', 'Phone', 40),
+      t('nationality', 'Nationality', 60), b.birth_date || null, !!b.vip, tags, t('preferences', 'Preferences', 1000), t('notes', 'Notes', 1000),
+      b.title || null, t('phone2', 'Second phone', 40), b.gender || null, t('address', 'Address', 300), t('city', 'City', 80), t('country', 'Country', 80), t('employer', 'Employer', 120),
+      t('occupation', 'Occupation', 80), t('language', 'Language', 40), pick(b.room_prefs, ROOM_PREFS), t('dietary', 'Dietary needs', 200), t('allergies', 'Allergies', 300), b.anniversary || null, pick(b.contact_prefs, CONTACT_PREFS)]);
   await audit(db, user, 'guest.update', 'guest', id, { vip: !!b.vip, tags });
   return { ok: true };
 }
