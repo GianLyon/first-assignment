@@ -103,7 +103,7 @@
 
   /* ---------- shell ---------- */
   const NAV = [
-    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['assistant', 'Assistant', 'assistant.use'], ['board', 'Room board', 'reservations.view'], ['inbox', 'WhatsApp inbox', 'messages.use'], ['phonebook', 'Phone book', 'messages.use'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
+    ['Front office', [['dashboard', 'Dashboard', 'reservations.view'], ['assistant', 'Assistant', 'assistant.use'], ['board', 'Room board', 'reservations.view'], ['housekeeping', 'Housekeeping', 'housekeeping.update'], ['inbox', 'WhatsApp inbox', 'messages.use'], ['phonebook', 'Phone book', 'messages.use'], ['reservations', 'Reservations', 'reservations.view'], ['availability', 'Availability', 'reservations.view'], ['audit', 'Night audit', 'audit.run']]],
     ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
@@ -142,11 +142,12 @@
     if (!ME) return;
     const { r, id } = route();
     const need = VIEW_PERM[r] || { res: 'reservations.view', check: 'pos.use', count: 'stock.count', company: 'finance.view', supplier: 'finance.view', invoice: 'finance.view', rec: 'finance.view', employee: 'hr.view', payrun: 'hr.view', payslip: 'staff.self', event: 'events.view', eventedit: 'events.manage', beo: 'events.view', asset: 'assets.manage', reportrun: 'reports.view', guest: 'reservations.view', campaign: 'marketing.manage' }[r] || null;
-    const home = NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
+    const home = ME.role === 'housekeeping' && CAN['housekeeping.update'] ? 'housekeeping' : NAV.flatMap(([, items]) => items).find(([, , p]) => CAN[p])?.[0] || 'dashboard';
     const view = VIEWS[r] && (!need || CAN[need]) ? r : home;
     if (view !== r) history.replaceState(null, '', '#' + view);
     clearInterval(ui.timer);
     if (view === 'kitchen') ui.timer = setInterval(() => { if (route().r === 'kitchen' && $('#modal').hidden) render(); }, 15000);
+    if (view === 'housekeeping') ui.timer = setInterval(() => { if (route().r === 'housekeeping' && $('#modal').hidden && !document.activeElement?.matches('select')) render(); }, 30000);
     if (view === 'inbox') ui.timer = setInterval(refreshInbox, 8000);
     renderNav(); document.body.classList.remove('nav-open');
     const seq = ++renderSeq;
@@ -186,7 +187,7 @@
       <div class="legend"><span><i class="lg occ"></i>Occupied</span><span><i class="lg dep"></i>Due out</span><span><i class="lg vc"></i>Vacant clean</span><span><i class="lg dirty"></i>Vacant dirty</span><span><i class="lg ooo"></i>Out of order</span></div>
       ${floors.map((f) => `<div class="card mt"><h2 class="sec">Floor ${esc(f)}</h2><div class="rack">${d.rooms.filter((r) => (r.floor || '–') === f).map((r) => `
         <button class="room ${cls(r)}" data-action="room" data-id="${r.id}" data-res="${r.reservation_id || ''}" data-number="${esc(r.number)}" data-hk="${r.hk_status}" data-type="${esc(r.type_code)}">
-          <b>${esc(r.number)}</b><small>${esc(r.type_name)}</small><span class="g">${r.reservation_id ? esc(guestName(r)) : HK[r.hk_status]}</span>${r.reservation_id ? `<small>Until ${fdate(r.departure)}${r.hk_status === 'dirty' ? ' · service' : ''}</small>` : ''}</button>`).join('')}</div></div>`).join('')}`;
+          <b>${esc(r.number)}</b><small>${esc(r.type_name)}</small><span class="g">${r.reservation_id ? esc(guestName(r)) : r.block && r.block.kind === 'out_of_order' ? esc(r.block.reason) : HK[r.hk_status]}</span>${r.block && r.block.kind === 'out_of_order' && !r.reservation_id ? `<small>${esc(blockUntil(r.block))}</small>` : ''}${r.block?.kind === 'out_of_service' ? `<small class="oos">⚠ ${esc(r.block.reason)}</small>` : ''}${r.next_block && !r.block ? `<small>Blocked from ${fdate(r.next_block)}</small>` : ''}${r.reservation_id ? `<small>Until ${fdate(r.departure)}${r.hk_status === 'dirty' ? ' · service' : ''}</small>` : ''}</button>`).join('')}</div></div>`).join('')}`;
   };
 
   VIEWS.reservations = async () => {
@@ -1056,13 +1057,18 @@
 
   VIEWS.maintenance = async () => {
     const t = cur('wo', 'open'), w = CAN['maintenance.work'];
+    if (t === 'blocks') {
+      ui.woRooms = await GET('/rooms');
+      return `<div class="page-head"><div><h1 class="page">Maintenance</h1><p class="sub">Rooms taken off sale for repairs, renovation or deep cleans. Off-sale nights come off the website and channels automatically.</p></div>
+        <div class="row"><button class="btn btn-gold" data-action="wo-report">+ Report a fault</button></div></div>${tabs('wo', [['open', 'Open jobs'], ['blocks', 'Room blocks'], ['closed', 'Closed jobs']], 'open')}` + await blocksTab();
+    }
     const d = await GET(`/ops/work-orders?status=${t}`);
     ui.woRooms = d.rooms; ui.woList = d.work_orders;
     if (!ui.woAssets) ui.woAssets = await GET('/ops/assets').catch(() => []);
     const late = (x) => x.due && x.due < d.business_date && !['done', 'cancelled'].includes(x.status);
     return `<div class="page-head"><div><h1 class="page">Maintenance</h1><p class="sub">${w ? 'All jobs, most urgent first. A room taken out of order goes back to housekeeping when the job is done.' : 'Faults you have reported. Maintenance will pick them up.'}</p></div>
       <div class="row"><button class="btn btn-gold" data-action="wo-report">+ Report a fault</button>${w ? '<button class="btn btn-ghost" data-action="wo-schedule">Create due services</button>' : ''}</div></div>
-      ${tabs('wo', [['open', 'Open'], ['closed', 'Closed']], 'open')}
+      ${tabs('wo', [['open', 'Open jobs'], ['blocks', 'Room blocks'], ['closed', 'Closed jobs']], 'open')}
       <div class="card">${table(['Job', 'Where', 'Priority', 'Due', 'Assigned', 'Status', ''], d.work_orders.map((x) => `<tr><td>${esc(x.title)}<br><span class="small muted">${esc(x.code)} · ${x.kind === 'repair' ? 'Repair' : x.kind === 'preventive' ? 'Scheduled service' : 'Inspection'} · ${esc(x.reporter || '')}</span>${x.description ? `<br><span class="small">${esc(x.description)}</span>` : ''}${x.completion_notes ? `<br><span class="small muted">Done: ${esc(x.completion_notes)}</span>` : ''}</td>
         <td>${x.room ? `Room ${esc(x.room)}${x.room_out_of_order ? ' ' + pill('Out of order', 'bad') : ''}` : ''}${x.asset_name ? `${x.room ? '<br>' : ''}${esc(x.asset_name)}` : ''}${x.location ? `<br><span class="small muted">${esc(x.location)}</span>` : ''}</td>
         <td>${pill(...PRIO[x.priority])}</td><td class="nowrap ${late(x) ? 'err' : ''}">${x.due ? fdate(x.due) : ''}</td><td>${esc(x.assigned_to || '')}</td><td>${pill(...WO_ST[x.status])}${x.cost ? `<br><span class="small muted">${ugx(x.cost)}</span>` : ''}</td>
@@ -2098,8 +2104,9 @@
       async (v) => { await POST(`/${d.kind === 'charge' ? 'charges' : 'payments'}/${d.id}/void`, v); return `${d.kind === 'charge' ? 'Charge' : 'Payment'} voided.`; }),
     room: (d) => {
       if (d.res) { location.hash = `#res/${d.res}`; return; }
-      const hkBtns = CAN['housekeeping.update'] ? ['clean', 'dirty', 'out_of_order'].filter((h) => h !== d.hk).map((h) => `<button class="btn btn-ghost" data-action="hk" data-id="${d.id}" data-hk="${h}">Mark ${HK[h].toLowerCase()}</button>`).join('') : '';
-      modal(`Room ${d.number}`, `<p>Status: <b>${HK[d.hk]}</b>. Vacant.</p><div class="row">${hkBtns || '<span class="muted">No actions available.</span>'}</div>`);
+      const hkBtns = CAN['housekeeping.update'] ? ['clean', 'dirty'].filter((h) => h !== d.hk).map((h) => `<button class="btn btn-ghost" data-action="hk" data-id="${d.id}" data-hk="${h}">${d.hk === 'out_of_order' ? 'Fixed: mark' : 'Mark'} ${HK[h].toLowerCase()}</button>`).join('') : '';
+      const blk = canBlock() && d.hk !== 'out_of_order' ? `<button class="btn btn-bad" data-action="room-block" data-id="${d.id}">Block room…</button>` : '';
+      modal(`Room ${d.number}`, `<p>Status: <b>${HK[d.hk]}</b>. Vacant.</p><div class="row">${hkBtns}${blk}${hkBtns || blk ? '' : '<span class="muted">No actions available.</span>'}</div>${d.hk === 'out_of_order' ? '<p class="small muted mt">Marking it clean or dirty ends today\'s block and puts the room back on sale. Details are in Maintenance › Room blocks.</p>' : ''}`);
     },
     hk: async (d) => { await PATCH(`/rooms/${d.id}/housekeeping`, { hk_status: d.hk }); closeModal(); toast('Room updated.'); render(); },
     'run-audit': async () => {
@@ -2897,6 +2904,117 @@
     },
   });
 
+  /* ---------- Phase 16: room blocks and the housekeeping board ---------- */
+  const BLK_CAT = { plumbing: 'Plumbing', electrical: 'Electrical', air_conditioning: 'Air conditioning', furniture: 'Furniture', appliance: 'Appliance / TV / fridge', structure: 'Walls, doors, windows', painting: 'Painting', pest_control: 'Pest control', deep_clean: 'Deep clean', renovation: 'Renovation', other: 'Other' };
+  const BLK_KIND = { out_of_order: ['Out of order', 'bad'], out_of_service: ['Out of service', 'warn'] };
+  const HKT_KIND = { departure: ['Departure', 'bad'], stayover: ['Stayover', 'info'], vacant_dirty: ['Vacant dirty', 'warn'], touch_up: ['Touch-up', ''] };
+  const HKT_ST = { pending: ['To do', ''], in_progress: ['Cleaning', 'info'], done: ['Done', 'ok'], inspected: ['Inspected', 'ok'], skipped: ['Not done', 'warn'] };
+  const SKIP_L = { dnd: 'Do not disturb', declined: 'Guest declined service', no_access: 'Could not get in', later: 'Guest asked for later' };
+  const canBlock = () => CAN['housekeeping.update'] || CAN['maintenance.work'];
+  const blockUntil = (b) => (b.date_to ? `back ${fdate(b.date_to)}` : 'until fixed');
+
+  async function blockForm(pre = {}) {
+    const rooms = ui.woRooms || await GET('/rooms');
+    modal('Block a room', `<form class="form" data-form="block-form">
+      <div class="two"><label>Room *<select name="room_id" required>${opts([['', 'Choose…'], ...rooms.filter((r) => r.active !== false).map((r) => [r.id, `Room ${r.number}${r.type_name ? ` · ${r.type_name}` : ''}`])], pre.room_id || '')}</select></label>
+        <label>Type of block<select name="kind">${opts([['out_of_order', 'Out of order: off sale'], ['out_of_service', 'Out of service: still sold, small issue']], 'out_of_order')}</select></label></div>
+      <div class="two"><label>What is wrong? *<input name="reason" required maxlength="300" placeholder="e.g. Toilet cistern cracked, ceiling stain"></label><label>Category<select name="category">${opts(Object.entries(BLK_CAT), pre.category || 'other')}</select></label></div>
+      <div class="three"><label>From *<input type="date" name="date_from" value="${SETTINGS.business_date}" min="${SETTINGS.business_date}" required></label><label>Back on sale<input type="date" name="date_to" min="${addDays(SETTINGS.business_date, 1)}"></label><label>Repair priority<select name="priority">${opts([['high', 'High'], ['urgent', 'Urgent'], ['normal', 'Normal'], ['low', 'Low']], 'high')}</select></label></div>
+      <p class="small muted">Leave “back on sale” empty to keep the room off sale until the repair is marked done. Out-of-order nights come off the website and the channels at once.</p>
+      <label class="row"><input type="checkbox" name="create_work_order" value="1" checked> Send a repair job to maintenance</label>
+      <label>Details for maintenance<textarea name="details" rows="2" maxlength="1000"></textarea></label>
+      <div class="actions">${cancelBtn}<button class="btn btn-bad">Block room</button></div></form>`,
+    async (v) => {
+      const body = { ...v, room_id: Number(v.room_id), date_to: v.date_to || null, create_work_order: !!v.create_work_order };
+      try { await POST('/room-blocks', body); }
+      catch (e) {
+        if (!e.details?.overbooked_nights || !confirm(`${e.message}\n\nBlock it anyway? The bookings will show as overbooked.`)) throw e;
+        await POST('/room-blocks', { ...body, force: true });
+      }
+      return 'Room blocked.';
+    });
+  }
+  const blocksTable = (list, scope) => table(['Room', 'Problem', 'Block', 'Dates', 'Repair job', 'By', ''], list.map((b) => `<tr><td><code>${esc(b.room)}</code><br><span class="small muted">${esc(b.room_type)}</span></td>
+      <td>${esc(b.reason)}<br><span class="small muted">${esc(BLK_CAT[b.category] || b.category)}</span></td><td>${pill(...BLK_KIND[b.kind])}</td>
+      <td class="nowrap">${fdate(b.date_from)} → ${b.date_to ? fdate(b.date_to) : '<b>until fixed</b>'}${b.released_at ? `<br><span class="small muted">released ${ftime(b.released_at)}${b.release_notes ? ` · ${esc(b.release_notes)}` : ''}</span>` : ''}</td>
+      <td>${b.work_order_code ? `${esc(b.work_order_code)} ${pill(...WO_ST[b.work_order_status])}${b.assigned_to ? `<br><span class="small muted">${esc(b.assigned_to)}</span>` : ''}` : '–'}</td><td class="small">${esc(b.created_by_name || '')}<br>${ftime(b.created_at)}</td>
+      <td class="right nowrap">${scope !== 'past' && canBlock() ? `<button class="btn btn-sm btn-ghost" data-action="blk-extend" data-id="${b.id}" data-to="${b.date_to || ''}">Change end</button> <button class="btn btn-sm" data-action="blk-release" data-id="${b.id}" data-room="${esc(b.room)}" data-future="${b.date_from > SETTINGS.business_date ? 1 : ''}">${b.date_from > SETTINGS.business_date ? 'Cancel' : 'Room fixed'}</button>` : ''}</td></tr>`), scope === 'current' ? 'No rooms are blocked today.' : scope === 'upcoming' ? 'Nothing planned.' : 'No past blocks.');
+  async function blocksTab() {
+    const [cur, up, past] = await Promise.all(['current', 'upcoming', 'past'].map((s) => GET(`/room-blocks?scope=${s}`)));
+    const ooo = cur.blocks.filter((b) => b.kind === 'out_of_order').length;
+    return `<div class="grid g3"><div class="card kpi"><span>Off sale today</span><b>${ooo}</b><small>rooms out of order</small></div><div class="card kpi"><span>Out of service</span><b>${cur.blocks.length - ooo}</b><small>sold, with a known issue</small></div><div class="card kpi"><span>Planned</span><b>${up.blocks.length}</b><small>blocks starting later</small></div></div>
+      <div class="card mt"><div class="row between"><h2 class="sec m0">Blocked now</h2>${canBlock() ? '<button class="btn btn-sm btn-bad" data-action="blk-new">+ Block a room</button>' : ''}</div>${blocksTable(cur.blocks, 'current')}</div>
+      <div class="card mt"><h2 class="sec">Planned (renovation, painting, deep cleans)</h2>${blocksTable(up.blocks, 'upcoming')}</div>
+      <div class="card mt"><h2 class="sec">History</h2>${blocksTable(past.blocks.slice(0, 50), 'past')}</div>`;
+  }
+
+  /* housekeeping board: supervisors see everyone, attendants see their own rooms as big phone cards */
+  const hkCard = (t, sup) => `<article class="hk-card st-${t.status} ${t.priority === 'high' ? 'hi' : ''}">
+      <header><b class="hk-no">${esc(t.number)}</b>${pill(...HKT_KIND[t.kind])}${t.priority === 'high' ? pill('Arrival today', 'bad') : ''}<span class="hk-st">${pill(...HKT_ST[t.status])}</span></header>
+      <p class="small">${esc(t.room_type)}${t.floor ? ` · floor ${esc(t.floor)}` : ''}${t.guest ? ` · <b>${esc(t.guest)}</b>${t.vip ? ' ' + pill('VIP', 'warn') : ''}${t.departure ? `, leaves ${fdate(t.departure)}` : ''}` : ''}${t.arriving ? `<br>Next: <b>${esc(t.arriving)}</b> arrives today` : ''}</p>
+      ${t.allergies ? `<p class="note err small">Allergy: ${esc(t.allergies)}</p>` : ''}${(t.room_prefs || []).length ? `<p class="small muted">Likes: ${t.room_prefs.map((k) => PREF_L[k] || k).join(', ')}</p>` : ''}
+      ${t.skip_reason ? `<p class="small">${pill(SKIP_L[t.skip_reason] || t.skip_reason, 'warn')}</p>` : ''}${t.notes ? `<p class="small"><b>Note:</b> ${esc(t.notes)}</p>` : ''}
+      ${sup ? `<p class="small muted">${t.assigned_name ? esc(t.assigned_name) : '<b class="err">Not assigned</b>'}${t.done_at ? ` · done ${new Date(t.done_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : ''}${t.inspected_by_name ? ` · inspected by ${esc(t.inspected_by_name)}` : ''}</p>` : ''}
+      <footer>${['pending', 'skipped'].includes(t.status) ? `<button class="btn btn-gold" data-action="hk-act" data-id="${t.id}" data-a="start">Start</button>` : ''}
+        ${['pending', 'in_progress', 'skipped'].includes(t.status) ? `<button class="btn btn-ok" data-action="hk-act" data-id="${t.id}" data-a="done">Done</button>` : ''}
+        ${['pending', 'in_progress'].includes(t.status) ? `<button class="btn btn-ghost" data-action="hk-skip" data-id="${t.id}">Not now</button>` : ''}
+        ${sup && t.status === 'done' ? `<button class="btn btn-ok" data-action="hk-act" data-id="${t.id}" data-a="inspect">Passed</button>` : ''}
+        ${sup && ['done', 'inspected'].includes(t.status) ? `<button class="btn btn-ghost" data-action="hk-redo" data-id="${t.id}" data-n="${esc(t.number)}">Redo</button>` : ''}
+        <button class="btn btn-ghost" data-action="hk-fault" data-room="${t.room_id}" data-n="${esc(t.number)}">Report fault</button>
+        ${sup && !['done', 'inspected'].includes(t.status) ? `<select class="hk-assign" data-task="${t.id}" aria-label="Assign room ${esc(t.number)}">${opts([['', 'Unassigned'], ...(ui.hk?.attendants || []).map((p) => [p.id, p.name])], t.assigned_to || '')}</select>` : ''}</footer></article>`;
+  VIEWS.housekeeping = async () => {
+    const view = cur('hk', 'board');
+    const d = await GET(`/housekeeping/board${view === 'mine' ? '?mine=1' : ''}`); ui.hk = d;
+    const sup = d.supervisor && view !== 'mine';
+    const tt = d.totals, pct = tt.total ? Math.round(((tt.done + tt.inspected) / tt.total) * 100) : 0;
+    const head = `<div class="page-head"><div><h1 class="page">${sup ? 'Housekeeping' : 'My rooms'}</h1><p class="sub">${fdateLong(d.business_date)} · ${tt.done + tt.inspected} of ${tt.total} rooms finished${tt.skipped ? `, ${tt.skipped} not done` : ''}</p></div>
+      <div class="row">${d.supervisor ? `<button class="btn btn-ghost" data-action="hk-generate">Refresh room list</button><button class="btn btn-gold" data-action="hk-assign-all">Share out rooms${tt.unassigned ? ` (${tt.unassigned})` : ''}</button>` : ''}<button class="btn btn-ghost" data-action="hk-fault">Report fault</button></div></div>
+      <div class="hk-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Rooms finished"><span class="w-${Math.round(pct / 5) * 5}"></span></div>
+      ${d.supervisor ? tabs('hk', [['board', 'Everyone'], ['mine', 'My rooms']], 'board') : ''}`;
+    if (!d.tasks.length) return head + `<div class="card"><p class="muted">${d.supervisor ? 'No rooms on the list yet. Press “Refresh room list” to build today\'s list from departures, stayovers and dirty rooms.' : 'No rooms for you yet. Your supervisor shares out the rooms each morning.'}</p></div>`;
+    const people = sup ? `<div class="card mt"><h2 class="sec">Attendants</h2>${table(['Name', '#Rooms', '#Finished', '#Workload', ''], d.attendants.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${p.total}</td><td class="num">${p.finished}</td><td class="num">${p.credits}</td><td><div class="hk-mini"><span class="w-${p.total ? Math.round((p.finished / p.total) * 20) * 5 : 0}"></span></div></td></tr>`), 'No staff with the Housekeeping role yet: add them under Users.')}<p class="small muted">Workload: a departure counts 2, a stayover or vacant dirty room 1.</p></div>` : '';
+    return head + `<div class="hk-grid">${d.tasks.map((t) => hkCard(t, sup)).join('')}</div>` + people;
+  };
+
+  Object.assign(OPS_A, {
+    'blk-new': () => blockForm(),
+    'blk-release': async (d) => {
+      const fut = d.future === '1';
+      modal(fut ? `Cancel block on room ${d.room}` : `Room ${d.room} is fixed`, `<form class="form" data-form="ops-modal"><p>${fut ? 'The room stays on sale for those dates.' : 'The room goes back on sale now and to housekeeping for cleaning.'}</p><label>Note<input name="notes" maxlength="500" placeholder="${fut ? 'Why it was cancelled' : 'What was done'}"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">${fut ? 'Cancel block' : 'Back in service'}</button></div></form>`,
+        async (v) => { await POST(`/room-blocks/${d.id}/release`, v); return fut ? 'Block cancelled.' : `Room ${esc(d.room)} back in service.`; });
+    },
+    'blk-extend': (d) => modal('Change when the room is back', `<form class="form" data-form="ops-modal"><label>Back on sale<input type="date" name="date_to" value="${esc(d.to)}" min="${addDays(SETTINGS.business_date, 1)}"></label><p class="small muted">Empty = until the repair is done.</p><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await PUT(`/room-blocks/${d.id}`, { date_to: v.date_to || null }); return 'Block changed.'; }),
+    'room-block': (d) => { closeModal(); blockForm({ room_id: d.id }); },
+    'hk-generate': async () => { const r = await POST('/housekeeping/generate'); toast(`${r.added} room${r.added === 1 ? '' : 's'} added${r.updated ? `, ${r.updated} updated` : ''}${r.removed ? `, ${r.removed} no longer needed` : ''}.`); render(); },
+    'hk-assign-all': async () => { const r = await POST('/housekeeping/assign'); toast(`${r.assigned} room${r.assigned === 1 ? '' : 's'} shared out.`); render(); },
+    'hk-act': async (d) => { await POST(`/housekeeping/tasks/${d.id}/${d.a}`); toast({ start: 'Started.', done: 'Room clean.', inspect: 'Room passed.' }[d.a]); render(); },
+    'hk-skip': (d) => modal('Room not done', `<form class="form" data-form="ops-modal"><label>Why?<select name="reason">${opts(Object.entries(SKIP_L), 'dnd')}</select></label><label>Note<input name="notes" maxlength="300"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await POST(`/housekeeping/tasks/${d.id}/skip`, v); return 'Noted.'; }),
+    'hk-redo': (d) => modal(`Send room ${d.n} back`, `<form class="form" data-form="ops-modal"><label>What needs doing again? *<input name="notes" required maxlength="300" placeholder="e.g. Bathroom mirror smeared, bin not emptied"></label><div class="actions">${cancelBtn}<button class="btn btn-bad">Send back</button></div></form>`,
+      async (v) => { await POST(`/housekeeping/tasks/${d.id}/redo`, v); return `Room ${esc(d.n)} sent back.`; }),
+    'wo-report': (d) => A['hk-fault'](d || {}),
+    'hk-fault': async (d) => {
+      ui.woRooms = ui.woRooms || await GET('/rooms');
+      modal(d.n ? `Fault in room ${d.n}` : 'Report a fault', `<form class="form" data-form="ops-modal"><label>Room<select name="room_id">${opts([['', 'Not a guest room'], ...ui.woRooms.map((r) => [r.id, `Room ${r.number}`])], d.room || '')}</select></label>
+        <div class="two"><label>What is wrong? *<input name="title" required maxlength="150" placeholder="e.g. AC not cooling"></label><label>Category<select name="category">${opts(Object.entries(BLK_CAT), 'other')}</select></label></div>
+        <label>Details<textarea name="description" rows="2" maxlength="1000"></textarea></label><label>Priority<select name="priority">${opts([['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent'], ['low', 'Low']], 'high')}</select></label>
+        <label class="row"><input type="checkbox" name="room_out_of_order" value="1"> The room cannot be sold until this is fixed (take it off sale)</label>
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Report</button></div></form>`,
+      async (v) => {
+        const body = { ...v, room_id: v.room_id ? Number(v.room_id) : null, room_out_of_order: !!v.room_out_of_order };
+        let w;
+        try { w = await POST('/ops/work-orders', body); }
+        catch (e) { if (!e.details?.overbooked_nights || !confirm(`${e.message}\n\nTake it off sale anyway?`)) throw e; w = await POST('/ops/work-orders', { ...body, force: true }); }
+        return `Reported as ${esc(w.code)}${body.room_out_of_order ? '; the room is off sale' : ''}.`;
+      });
+    },
+  });
+  document.addEventListener('change', async (e) => {
+    if (!e.target.matches('select.hk-assign')) return;
+    try { await PUT(`/housekeeping/tasks/${e.target.dataset.task}/assign`, { user_id: e.target.value ? Number(e.target.value) : null }); toast('Reassigned.'); render(); } catch (err) { toast(esc(err.message), true); }
+  });
+
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
@@ -2944,6 +3062,7 @@
       const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings; MFA = me.mfa || {};
       CAN = (await GET('/meta')).can;
       if (MFA.setup_needed) { await renderForcedSetup(); return; }
+      if (ME.role === 'housekeeping' && !location.hash) history.replaceState(null, '', '#housekeeping');
       shell(); await render();
       clearInterval(ui.badgeTimer); if (CAN['messages.use']) ui.badgeTimer = setInterval(() => { if (ME && route().r !== 'inbox') updateWaBadge(); }, 30000);
     } catch (e) { if (e.message !== 'Signed out') renderLogin(); }

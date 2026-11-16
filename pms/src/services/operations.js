@@ -1,7 +1,8 @@
 // Phase 7: amenity sales, events & banqueting, assets & maintenance.
 import { HttpError, audit } from '../auth.js';
+import { createBlock, releaseBlock } from './blocks.js';
 import { postJournal, saleLines, vatPortion, REVENUE } from '../ledger.js';
-import { getSettings, insertCharge, setHousekeeping } from './frontoffice.js';
+import { getSettings, insertCharge } from './frontoffice.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -330,7 +331,6 @@ export async function reportIssue(db, user, b) {
   if (roomId) { const { rows } = await db.query('SELECT 1 FROM rooms WHERE id=$1', [roomId]); if (!rows[0]) throw new HttpError(400, 'Unknown room.'); }
   if (assetId) { const { rows } = await db.query("SELECT 1 FROM assets WHERE id=$1 AND status <> 'disposed'", [assetId]); if (!rows[0]) throw new HttpError(400, 'Unknown asset.'); }
   const ooo = !!b.room_out_of_order && !!roomId;
-  if (ooo) await setHousekeeping(db, user, roomId, 'out_of_order'); // refuses if the room is occupied
   const { rows: [w] } = await db.query(
     `INSERT INTO work_orders (title, description, kind, priority, asset_id, room_id, location, room_out_of_order, assigned_to, due_date, reported_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
@@ -338,6 +338,8 @@ export async function reportIssue(db, user, b) {
       pr, assetId, roomId, text(b.location, 'Location', { max: 80 }), ooo, text(b.assigned_to, 'Assigned to', { max: 80 }),
       isDate(b.due_date) ? b.due_date : addDays(s.business_date, { urgent: 0, high: 1, normal: 3, low: 7 }[pr]), user.id]);
   if (assetId && pr !== 'low' && w.kind === 'repair') await db.query("UPDATE assets SET status='under_repair' WHERE id=$1 AND status='in_use'", [assetId]);
+  // the room comes off sale from today (or the date given) until the job is done, or until the date given
+  if (ooo) await createBlock(db, user, { room_id: roomId, kind: 'out_of_order', date_from: b.block_from || undefined, date_to: b.block_until || null, category: b.category, reason: w.title, work_order_id: w.id, force: b.force });
   await audit(db, user, 'maintenance.report', 'work_order', w.id, { code: w.code, priority: pr, room_out_of_order: ooo });
   return w;
 }
@@ -352,10 +354,9 @@ export async function updateWorkOrder(db, user, id, b) {
     [w.id, status, text(b.assigned_to, 'Assigned to', { max: 80 }) ?? w.assigned_to, isDate(b.due_date) ? b.due_date : w.due_date, b.cost !== undefined ? money0(b.cost, 'Cost') : w.cost,
       text(b.completion_notes, 'Completion notes', { max: 1000 }), ['low', 'normal', 'high', 'urgent'].includes(b.priority) ? b.priority : w.priority, user.id]);
   if (['done', 'cancelled'].includes(status)) {
-    if (w.room_out_of_order) {
-      const { rows: [room] } = await db.query('SELECT hk_status FROM rooms WHERE id=$1', [w.room_id]);
-      if (room?.hk_status === 'out_of_order') await setHousekeeping(db, user, w.room_id, 'dirty'); // back to housekeeping for cleaning
-    }
+    // the room's block ends with the job: it goes back to housekeeping for cleaning
+    const { rows: blocks } = await db.query('SELECT id FROM room_blocks WHERE work_order_id=$1 AND released_at IS NULL', [w.id]);
+    for (const x of blocks) await releaseBlock(db, user, x.id, `${w.code} ${status === 'done' ? 'done' : 'cancelled'}`);
     if (w.asset_id) {
       const { rows: [open] } = await db.query("SELECT 1 FROM work_orders WHERE asset_id=$1 AND id<>$2 AND status IN ('open','in_progress','on_hold') AND kind='repair'", [w.asset_id, w.id]);
       if (!open) await db.query("UPDATE assets SET status='in_use' WHERE id=$1 AND status='under_repair'", [w.asset_id]);

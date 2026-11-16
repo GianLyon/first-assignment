@@ -280,7 +280,7 @@ async function sampleWhatsApp(db) {
 const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox', 'amenity_bookings', 'assets', 'attendance', 'bank_reconciliations', 'bill_grns', 'bill_lines',
   'campaigns', 'channel_log', 'companies', 'depreciation_runs', 'email_outbox', 'employees', 'event_extras', 'event_payments', 'events', 'expenses', 'folio_charges', 'goods_received',
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
-  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions',
+  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
   'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
 

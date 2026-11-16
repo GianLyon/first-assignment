@@ -624,3 +624,48 @@ td a:hover { text-decoration: underline; }
 .chip input:checked + span { background: var(--accent-l); border-color: var(--accent); color: var(--accent-d); }
 .chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 .modal:has(form[data-form=guest-form]), .modal:has(form[data-form=rt-form]), .modal:has(form[data-form=plan-form]) { width: min(1000px, 100%); }
+
+/* ---------- housekeeping board ---------- */
+.w-0 { width: 0%; }
+.w-5 { width: 5%; }
+.w-10 { width: 10%; }
+.w-15 { width: 15%; }
+.w-20 { width: 20%; }
+.w-25 { width: 25%; }
+.w-30 { width: 30%; }
+.w-35 { width: 35%; }
+.w-40 { width: 40%; }
+.w-45 { width: 45%; }
+.w-50 { width: 50%; }
+.w-55 { width: 55%; }
+.w-60 { width: 60%; }
+.w-65 { width: 65%; }
+.w-70 { width: 70%; }
+.w-75 { width: 75%; }
+.w-80 { width: 80%; }
+.w-85 { width: 85%; }
+.w-90 { width: 90%; }
+.w-95 { width: 95%; }
+.w-100 { width: 100%; }
+.hk-progress, .hk-mini { height: 6px; background: var(--line-2); border-radius: 3px; overflow: hidden; margin: -4px 0 12px; }
+.hk-mini { margin: 0; width: 120px; }
+.hk-progress span, .hk-mini span { display: block; height: 100%; background: var(--ok); }
+.hk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.hk-card { background: #fff; border: 1px solid var(--line); border-left: 4px solid #aab5c2; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.hk-card.hi { border-left-color: var(--bad); }
+.hk-card.st-in_progress { border-left-color: var(--accent); background: #f7faff; }
+.hk-card.st-done, .hk-card.st-inspected { border-left-color: var(--ok); opacity: .82; }
+.hk-card.st-skipped { border-left-color: var(--warn); }
+.hk-card header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hk-no { font-family: var(--mono); font-size: 1.35rem; margin-right: 4px; }
+.hk-st { margin-left: auto; }
+.hk-card p { margin: 0; }
+.hk-card footer { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.hk-card footer .btn { padding: 8px 14px; font-size: .86rem; }
+.hk-card footer select { min-height: 34px; border: 1px solid #cdd5de; border-radius: 4px; padding: 4px 6px; font-size: .82rem; }
+.room small.oos { color: var(--warn); font-weight: 600; }
+.room.occ small.oos { color: #ffd38a; }
+@media (max-width: 520px) { .hk-grid { grid-template-columns: 1fr; } .hk-card footer .btn { flex: 1; justify-content: center; padding: 11px 10px; font-size: .95rem; } .hk-no { font-size: 1.6rem; } }
+
+/* phones: one column (the sidebar slides in from the menu button) */
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .side { width: 250px; } .top-actions { flex-wrap: wrap; } .topbar .user { display: none; } }

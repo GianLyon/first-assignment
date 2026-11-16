@@ -26,12 +26,12 @@ export async function getSettings(db, { lock = false } = {}) {
 /** Rooms of a type still free on every night from `from` up to (not including) `to`. */
 export async function availableCount(db, roomTypeId, from, to, excludeReservationId = null) {
   const { rows: [r] } = await db.query(
-    `WITH nights AS (SELECT d::date AS night FROM generate_series($2::date, $3::date - 1, interval '1 day') d),
-          cap AS (SELECT count(*)::int AS n FROM rooms WHERE room_type_id = $1 AND active AND hk_status <> 'out_of_order')
-     SELECT COALESCE(MIN(cap.n - (SELECT count(*) FROM reservations r WHERE r.room_type_id = $1
+    `WITH nights AS (SELECT d::date AS night FROM generate_series($2::date, $3::date - 1, interval '1 day') d)
+     SELECT COALESCE(MIN((SELECT count(*) FROM rooms rm WHERE rm.room_type_id = $1 AND rm.active AND NOT EXISTS (SELECT 1 FROM room_blocks b WHERE b.room_id=rm.id AND b.kind='out_of_order' AND b.date_from <= nights.night AND (b.date_to IS NULL OR b.date_to > nights.night)))
+              - (SELECT count(*) FROM reservations r WHERE r.room_type_id = $1
               AND r.status IN ('reserved','in_house') AND r.arrival <= nights.night AND r.departure > nights.night
               AND ($4::int IS NULL OR r.id <> $4))), 0)::int AS free
-     FROM nights, cap`, [roomTypeId, from, to, excludeReservationId]);
+     FROM nights`, [roomTypeId, from, to, excludeReservationId]);
   return r.free;
 }
 
@@ -39,7 +39,7 @@ export async function availabilityGrid(db, from, days) {
   const { rows } = await db.query(
     `WITH nights AS (SELECT d::date AS night FROM generate_series($1::date, $1::date + ($2::int - 1), interval '1 day') d)
      SELECT rt.id, rt.code, rt.name, rt.base_rate, to_char(n.night, 'YYYY-MM-DD') AS night,
-       (SELECT count(*) FROM rooms WHERE room_type_id = rt.id AND active AND hk_status <> 'out_of_order')
+       (SELECT count(*) FROM rooms rm WHERE rm.room_type_id = rt.id AND rm.active AND NOT EXISTS (SELECT 1 FROM room_blocks b WHERE b.room_id=rm.id AND b.kind='out_of_order' AND b.date_from <= n.night AND (b.date_to IS NULL OR b.date_to > n.night)))
        - (SELECT count(*) FROM reservations r WHERE r.room_type_id = rt.id AND r.status IN ('reserved','in_house')
           AND r.arrival <= n.night AND r.departure > n.night) AS free
      FROM room_types rt CROSS JOIN nights n WHERE rt.active ORDER BY rt.id, n.night`, [from, days]);
@@ -516,6 +516,9 @@ export async function runNightAudit(db, user) {
   await db.query(`UPDATE rooms SET hk_status='dirty' WHERE hk_status='clean' AND id IN (SELECT room_id FROM reservations WHERE status='in_house')`);
   await db.query('INSERT INTO night_audits (business_date, run_by, room_charges_posted, room_revenue, no_shows) VALUES ($1,$2,$3,$4,$5)', [date, user.id, stays.length, revenue, noShows]);
   const { rows: [n] } = await db.query("UPDATE settings SET business_date = business_date + 1 WHERE id = 1 RETURNING to_char(business_date, 'YYYY-MM-DD') AS d");
+  // room blocks starting or ending on the new date (loaded here to avoid a circular import)
+  await (await import('./blocks.js')).activateBlocks(db);
+  await (await import('./housekeeping.js')).generateTasks(db);
   await audit(db, user, 'night_audit.run', 'night_audit', date, { room_charges: stays.length, room_revenue: revenue, no_shows: noShows });
   return { closed_date: date, new_business_date: n.d, room_charges_posted: stays.length, room_revenue: revenue, no_shows: noShows };
 }

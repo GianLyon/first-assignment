@@ -26,7 +26,7 @@ export async function verifyPassword(password, stored) {
 /* ---------- roles & permissions ---------- */
 export const PERMISSIONS = {
   admin: ['*'],
-  manager: ['guests.manage', 'marketing.manage', 'messages.use', 'messages.manage', 'assistant.use', 'reports.schedule', 'group.view', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
+  manager: ['guests.manage', 'marketing.manage', 'messages.use', 'messages.manage', 'assistant.use', 'housekeeping.supervise', 'reports.schedule', 'group.view', 'reservations.view', 'reservations.manage', 'frontdesk.checkin', 'frontdesk.checkout', 'folio.post', 'folio.void', 'payments.post',
     'housekeeping.update', 'audit.run', 'accounts.view', 'reports.view', 'settings.manage', 'auditlog.view', 'pos.use', 'pos.void', 'pos.manage', 'pos.kitchen',
     'inventory.view', 'inventory.manage', 'inventory.receive', 'purchase.approve', 'requisition.create', 'requisition.approve', 'requisition.issue', 'stock.count', 'distribution.manage', 'finance.view', 'hr.view', 'hr.manage', 'hr.approve', 'roster.manage', 'attendance.record', 'staff.self',
     'amenities.sell', 'amenities.manage', 'events.view', 'events.manage', 'assets.manage', 'maintenance.report', 'maintenance.work'],

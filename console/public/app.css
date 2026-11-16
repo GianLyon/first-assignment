@@ -443,3 +443,6 @@ td a:hover { text-decoration: underline; }
   .topbar { height: auto; padding: 8px 12px; }
 }
 @media print { .gsearch { display: none; } }
+
+/* phones: one column (the sidebar slides in from the menu button) */
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .side { width: 250px; } .top-actions { flex-wrap: wrap; } .topbar .user { display: none; } }

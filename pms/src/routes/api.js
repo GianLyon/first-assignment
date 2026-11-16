@@ -14,6 +14,8 @@ import {
 import * as fo from '../services/frontoffice.js';
 import * as booking from '../services/booking.js';
 import * as L from '../lists.js';
+import * as blocks from '../services/blocks.js';
+import * as hk from '../services/housekeeping.js';
 import { PAYMENT_METHODS, DEPARTMENTS } from '../ledger.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -244,16 +246,42 @@ export function apiRouter(pool) {
     await audit(db, req.user, 'room.update', 'room', room.id, { number: room.number });
     return room;
   }));
-  r.patch('/rooms/:id/housekeeping', requirePerm('housekeeping.update'), inTx(async (db, req) => { await fo.setHousekeeping(db, req.user, id(req), req.body?.hk_status); return { ok: true }; }));
+  // out of order goes through a block (from today until fixed); leaving out of order releases today's block
+  r.patch('/rooms/:id/housekeeping', requirePerm('housekeeping.update'), inTx(async (db, req) => {
+    const st = req.body?.hk_status;
+    if (st === 'out_of_order') { await blocks.createBlock(db, req.user, { room_id: id(req), reason: req.body?.reason || 'Marked out of order', category: req.body?.category, force: req.body?.force }); return { ok: true }; }
+    const { rows: open } = await db.query("SELECT b.id FROM room_blocks b JOIN settings s ON s.id=1 WHERE b.room_id=$1 AND b.released_at IS NULL AND b.kind='out_of_order' AND b.date_from <= s.business_date", [id(req)]);
+    for (const b of open) await blocks.releaseBlock(db, req.user, b.id, 'Marked ' + st + ' on the room board');
+    await fo.setHousekeeping(db, req.user, id(req), st);
+    return { ok: true };
+  }));
+  /* housekeeping board */
+  const sup = requirePerm('housekeeping.supervise');
+  r.get('/housekeeping/board', requirePerm('housekeeping.update'), async (req, res) => {
+    const all = can(req.user, 'housekeeping.supervise') && req.query.mine !== '1';
+    res.json({ ...(await hk.board(pool, { userId: all ? null : req.user.id })), supervisor: can(req.user, 'housekeeping.supervise') });
+  });
+  r.post('/housekeeping/generate', sup, inTx((db, req) => hk.generateTasks(db, req.user)));
+  r.post('/housekeeping/assign', sup, inTx((db, req) => hk.autoAssign(db, req.user, req.body?.attendant_ids)));
+  r.put('/housekeeping/tasks/:id/assign', sup, inTx((db, req) => hk.assignTask(db, req.user, id(req), req.body?.user_id)));
+  r.post('/housekeeping/tasks/:id/:action', requirePerm('housekeeping.update'), inTx((db, req) => hk.act(db, req.user, id(req), req.params.action, req.body || {})));
+  const canBlock = (req, _res, next) => { if (!['housekeeping.update', 'maintenance.work'].some((p) => can(req.user, p))) throw new HttpError(403, 'You do not have permission to do this.'); next(); };
+  r.get('/room-blocks', requirePerm('reservations.view'), async (req, res) => res.json(await blocks.listBlocks(pool, { scope: req.query.scope })));
+  r.post('/room-blocks', canBlock, inTx((db, req) => blocks.createBlock(db, req.user, req.body || {})));
+  r.post('/room-blocks/:id/release', canBlock, inTx((db, req) => blocks.releaseBlock(db, req.user, id(req), req.body?.notes)));
+  r.put('/room-blocks/:id', canBlock, inTx((db, req) => blocks.extendBlock(db, req.user, id(req), req.body?.date_to)));
 
   r.get('/room-board', requirePerm('reservations.view'), async (_req, res) => {
     const s = await fo.getSettings(pool);
     const { rows } = await pool.query(
       `SELECT rm.id, rm.number, rm.floor, rm.hk_status, rm.active, t.code AS type_code, t.name AS type_name,
-              r.id AS reservation_id, r.code, r.departure, g.first_name, g.last_name
+              r.id AS reservation_id, r.code, r.departure, g.first_name, g.last_name,
+              (SELECT row_to_json(x) FROM (SELECT b.id, b.kind, b.reason, b.category, to_char(b.date_to,'YYYY-MM-DD') AS date_to FROM room_blocks b
+                 WHERE b.room_id=rm.id AND b.released_at IS NULL AND b.date_from <= $1 AND (b.date_to IS NULL OR b.date_to > $1) ORDER BY b.kind LIMIT 1) x) AS block,
+              (SELECT to_char(min(b.date_from),'YYYY-MM-DD') FROM room_blocks b WHERE b.room_id=rm.id AND b.released_at IS NULL AND b.date_from > $1) AS next_block
        FROM rooms rm JOIN room_types t ON t.id = rm.room_type_id
        LEFT JOIN reservations r ON r.room_id = rm.id AND r.status = 'in_house' LEFT JOIN guests g ON g.id = r.guest_id
-       WHERE rm.active ORDER BY rm.floor NULLS LAST, rm.number`);
+       WHERE rm.active ORDER BY rm.floor NULLS LAST, rm.number`, [s.business_date]);
     res.json({ business_date: s.business_date, rooms: rows });
   });
 
