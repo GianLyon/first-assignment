@@ -5,6 +5,8 @@ import { tx } from '../db.js';
 import { getSettings, availableCount, availabilityGrid, createReservation, cancelReservation } from './frontoffice.js';
 import { enqueueAri } from './ari.js';
 import { adapters } from '../channels/index.js';
+import { pullBookings } from '../channels/channex.js';
+import { MEAL_PLANS } from '../lists.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (d) => typeof d === 'string' && DATE_RE.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
@@ -59,16 +61,18 @@ export async function quote(db, { arrival, departure, adults = 1 }) {
       room_type: { id: t.id, code: t.code, name: t.name, max_occupancy: t.max_occupancy }, available, fits,
       plans: plans.map((p) => {
         const pr = priceStay(grid.get(t.id) || [], p);
+        const rule = planRule(p, arrival, departure, s.business_date);
+        if (pr.bookable && rule) Object.assign(pr, { bookable: false, reason: rule + '.' });
         if (pr.bookable && available < 1) Object.assign(pr, { bookable: false, reason: 'Sold out.' });
         if (pr.bookable && !fits) Object.assign(pr, { bookable: false, reason: `Up to ${t.max_occupancy} guests.` });
-        return { id: p.id, code: p.code, name: p.name, description: p.description, breakfast: p.breakfast, refundable: p.refundable, ...pr };
+        return { id: p.id, code: p.code, name: p.name, description: p.description, breakfast: p.breakfast, refundable: p.refundable, meal_plan: p.meal_plan, cancel_days: p.cancel_days, deposit_pct: p.deposit_pct, ...pr };
       }),
     });
   }
   return { arrival, departure, nights: nightsBetween(arrival, departure), adults: guests, room_types: out };
 }
 
-async function saveNights(db, reservationId, nightly) {
+export async function saveNights(db, reservationId, nightly) {
   await db.query('DELETE FROM reservation_nights WHERE reservation_id=$1', [reservationId]);
   for (const n of nightly) await db.query('INSERT INTO reservation_nights (reservation_id, night, rate) VALUES ($1,$2,$3)', [reservationId, n.night, n.rate]);
 }
@@ -134,18 +138,45 @@ export async function savePlan(db, user, id, b) {
   const name = String(b.name || '').trim(); if (!name) throw new HttpError(400, 'Name is required.');
   const disc = Number(b.discount_pct || 0); if (!(disc >= 0 && disc < 100)) throw new HttpError(400, 'Discount must be between 0 and 99%.');
   const minStay = Math.max(1, Number(b.min_stay) || 1);
-  const vals = [name, String(b.description || '').trim() || null, disc, !!b.breakfast, b.refundable !== false, minStay, b.on_website !== false, b.on_channels !== false, b.active !== false, Number(b.sort) || 0];
+  const meal = b.meal_plan || (b.breakfast ? 'bb' : 'room_only');
+  if (!MEAL_PLANS.includes(meal)) throw new HttpError(400, 'Choose a meal plan.');
+  const optInt = (v, l, lo, hi) => { if (v === '' || v == null) return null; const n = Number(v); if (!Number.isInteger(n) || n < lo || n > hi) throw new HttpError(400, `${l} must be between ${lo} and ${hi}.`); return n; };
+  const cancelDays = b.refundable === false ? null : optInt(b.cancel_days ?? (b.refundable !== false ? 1 : null), 'Free cancellation days', 0, 365);
+  const deposit = optInt(b.deposit_pct, 'Deposit', 0, 100) ?? 0;
+  const maxStay = optInt(b.max_stay, 'Maximum stay', 1, 365);
+  if (maxStay && maxStay < minStay) throw new HttpError(400, 'Maximum stay must be at least the minimum stay.');
+  const advance = optInt(b.min_advance, 'Book-ahead days', 0, 365) ?? 0;
+  const from = b.valid_from || null, to = b.valid_to || null;
+  if ((from && !isDate(from)) || (to && !isDate(to))) throw new HttpError(400, 'Valid from / to must be dates.');
+  if (from && to && to < from) throw new HttpError(400, '“Valid to” is before “valid from”.');
+  const days = Array.isArray(b.arrival_days) ? [...new Set(b.arrival_days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [0, 1, 2, 3, 4, 5, 6];
+  if (!days.length) throw new HttpError(400, 'Allow arrival on at least one day of the week.');
+  const vals = [name, String(b.description || '').trim() || null, disc, meal !== 'room_only', cancelDays != null, minStay, b.on_website !== false, b.on_channels !== false, b.active !== false, Number(b.sort) || 0,
+    meal, cancelDays, deposit, from, to, days, maxStay, advance];
+  const cols = 'name, description, discount_pct, breakfast, refundable, min_stay, on_website, on_channels, active, sort, meal_plan, cancel_days, deposit_pct, valid_from, valid_to, arrival_days, max_stay, min_advance';
   let p;
   if (id) {
-    ({ rows: [p] } = await db.query('UPDATE rate_plans SET name=$2, description=$3, discount_pct=$4, breakfast=$5, refundable=$6, min_stay=$7, on_website=$8, on_channels=$9, active=$10, sort=$11 WHERE id=$1 RETURNING *', [id, ...vals]));
+    ({ rows: [p] } = await db.query(`UPDATE rate_plans SET (${cols}) = (${vals.map((_, i) => '$' + (i + 2)).join(',')}) WHERE id=$1 RETURNING *`, [id, ...vals]));
     if (!p) throw new HttpError(404, 'Rate plan not found.');
   } else {
     const code = String(b.code || '').trim().toUpperCase(); if (!/^[A-Z0-9_-]{2,20}$/.test(code)) throw new HttpError(400, 'Code: 2–20 letters, numbers, dashes or underscores.');
-    ({ rows: [p] } = await db.query('INSERT INTO rate_plans (code, name, description, discount_pct, breakfast, refundable, min_stay, on_website, on_channels, active, sort) VALUES ($11,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *', [...vals, code]));
+    ({ rows: [p] } = await db.query(`INSERT INTO rate_plans (code, ${cols}) VALUES ($1, ${vals.map((_, i) => '$' + (i + 2)).join(',')}) RETURNING *`, [code, ...vals]));
   }
   await enqueueAriFromNow(db, null, 'rate plan change');
   await audit(db, user, id ? 'distribution.plan_update' : 'distribution.plan_create', 'rate_plan', p.id, { code: p.code, discount_pct: p.discount_pct, active: p.active });
   return p;
+}
+/** Why a plan cannot be sold for these dates, or null. */
+export function planRule(plan, arrival, departure, businessDate) {
+  const nights = nightsBetween(arrival, departure);
+  const ymd = (d) => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
+  if (plan.valid_from && arrival < ymd(plan.valid_from)) return `Sold from ${ymd(plan.valid_from)}`;
+  if (plan.valid_to && arrival > ymd(plan.valid_to)) return `Sold until ${ymd(plan.valid_to)}`;
+  const dow = new Date(arrival + 'T00:00:00Z').getUTCDay();
+  if (Array.isArray(plan.arrival_days) && plan.arrival_days.length && !plan.arrival_days.includes(dow)) return 'Not for arrivals on this weekday';
+  if (plan.max_stay && nights > plan.max_stay) return `Maximum stay ${plan.max_stay} nights`;
+  if (plan.min_advance && nightsBetween(ymd(businessDate), arrival) < plan.min_advance) return `Book at least ${plan.min_advance} days ahead`;
+  return null;
 }
 async function enqueueAriFromNow(db, typeId, reason) {
   const s = await getSettings(db);
@@ -203,7 +234,7 @@ export async function buildAri(db, channel, roomTypeIds, from, toInclusive) {
   return items;
 }
 
-async function logChannel(db, channelId, direction, kind, status, summary, payload) {
+export async function logChannel(db, channelId, direction, kind, status, summary, payload) {
   await db.query('INSERT INTO channel_log (channel_id, direction, kind, status, summary, payload) VALUES ($1,$2,$3,$4,$5,$6)', [channelId, direction, kind, status, summary, payload ?? null]);
 }
 
@@ -341,3 +372,22 @@ export async function receiveInbound(pool, code, rawBody, signature) {
 }
 
 export const newSecret = () => crypto.randomBytes(24).toString('base64url');
+
+/** Fetch new OTA bookings from every active Channex channel (or one). Errors are kept on the channel, not thrown. */
+export async function pullChannex(pool, channelId = null) {
+  const { rows } = await pool.query("SELECT * FROM channels WHERE adapter='channex' AND active AND ($1::int IS NULL OR id=$1) ORDER BY id", [channelId]);
+  const out = [];
+  for (const c of rows) {
+    try {
+      const r = await pullBookings(pool, c, { handleInbound, logChannel });
+      if (!r.failed) await pool.query('UPDATE channels SET last_error=NULL WHERE id=$1 AND last_error LIKE $2', [c.id, 'Bookings:%']);
+      else await pool.query('UPDATE channels SET last_error=$2 WHERE id=$1', [c.id, `Bookings: ${r.failed} could not be saved; see the log.`]);
+      out.push({ channel: c.code, ...r });
+    } catch (e) {
+      await pool.query('UPDATE channels SET last_error=$2 WHERE id=$1', [c.id, `Bookings: ${String(e.message).slice(0, 280)}`]);
+      await logChannel(pool, c.id, 'in', 'channex.pull', 'error', String(e.message).slice(0, 300), null);
+      out.push({ channel: c.code, error: e.message });
+    }
+  }
+  return out;
+}

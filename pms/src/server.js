@@ -2,7 +2,7 @@ import { config } from './config.js';
 import { createPool, migrate } from './db.js';
 import { createApp } from './app.js';
 import { seedAll } from './seed.js';
-import { processOutbox } from './services/distribution.js';
+import { processOutbox, pullChannex } from './services/distribution.js';
 import { generateDue, processOutbox as sendEmails } from './services/reports.js';
 import { queueGuestEmails } from './services/crm.js';
 import { backupIfDue } from './backup.js';
@@ -32,6 +32,7 @@ const mailTimer = setInterval(async () => {
   if (mailing) return; mailing = true;
   try { await tx(pool, (db) => generateDue(db)); await tx(pool, (db) => queueGuestEmails(db));
     try { await tx(pool, (db) => runAutomations(db)); await deliverQueued(pool); } catch (e) { console.error('WhatsApp automations failed:', e.message); }
+    try { await pullChannex(pool); } catch (e) { console.error('Channex pull failed:', e.message); }
     await backupIfDue(pool); await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
 }, Number(process.env.REPORT_CHECK_SECONDS || 60) * 1000);
 

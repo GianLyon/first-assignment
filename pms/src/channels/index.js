@@ -2,6 +2,7 @@
 //
 //  simulator  Built-in test channel: accepts every message and keeps it in the channel log.
 //             Use it to try the channel manager before connecting a real provider.
+//  channex    Channex channel manager API (see channex.js): one connection for Booking.com, Expedia, Agoda and more.
 //  webhook    Sends the message as signed JSON to the channel's endpoint URL. This is how the PMS
 //             connects to a certified channel-manager provider (or a small bridge service), which
 //             then talks to Booking.com, Expedia, Airbnb and others.
@@ -10,6 +11,7 @@
 // The same scheme is used for bookings the channel sends back to /api/channels/<code>/inbound.
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { pushAri as channexPush } from './channex.js';
 
 const sign = (secret, body) => 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 
@@ -22,6 +24,10 @@ export function validateEndpoint(url) {
 }
 
 export const adapters = {
+  channex: {
+    label: 'Channex: Booking.com, Expedia, Agoda, Airbnb…',
+    push: (channel, message) => channexPush(channel, message),
+  },
   simulator: {
     label: 'Simulator (testing)',
     async push(_channel, message) { return { note: `simulator accepted ${message.items.length} updates` }; },

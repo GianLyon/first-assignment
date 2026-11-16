@@ -61,6 +61,14 @@ services:
         sync: false
       - key: WHATSAPP_DISPLAY_NUMBER
         sync: false
+      # Front-desk AI assistant (Part E): without it the to-do list still works
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Channex channel manager for Booking.com, Expedia, Agoda (Part F)
+      - key: CHANNEX_API_KEY
+        sync: false
+      - key: CHANNEX_API_BASE   # https://staging.channex.io/api/v1 to test, https://app.channex.io/api/v1 live
+        sync: false
 
   # Azeli Console: the Azeli Technologies admin panel (admin.azelitech.com)
   - type: web

@@ -59,6 +59,16 @@ export function operationsRouter(pool) {
       enquiries: "e.status IN ('enquiry','tentative')", past: "e.status IN ('completed','cancelled')" }[req.query.filter] || "e.status IN ('enquiry','tentative','confirmed') AND e.event_date >= $1";
     res.json({ business_date: s.business_date, events: await q(`${evSelect} WHERE ${f.includes('$1') ? f : `${f} AND $1::date IS NOT NULL`} ORDER BY e.event_date ${req.query.filter === 'past' ? 'DESC' : ''}, e.start_time LIMIT 200`, [s.business_date]) });
   });
+  // the events calendar: every function room × every day of the period, with what is booked when
+  r.get('/events/calendar', evView, async (req, res) => {
+    const s = await getSettings(pool);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : String(s.business_date).slice(0, 10);
+    const days = Math.min(62, Math.max(1, Number(req.query.days) || 31));
+    const rooms = await q('SELECT id, name, capacity FROM function_rooms WHERE active ORDER BY capacity DESC, name');
+    const events = await q(`${evSelect} WHERE e.status <> 'cancelled' AND e.event_date >= $1::date AND e.event_date < $1::date + $2::int ORDER BY e.event_date, e.start_time`, [from, days]);
+    res.json({ from, days, business_date: s.business_date, rooms, events: events.map((e) => ({ id: e.id, code: e.code, title: e.title, status: e.status, d: e.d, start: e.start, end: e.end,
+      function_room_id: e.function_room_id, pax: e.pax, event_type: e.event_type, client: e.company_name || e.contact_name })) });
+  });
   r.get('/events/:id', evView, async (req, res) => {
     const [e] = await q(`${evSelect} WHERE e.id=$1`, [id(req)]);
     if (!e) throw new HttpError(404, 'Event not found.');
