@@ -63,6 +63,22 @@ async function getReservationForUpdate(db, id) {
   return rows[0];
 }
 
+export const TITLES = ['Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Prof', 'Rev', 'Hon', 'Eng', 'Sir', 'Madam'];
+export const SEGMENTS = ['leisure', 'corporate', 'government', 'ngo', 'group', 'wholesale', 'long_stay', 'complimentary', 'other'];
+export const GUARANTEES = ['none', 'deposit', 'card', 'company', 'prepaid', 'voucher'];
+const guestTitle = (t) => { const v = text(t, 'Title', { max: 10 }); if (v && !TITLES.includes(v)) throw new HttpError(400, 'Choose a title from the list.'); return v; };
+/** The booking details beyond dates and room: arrival time, segment, guarantee, requests, references. */
+export function bookingExtras(b) {
+  const eta = b.eta ? String(b.eta).slice(0, 5) : null;
+  if (eta && !/^([01]\d|2[0-3]):[0-5]\d$/.test(eta)) throw new HttpError(400, 'Arrival time must be like 14:30.');
+  const seg = b.market_segment || null;
+  if (seg && !SEGMENTS.includes(seg)) throw new HttpError(400, 'Unknown market segment.');
+  const guarantee = b.guarantee || 'none';
+  if (!GUARANTEES.includes(guarantee)) throw new HttpError(400, 'Unknown guarantee.');
+  return { eta, market_segment: seg, guarantee, special_requests: text(b.special_requests, 'Special requests', { max: 1000 }),
+    booker_reference: text(b.booker_reference, 'Booking reference', { max: 60 }), travel_agent: text(b.travel_agent, 'Travel agent', { max: 120 }) };
+}
+
 export async function createReservation(db, user, body) {
   const s = await getSettings(db);
   const { arrival, departure } = body;
@@ -90,9 +106,9 @@ export async function createReservation(db, user, body) {
   if (!guestId) {
     const g = body.guest || {};
     const { rows: [ng] } = await db.query(
-      `INSERT INTO guests (first_name, last_name, phone, email, nationality, id_type, id_number) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      `INSERT INTO guests (first_name, last_name, phone, email, nationality, id_type, id_number, title) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [text(g.first_name, 'First name', { required: true, max: 80 }), text(g.last_name, 'Last name', { max: 80 }) || '', text(g.phone, 'Phone', { max: 40 }),
-        text(g.email, 'Email', { max: 120 }), text(g.nationality, 'Nationality', { max: 60 }), text(g.id_type, 'ID type', { max: 40 }), text(g.id_number, 'ID number', { max: 60 })]);
+        text(g.email, 'Email', { max: 120 }), text(g.nationality, 'Nationality', { max: 60 }), text(g.id_type, 'ID type', { max: 40 }), text(g.id_number, 'ID number', { max: 60 }), guestTitle(g.title)]);
     guestId = ng.id;
   }
   if (body.guest?.marketing_consent === true) {
@@ -101,11 +117,21 @@ export async function createReservation(db, user, body) {
   const rate = body.rate == null || body.rate === '' ? type.base_rate : Number(body.rate);
   if (!Number.isInteger(rate) || rate < 0) throw new HttpError(400, 'Rate must be a whole number of shillings.');
   const adults = Math.max(1, Number(body.adults) || 1), children = Math.max(0, Number(body.children) || 0);
+  if (adults > 20 || children > 20) throw new HttpError(400, 'Too many guests for one room.');
+  const x = bookingExtras(body);
+  let companyName = text(body.company_name, 'Company', { max: 120 }), companyId = null;
+  if (body.company_id) {
+    const { rows: [co] } = await db.query('SELECT id, name FROM companies WHERE id=$1 AND active', [Number(body.company_id)]);
+    if (!co) throw new HttpError(400, 'Company not found.');
+    companyId = co.id; companyName = co.name;
+  }
   const { rows: [r] } = await db.query(
-    `INSERT INTO reservations (guest_id, room_type_id, arrival, departure, adults, children, rate, source, company_name, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    `INSERT INTO reservations (guest_id, room_type_id, arrival, departure, adults, children, rate, source, company_name, notes, created_by,
+       company_id, eta, market_segment, guarantee, special_requests, booker_reference, travel_agent, group_code)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [guestId, type.id, arrival, departure, adults, children, rate, text(body.source, 'Source', { max: 40 }) || 'Direct',
-      text(body.company_name, 'Company', { max: 120 }), text(body.notes, 'Notes', { max: 1000 }), user?.id ?? null]);
+      companyName, text(body.notes, 'Notes', { max: 1000 }), user?.id ?? null,
+      companyId, x.eta, x.market_segment, x.guarantee, x.special_requests, x.booker_reference, x.travel_agent, text(body.group_code, 'Group', { max: 20 })]);
   await enqueueAri(db, type.id, arrival, departure, 'reservation');
   await audit(db, user, 'reservation.create', 'reservation', r.id, { code: r.code, arrival, departure, room_type: type.code, rate });
   return r;
@@ -125,6 +151,12 @@ export async function updateReservation(db, user, id, body) {
   if (body.departure !== undefined) next.departure = body.departure;
   if (body.notes !== undefined) next.notes = text(body.notes, 'Notes', { max: 1000 });
   if (body.company_name !== undefined) next.company_name = text(body.company_name, 'Company', { max: 120 });
+  const extraKeys = ['eta', 'market_segment', 'guarantee', 'special_requests', 'booker_reference', 'travel_agent'].filter((k) => body[k] !== undefined);
+  if (extraKeys.length) {
+    const x = bookingExtras({ ...r, eta: r.eta ? String(r.eta).slice(0, 5) : null, ...Object.fromEntries(extraKeys.map((k) => [k, body[k]])) });
+    await db.query('UPDATE reservations SET eta=$2, market_segment=$3, guarantee=$4, special_requests=$5, booker_reference=$6, travel_agent=$7 WHERE id=$1',
+      [r.id, x.eta, x.market_segment, x.guarantee, x.special_requests, x.booker_reference, x.travel_agent]);
+  }
   if (!isDate(next.arrival) || !isDate(next.departure) || next.departure <= next.arrival) throw new HttpError(400, 'Departure must be after arrival.');
   if (r.status === 'reserved' && next.arrival < s.business_date) throw new HttpError(400, 'Arrival cannot be before the current business date.');
   if (r.status === 'in_house' && next.departure <= s.business_date) throw new HttpError(400, 'An in-house stay must end after today. Use check-out to end it today.');
@@ -263,7 +295,7 @@ export async function moveRoom(db, user, id, { room_id, reason, rate, allow_dirt
 export async function folio(db, id) {
   const { rows: [r] } = await db.query(
     `SELECT r.*, g.first_name, g.last_name, g.phone, g.email, g.id_type, g.id_number, g.nationality, g.gender, g.address, g.id_issued_by,
-            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.whatsapp_opt_in, g.whatsapp_opt_out_at,
+            to_char(g.id_expiry,'YYYY-MM-DD') AS id_expiry, to_char(g.birth_date,'YYYY-MM-DD') AS birth_date, g.vip, g.whatsapp_opt_in, g.whatsapp_opt_out_at, g.title, g.preferences,
             rt.name AS room_type_name, rt.code AS room_type_code, rm.number AS room_number, rp.name AS rate_plan_name, ch.name AS channel_name
      FROM reservations r JOIN guests g ON g.id = r.guest_id JOIN room_types rt ON rt.id = r.room_type_id
      LEFT JOIN rooms rm ON rm.id = r.room_id LEFT JOIN rate_plans rp ON rp.id = r.rate_plan_id LEFT JOIN channels ch ON ch.id = r.channel_id WHERE r.id = $1`, [id]);
@@ -275,7 +307,9 @@ export async function folio(db, id) {
   const nights = (await db.query("SELECT to_char(night,'YYYY-MM-DD') AS night, rate FROM reservation_nights WHERE reservation_id=$1 ORDER BY night", [id])).rows;
   const moves = (await db.query(`SELECT m.*, to_char(m.business_date,'YYYY-MM-DD') AS d, f.number AS from_room, t.number AS to_room, u.full_name AS moved_by_name
     FROM room_moves m JOIN rooms f ON f.id=m.from_room_id JOIN rooms t ON t.id=m.to_room_id LEFT JOIN users u ON u.id=m.moved_by WHERE m.reservation_id=$1 ORDER BY m.id`, [id])).rows;
-  return { reservation: r, charges, payments, nights, moves, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
+  const group = r.group_code ? (await db.query(`SELECT r.id, r.code, r.status, rt.name AS room_type_name, rm.number AS room_number, r.adults, r.children
+    FROM reservations r JOIN room_types rt ON rt.id=r.room_type_id LEFT JOIN rooms rm ON rm.id=r.room_id WHERE r.group_code=$1 ORDER BY r.id`, [r.group_code])).rows : [];
+  return { reservation: { ...r, eta: r.eta ? String(r.eta).slice(0, 5) : null }, charges, payments, nights, moves, group, totals: { charges: totalCharges, payments: totalPayments, balance: totalCharges - totalPayments } };
 }
 async function balanceOf(db, id) {
   const { rows: [b] } = await db.query(
@@ -319,6 +353,36 @@ export async function voidCharge(db, user, chargeId, reason) {
   await audit(db, user, 'folio.void_charge', 'reservation', c.reservation_id, { charge_id: c.id, amount: c.amount, reason: why });
 }
 
+export const CARD_BRANDS = ['Visa', 'Mastercard', 'American Express', 'UnionPay', 'Other'];
+/** What is worth keeping about how a payment was made. Never the full card number. */
+export function paymentDetails(method, amount, d) {
+  const t = (v, f, max) => text(v, f, { max });
+  if (method === 'card') {
+    const brand = d.card_brand || null, last4 = d.card_last4 ? String(d.card_last4).trim() : null;
+    if (brand && !CARD_BRANDS.includes(brand)) throw new HttpError(400, 'Choose the card type.');
+    if (last4 && !/^\d{4}$/.test(last4)) throw new HttpError(400, 'Card: enter only the last 4 digits.');
+    return clean({ card_brand: brand, card_last4: last4, auth_code: t(d.auth_code, 'Approval code', 20) });
+  }
+  if (method === 'mobile_money') {
+    const net = d.network || null;
+    if (net && !['MTN', 'Airtel'].includes(net)) throw new HttpError(400, 'Choose MTN or Airtel.');
+    return clean({ network: net, momo_number: t(d.momo_number, 'Mobile money number', 30) });
+  }
+  if (method === 'bank_transfer') {
+    const date = d.bank_date || null;
+    if (date && !isDate(date)) throw new HttpError(400, 'Transfer date is not valid.');
+    return clean({ bank: t(d.bank, 'Bank', 60), bank_date: date });
+  }
+  if (method === 'cash') {
+    if (d.tendered === undefined || d.tendered === null || d.tendered === '') return {};
+    const tendered = Number(d.tendered);
+    if (!Number.isInteger(tendered) || tendered < amount) throw new HttpError(400, 'Cash received must be at least the amount paid.');
+    return { tendered, change: tendered - amount };
+  }
+  return {};
+}
+const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ''));
+
 export async function postPayment(db, user, id, body) {
   const r = await getReservationForUpdate(db, id);
   if (!['reserved', 'in_house', 'checked_out'].includes(r.status)) throw new HttpError(409, 'Payments cannot be taken on a cancelled or no-show booking.');
@@ -345,10 +409,12 @@ export async function postPayment(db, user, id, body) {
   }
   if (r.status === 'checked_out' && amount > await balanceOf(db, r.id)) throw new HttpError(400, 'Payment is more than the outstanding balance.');
   const reference = text(body.reference, 'Reference', { max: 80 });
+  const details = paymentDetails(method, amount, body.details || {});
+  const payer = text(body.payer_name, 'Paid by', { max: 120 });
   const entryId = await postJournal(db, { date: s.business_date, description: `${r.code}: payment (${method.replace('_', ' ')})`, refType: 'payment', refId: r.id, userId: user?.id ?? null, lines: paymentLines(method, amount) });
   const { rows: [p] } = await db.query(
-    `INSERT INTO payments (reservation_id, business_date, method, amount, reference, posted_by, journal_entry_id, company_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [r.id, s.business_date, method, amount, reference, user?.id ?? null, entryId, companyId]);
+    `INSERT INTO payments (reservation_id, business_date, method, amount, reference, posted_by, journal_entry_id, company_id, payer_name, details) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [r.id, s.business_date, method, amount, reference, user?.id ?? null, entryId, companyId, payer, details]);
   await audit(db, user, 'folio.payment', 'reservation', r.id, { payment_id: p.id, method, amount });
   return p;
 }

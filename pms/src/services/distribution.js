@@ -69,7 +69,7 @@ export async function quote(db, { arrival, departure, adults = 1 }) {
   return { arrival, departure, nights: nightsBetween(arrival, departure), adults: guests, room_types: out };
 }
 
-async function saveNights(db, reservationId, nightly) {
+export async function saveNights(db, reservationId, nightly) {
   await db.query('DELETE FROM reservation_nights WHERE reservation_id=$1', [reservationId]);
   for (const n of nightly) await db.query('INSERT INTO reservation_nights (reservation_id, night, rate) VALUES ($1,$2,$3)', [reservationId, n.night, n.rate]);
 }

@@ -65,14 +65,27 @@ export async function saveItem(db, user, id, b) {
   return i;
 }
 
+export const SUPPLIER_CATEGORIES = ['Food', 'Beverages', 'Housekeeping & laundry', 'Maintenance & repairs', 'Utilities', 'Equipment', 'Services', 'Other'];
 export async function saveSupplier(db, user, id, b) {
-  const vals = [text(b.name, 'Name', { required: true, max: 120 }), text(b.contact, 'Contact', { max: 80 }), text(b.phone, 'Phone', { max: 40 }), text(b.email, 'Email', { max: 120 }), text(b.tin, 'TIN', { max: 30 })];
+  const t = (v, f, max) => text(v, f, { max });
+  const email = t(b.email, 'Email', 120)?.toLowerCase() || null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) throw new HttpError(400, 'That email address is not valid.');
+  if (b.category && !SUPPLIER_CATEGORIES.includes(b.category)) throw new HttpError(400, 'Choose a category from the list.');
+  if (b.momo_network && !['MTN', 'Airtel'].includes(b.momo_network)) throw new HttpError(400, 'Choose MTN or Airtel.');
+  if (b.tin && !/^[0-9]{10}$/.test(String(b.tin).trim())) throw new HttpError(400, 'A Uganda TIN has 10 digits.');
+  const acct = t(b.bank_account_no, 'Account number', 40);
+  if (acct && !/^[0-9 -]{5,40}$/.test(acct)) throw new HttpError(400, 'The account number should be digits.');
+  const vals = [t(b.name, 'Name', 120), t(b.contact, 'Contact', 80), t(b.phone, 'Phone', 40), email, t(b.tin, 'TIN', 30),
+    b.category || null, t(b.contact_role, 'Contact role', 80), t(b.phone2, 'Second phone', 40), t(b.address, 'Address', 300), Math.min(180, Math.max(0, Number(b.terms_days ?? 30) || 0)),
+    t(b.bank_name, 'Bank', 80), t(b.bank_branch, 'Branch', 80), t(b.bank_account_name, 'Account name', 120), acct, b.momo_network || null, t(b.momo_number, 'Mobile money number', 30), t(b.notes, 'Notes', 1000)];
+  if (!vals[0]) throw new HttpError(400, 'Name is required.');
+  const cols = 'name, contact, phone, email, tin, category, contact_role, phone2, address, terms_days, bank_name, bank_branch, bank_account_name, bank_account_no, momo_network, momo_number, notes';
   if (id) {
-    const { rows: [s] } = await db.query('UPDATE suppliers SET name=$2, contact=$3, phone=$4, email=$5, tin=$6, active=$7 WHERE id=$1 RETURNING *', [id, ...vals, b.active !== false]);
+    const { rows: [s] } = await db.query(`UPDATE suppliers SET (${cols}, active) = (${vals.map((_, i) => '$' + (i + 2)).join(',')}, $${vals.length + 2}) WHERE id=$1 RETURNING *`, [id, ...vals, b.active !== false]);
     if (!s) throw new HttpError(404, 'Supplier not found.');
     await audit(db, user, 'inventory.supplier_update', 'supplier', s.id, { name: s.name }); return s;
   }
-  const { rows: [s] } = await db.query('INSERT INTO suppliers (name, contact, phone, email, tin) VALUES ($1,$2,$3,$4,$5) RETURNING *', vals);
+  const { rows: [s] } = await db.query(`INSERT INTO suppliers (${cols}) VALUES (${vals.map((_, i) => '$' + (i + 1)).join(',')}) RETURNING *`, vals);
   await audit(db, user, 'inventory.supplier_create', 'supplier', s.id, { name: s.name }); return s;
 }
 

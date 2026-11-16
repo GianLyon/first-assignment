@@ -12,6 +12,7 @@ import {
   destroySession, checkThrottle, recordFailure, clearFailures, audit,
 } from '../auth.js';
 import * as fo from '../services/frontoffice.js';
+import * as booking from '../services/booking.js';
 import { PAYMENT_METHODS, DEPARTMENTS } from '../ledger.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -267,6 +268,46 @@ export function apiRouter(pool) {
     res.json(rows.map((x) => ({ ...x, balance: Number(x.balance) })));
   });
   r.post('/reservations', requirePerm('reservations.manage'), inTx((db, req) => fo.createReservation(db, req.user, req.body || {})));
+  r.get('/reservations/quote', requirePerm('reservations.view'), async (req, res) => res.json(await booking.staffQuote(pool, req.query)));
+  r.post('/bookings', requirePerm('reservations.manage'), inTx(async (db, req) => {
+    if (req.body?.deposit && Number(req.body.deposit.amount) > 0 && !can(req.user, 'payments.post')) throw new HttpError(403, 'You cannot take payments.');
+    return booking.createBooking(db, req.user, req.body || {});
+  }));
+  r.get('/booking-options', requirePerm('reservations.view'), async (_req, res) => res.json({
+    titles: fo.TITLES, segments: fo.SEGMENTS, guarantees: fo.GUARANTEES, card_brands: fo.CARD_BRANDS,
+    companies: (await pool.query('SELECT id, name, discount_pct, credit_limit, terms_days FROM companies WHERE active ORDER BY name')).rows,
+    plans: (await pool.query('SELECT id, code, name, breakfast, refundable FROM rate_plans WHERE active ORDER BY sort, id')).rows,
+  }));
+  // the top bar search: bookings by number or name, rooms by number, guests by name or phone
+  r.get('/search', requirePerm('reservations.view'), async (req, res) => {
+    const q = String(req.query.q || '').trim().toLowerCase().slice(0, 60);
+    if (q.length < 2) return res.json({ reservations: [], rooms: [], guests: [] });
+    const like = `%${q}%`, digits = q.replace(/\D/g, '');
+    const [rs, rooms, guests] = await Promise.all([
+      pool.query(`SELECT r.id, r.code, r.status, g.first_name || ' ' || g.last_name AS name, rm.number AS room FROM reservations r JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id
+        WHERE r.status <> 'cancelled' AND (lower(r.code) LIKE $1 OR lower(g.first_name || ' ' || g.last_name) LIKE $1 OR lower(coalesce(r.booker_reference,'')) LIKE $1 OR lower(coalesce(r.external_ref,'')) LIKE $1)
+        ORDER BY (r.status='in_house') DESC, (r.status='reserved') DESC, r.arrival DESC LIMIT 7`, [like]),
+      pool.query(`SELECT rm.id, rm.number, rm.hk_status, rt.name AS type_name, r.id AS reservation_id, g.first_name || ' ' || g.last_name AS guest FROM rooms rm JOIN room_types rt ON rt.id=rm.room_type_id
+        LEFT JOIN reservations r ON r.room_id=rm.id AND r.status='in_house' LEFT JOIN guests g ON g.id=r.guest_id WHERE rm.active AND lower(rm.number) LIKE $1 ORDER BY rm.number LIMIT 5`, [`${q}%`]),
+      pool.query(`SELECT g.id, g.first_name, g.last_name, g.phone, g.vip, (SELECT count(*) FROM reservations r WHERE r.guest_id=g.id AND r.status IN ('in_house','checked_out'))::int AS stays FROM guests g
+        WHERE g.merged_into IS NULL AND g.erased_at IS NULL AND (lower(g.first_name || ' ' || g.last_name) LIKE $1 OR lower(coalesce(g.email,'')) LIKE $1 OR ($2 <> '' AND regexp_replace(coalesce(g.phone,''),'\\D','','g') LIKE '%' || $2 || '%'))
+        ORDER BY g.vip DESC, g.id DESC LIMIT 5`, [like, digits.length >= 5 ? digits.replace(/^0+/, '') : '']),
+    ]);
+    res.json({ reservations: rs.rows, rooms: rooms.rows, guests: guests.rows });
+  });
+  r.get('/guests/search', requirePerm('reservations.view'), async (req, res) => {
+    const q = String(req.query.q || '').trim().toLowerCase().slice(0, 60);
+    if (q.length < 2) return res.json([]);
+    const digits = q.replace(/\D/g, '');
+    const { rows } = await pool.query(`SELECT g.id, g.title, g.first_name, g.last_name, g.phone, g.email, g.nationality, g.vip, g.preferences,
+        (SELECT count(*) FROM reservations r WHERE r.guest_id=g.id AND r.status IN ('in_house','checked_out'))::int AS stays,
+        (SELECT to_char(max(r.departure),'YYYY-MM-DD') FROM reservations r WHERE r.guest_id=g.id AND r.status='checked_out') AS last_stay,
+        (SELECT r.company_id FROM reservations r WHERE r.guest_id=g.id AND r.company_id IS NOT NULL ORDER BY r.id DESC LIMIT 1) AS company_id
+      FROM guests g WHERE g.merged_into IS NULL AND g.erased_at IS NULL AND (lower(g.first_name || ' ' || g.last_name) LIKE $1 OR lower(g.last_name || ' ' || g.first_name) LIKE $1
+        OR lower(coalesce(g.email,'')) LIKE $1 OR ($2 <> '' AND regexp_replace(coalesce(g.phone,''),'\\D','','g') LIKE '%' || $2 || '%'))
+      ORDER BY g.vip DESC, stays DESC, g.id DESC LIMIT 8`, [`%${q}%`, digits.length >= 5 ? digits.replace(/^0+/, '') : '']);
+    res.json(rows);
+  });
   r.get('/reservations/:id', requirePerm('reservations.view'), async (req, res) => res.json(await fo.folio(pool, id(req))));
   r.put('/reservations/:id', requirePerm('reservations.manage'), inTx((db, req) => fo.updateReservation(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/cancel', requirePerm('reservations.manage'), inTx(async (db, req) => { await fo.cancelReservation(db, req.user, id(req), req.body?.reason); return { ok: true }; }));

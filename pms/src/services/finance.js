@@ -37,13 +37,23 @@ async function bizDate(db, d) {
 
 /* =============== companies & receivables =============== */
 export async function saveCompany(db, user, id, b) {
+  const email = (v, f) => { const e = text(v, f, { max: 120 })?.toLowerCase() || null; if (e && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e)) throw new HttpError(400, `${f} is not a valid email address.`); return e; };
+  const disc = Number(b.discount_pct || 0);
+  if (!(disc >= 0 && disc < 100)) throw new HttpError(400, 'Discount must be 0–99%.');
+  let web = text(b.website, 'Website', { max: 200 });
+  if (web && !/^https?:\/\//i.test(web)) web = 'https://' + web;
+  if (b.tin && !/^[0-9]{10}$/.test(String(b.tin).trim())) throw new HttpError(400, 'A Uganda TIN has 10 digits.');
   const vals = [text(b.name, 'Name', { required: true, max: 120 }), text(b.tin, 'TIN', { max: 30 }), text(b.contact, 'Contact', { max: 80 }), text(b.phone, 'Phone', { max: 40 }),
-    text(b.email, 'Email', { max: 120 }), text(b.address, 'Address', { max: 300 }), money0(b.credit_limit, 'Credit limit'), Math.min(180, Math.max(0, Number(b.terms_days ?? 30) || 0))];
+    email(b.email, 'Email'), text(b.address, 'Address', { max: 300 }), money0(b.credit_limit, 'Credit limit'), Math.min(180, Math.max(0, Number(b.terms_days ?? 30) || 0)),
+    text(b.industry, 'Industry', { max: 60 }), text(b.contact_role, 'Contact role', { max: 80 }), text(b.phone2, 'Second phone', { max: 40 }), email(b.billing_email, 'Billing email'),
+    web, disc, text(b.notes, 'Notes', { max: 1000 })];
   let c;
-  if (id) ({ rows: [c] } = await db.query('UPDATE companies SET name=$2, tin=$3, contact=$4, phone=$5, email=$6, address=$7, credit_limit=$8, terms_days=$9, active=$10 WHERE id=$1 RETURNING *', [id, ...vals, b.active !== false]));
-  else ({ rows: [c] } = await db.query('INSERT INTO companies (name, tin, contact, phone, email, address, credit_limit, terms_days) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', vals));
+  if (id) ({ rows: [c] } = await db.query(`UPDATE companies SET name=$2, tin=$3, contact=$4, phone=$5, email=$6, address=$7, credit_limit=$8, terms_days=$9,
+      industry=$10, contact_role=$11, phone2=$12, billing_email=$13, website=$14, discount_pct=$15, notes=$16, active=$17 WHERE id=$1 RETURNING *`, [id, ...vals, b.active !== false]));
+  else ({ rows: [c] } = await db.query(`INSERT INTO companies (name, tin, contact, phone, email, address, credit_limit, terms_days, industry, contact_role, phone2, billing_email, website, discount_pct, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`, vals));
   if (!c) throw new HttpError(404, 'Company not found.');
-  await audit(db, user, id ? 'finance.company_update' : 'finance.company_create', 'company', c.id, { name: c.name, credit_limit: c.credit_limit });
+  await audit(db, user, id ? 'finance.company_update' : 'finance.company_create', 'company', c.id, { name: c.name, credit_limit: c.credit_limit, discount_pct: disc });
   return c;
 }
 
