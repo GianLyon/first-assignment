@@ -17,7 +17,7 @@
   const ROLE = { admin: 'Administrator', manager: 'Manager', front_office: 'Front office', housekeeping: 'Housekeeping', accountant: 'Accountant', night_auditor: 'Night auditor', waiter: 'Waiter / cashier', kitchen: 'Kitchen / bar', storekeeper: 'Storekeeper', hr_officer: 'HR officer', maintenance: 'Maintenance' };
   const HK = { clean: 'Clean', dirty: 'Dirty', out_of_order: 'Out of order' };
 
-  let ME = null, CAN = {}, SETTINGS = null, MFA = {};
+  let ME = null, CAN = {}, SETTINGS = null, MFA = {}, DEMO = null;
   const ui = { tab: {}, q: {} };
 
   /* ---------- API ---------- */
@@ -53,7 +53,8 @@
       ${msg ? `<p class="note err">${esc(msg)}</p>` : ''}
       <label>Username<input name="username" autocomplete="username" required autofocus></label>
       <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-      <button class="btn btn-gold">Sign in</button></form></div>`;
+      <button class="btn btn-gold">Sign in</button><div id="demo-entry"></div></form></div>`;
+    fetch('/api/demo-info').then((r) => r.json()).then((d) => { DEMO = d; if (d.demo && $('#demo-entry')) $('#demo-entry').innerHTML = '<p class="small muted center">or</p><button type="button" class="btn btn-ok" data-action="demo-enter">Explore the demo hotel</button><p class="small muted center">No sign-up needed. A sample hotel, reset every night.</p>'; }).catch(() => {});
   }
 
   async function fillBackups() {
@@ -112,7 +113,7 @@
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
     ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage'], ['whatsapp', 'WhatsApp set-up', 'messages.manage']]],
     ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
-    ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Users', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
+    ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Staff & access', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
   const route = () => { const [r, id] = (location.hash.replace('#', '') || 'dashboard').split('/'); return { r, id }; };
@@ -127,9 +128,16 @@
           <button class="btn btn-ghost btn-sm" data-action="mfa-manage">Two-step</button><button class="btn btn-ghost btn-sm" data-action="change-password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div>
       </header><main id="view" tabindex="-1"></main></div></div>`;
   }
+  function demoBanner() {
+    if (!DEMO?.demo || $('#demo-strip')) return;
+    const b = document.createElement('div'); b.id = 'demo-strip'; b.className = 'demo-strip no-print';
+    b.innerHTML = `<span><b>Demo hotel.</b> Click anywhere, try anything: it is all sample data, rebuilt every night.</span><a class="btn btn-sm btn-gold" href="${esc(DEMO.contact)}" target="_top">Book a walkthrough</a>`;
+    $('.main')?.prepend(b);
+  }
   function renderNav() {
     const { r } = route();
     $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules', guest: 'guests', campaign: 'campaigns' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
+    demoBanner();
     $('#prop-name').textContent = SETTINGS.property_name;
     $('#prop-name').classList.toggle('has-demo', !!SETTINGS.demo_data);
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
@@ -2223,7 +2231,9 @@
   const WA_MODE = { live: ['Connected', 'ok'], practice: ['Practice mode', 'warn'], off: ['Not connected', 'bad'] };
   const WA_TICK = { queued: ['Sending…', ''], sent: ['Sent ✓', ''], delivered: ['Delivered ✓✓', ''], read: ['Read ✓✓', 'read'], failed: ['Not delivered', 'err'], received: ['', ''] };
   const WA_PARAM = { first_name: 'First name', last_name: 'Last name', property: 'Hotel name', code: 'Booking number', arrival: 'Arrival date', departure: 'Departure date', nights: 'Nights', room: 'Room number', room_type: 'Room type', check_in_time: 'Check-in time', check_out_time: 'Check-out time', review_link: 'Review page' };
-  const WA_FILTERS = [['open', 'Open'], ['unread', 'Unread'], ['in_house', 'In-house'], ['done', 'Done'], ['all', 'All']];
+  const WA_FILTERS = [['open', 'Open'], ['hot', 'Hot leads'], ['unread', 'Unread'], ['in_house', 'In-house'], ['done', 'Done'], ['all', 'All']];
+  const STAGE = { explorer: ['Explorer', ''], interested: ['Interested', 'info'], buyer: ['Buyer', 'warn'], ready: ['Ready to book', 'bad'] };
+  const intentPill = (c) => (c.intent_stage ? pill(`${STAGE[c.intent_stage][0]} ${c.intent_score}%`, STAGE[c.intent_stage][1]) : '');
   const PB_KIND = { all: 'Everyone', guests: 'Guests', in_house: 'In-house guests', contacts: 'Other contacts', supplier: 'Suppliers', transport: 'Transport / drivers', partner: 'Partners / tour operators', staff: 'Staff', emergency: 'Emergency', other: 'Other' };
   const PB_CAT = { supplier: 'Supplier', transport: 'Transport / driver', partner: 'Partner / tour operator', staff: 'Staff', emergency: 'Emergency', other: 'Other' };
   const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`).replace(/\n/g, '<br>');
@@ -2237,7 +2247,7 @@
     return list.map((c) => `<a class="wa-item ${String(c.id) === String(openId) ? 'on' : ''}" href="#inbox/${c.id}">
       <span class="wa-top"><b>${esc(c.display_name)}</b><span class="small muted">${c.last ? ftime(c.last.created_at) : ''}</span></span>
       <span class="wa-sub"><span class="small muted wa-prev">${c.last ? (c.last.direction === 'out' ? 'You: ' : '') + esc(String(c.last.body || '').slice(0, 80)) : 'No messages yet'}</span>${c.unread ? `<span class="badge">${c.unread}</span>` : ''}</span>
-      <span class="small">${c.room ? pill('Room ' + c.room, 'ink') + ' ' : ''}${c.vip ? pill('VIP', 'warn') + ' ' : ''}${c.opted_out_at ? pill('STOP', 'bad') : c.window_open ? pill('Can reply', 'ok') : ''}${c.assigned_name ? ` <span class="muted">· ${esc(c.assigned_name)}</span>` : ''}</span></a>`).join('');
+      <span class="small">${intentPill(c)} ${c.room ? pill('Room ' + c.room, 'ink') + ' ' : ''}${c.vip ? pill('VIP', 'warn') + ' ' : ''}${c.opted_out_at ? pill('STOP', 'bad') : c.window_open ? pill('Can reply', 'ok') : ''}${c.assigned_name ? ` <span class="muted">· ${esc(c.assigned_name)}</span>` : ''}</span></a>`).join('');
   }
   function waMsgsHtml(msgs) {
     if (!msgs.length) return '<p class="muted small center pad">No messages yet. Send a template to start the conversation.</p>';
@@ -2271,14 +2281,23 @@
         <div class="row between"><span class="small muted">Free replies allowed for ${hoursLeft(c.window_ends)} more hour${hoursLeft(c.window_ends) === 1 ? '' : 's'}.</span><span class="row">${CAN['assistant.use'] && ui.aiStatus?.ai_enabled ? `<button type="button" class="btn btn-ghost" data-action="wa-suggest" data-id="${c.id}">Suggest a reply</button>` : ''}<button class="btn btn-gold">Send</button></span></div></form>
       ${tpls.length ? `<details class="mt"><summary class="small">Send a template instead</summary>${tplForm}</details>` : ''}</div>`;
   }
+  function intentCard(c) {
+    if (!c.intent_stage) return '';
+    const sig = c.intent_signals || [];
+    const bar = (label, v) => `<div class="meter"><span>${label}</span><div class="hk-mini"><span class="w-${Math.round(v / 5) * 5}"></span></div><b>${v}%</b></div>`;
+    return `<div class="intent st-${c.intent_stage}"><h3 class="sub3">Buying signals</h3><p>${pill(STAGE[c.intent_stage][0], STAGE[c.intent_stage][1])}</p>${bar('Likely to book', c.intent_score)}${bar('Confidence', c.intent_confidence)}${bar('Interest depth', c.intent_depth)}
+      ${c.first_purchase_signal_at ? `<p class="small"><b>First asked to book or pay:</b> ${ftime(c.first_purchase_signal_at)}</p>` : ''}
+      <ul class="sig">${sig.map((x) => `<li class="${x.weight < 0 ? 'neg' : ''}"><b>${x.weight > 0 ? '+' : ''}${x.weight}</b> ${esc(x.label)}${x.quote ? `<br><span class="small muted">“${esc(x.quote)}”</span>` : ''}</li>`).join('')}</ul>
+      <p class="small muted">${c.intent_stage === 'ready' ? 'Send the price and how to pay now: they are asking to book.' : c.intent_stage === 'buyer' ? 'Specific questions: give a clear price for their dates and offer to hold the room.' : c.intent_stage === 'interested' ? 'Interested: answer, then ask for their dates and how many guests.' : 'Just looking: share the website and a photo or two; ask when they plan to travel.'}</p></div>`;
+  }
   function waGuestHtml(d) {
     const c = d.conversation, g = d.guest;
     const assign = `<div class="row mt"><button class="btn btn-sm btn-ghost" data-action="wa-assign" data-id="${c.id}">${c.assigned_to === ME.id ? 'Unassign me' : 'Assign to me'}</button><button class="btn btn-sm btn-ghost" data-action="wa-status" data-id="${c.id}" data-s="${c.status === 'done' ? 'open' : 'done'}">${c.status === 'done' ? 'Reopen' : 'Mark done'}</button></div>`;
     if (!g) {
-      return `<h2 class="sec">${esc(c.display_name)}</h2><p class="small">${esc(c.phone)}${c.contact_company ? ` · ${esc(c.contact_company)}` : ''}</p>
+      return `${intentCard(c)}<h2 class="sec">${esc(c.display_name)}</h2><p class="small">${esc(c.phone)}${c.contact_company ? ` · ${esc(c.contact_company)}` : ''}</p>
         ${c.contact_id ? '<p class="small muted">From the phone book.</p>' : `<p class="small muted">Not linked to a guest profile.</p><form class="form" data-form="wa-link" data-id="${c.id}"><label>Link to a guest (search)<input name="q" placeholder="Name or phone" required></label><button class="btn btn-sm btn-ghost">Find</button></form><div id="wa-link-results"></div>`}${assign}`;
     }
-    return `<h2 class="sec"><a href="#guest/${g.id}">${esc(guestName(g))}</a> ${g.vip ? pill('VIP', 'warn') : ''}</h2><p class="small">${esc(c.phone)}${g.email ? `<br>${esc(g.email)}` : ''}</p><p>${waPill(g)}</p>
+    return `${intentCard(c)}<h2 class="sec"><a href="#guest/${g.id}">${esc(guestName(g))}</a> ${g.vip ? pill('VIP', 'warn') : ''}</h2><p class="small">${esc(c.phone)}${g.email ? `<br>${esc(g.email)}` : ''}</p><p>${waPill(g)}</p>
       ${CAN['guests.manage'] && !g.whatsapp_opt_out_at ? `<button class="btn btn-sm btn-ghost" data-action="wa-optin" data-id="${g.id}" data-c="${g.whatsapp_opt_in ? 0 : 1}">${g.whatsapp_opt_in ? 'Withdraw WhatsApp permission' : 'Guest agreed to WhatsApp'}</button>` : ''}
       ${d.stays.length ? `<h3 class="sub3 mt">Stays</h3>${d.stays.map((s) => `<p class="small"><a href="#res/${s.id}">${esc(s.code)}</a> ${statusPill(s.status)}<br>${fdate(s.arrival)} → ${fdate(s.departure)}${s.room ? ` · room ${esc(s.room)}` : ` · ${esc(s.room_type)}`}</p>`).join('')}` : '<p class="small muted">No stays yet.</p>'}
       ${g.preferences ? `<h3 class="sub3">Preferences</h3><p class="small">${esc(g.preferences)}</p>` : ''}${g.notes ? `<h3 class="sub3">Notes</h3><p class="small">${esc(g.notes)}</p>` : ''}${assign}`;
@@ -2469,10 +2488,10 @@
     'ev-new-at': (d) => { ui.evPrefill = { room: d.room, date: d.date }; location.hash = '#eventedit/new'; },
   });
   /* ---------- Phase 13: front-desk assistant ---------- */
-  const PRI = { urgent: ['Now', 'bad'], high: ['Soon', 'warn'], normal: ['Today', ''] };
-  const KIND_ICON = { checkout: '⇥', payment: '◎', arrivals: '⇤', housekeeping: '✦', overbooking: '!', reconcile: '≡', pos: '☕', whatsapp: '✉', event: '◆', audit: '☾', plan: '▦' };
+  const PRI = { urgent: ['Now', 'bad'], high: ['Soon', 'warn'], normal: ['Today', ''], low: ['When you can', ''] };
+  const KIND_ICON = { management: '◆', front_office: '⇤', finance: '≡', procurement: '▤', marketing: '↗', housekeeping: '✦', fnb: '☕', hr: '☺', checkout: '⇥', payment: '◎', arrivals: '⇤', housekeeping: '✦', overbooking: '!', reconcile: '≡', pos: '☕', whatsapp: '✉', event: '◆', audit: '☾', plan: '▦' };
   const todoList = (tasks) => (tasks.length ? `<ul class="todo">${tasks.map((t) => `<li class="todo-${t.priority}"><span class="todo-ic" aria-hidden="true">${KIND_ICON[t.kind] || '•'}</span><div><a href="${esc(t.link || '#assistant')}"><b>${esc(t.title)}</b></a> ${pill(...PRI[t.priority])}<br><span class="small muted">${esc(t.detail)}</span></div></li>`).join('')}</ul>`
-    : '<p class="muted">Nothing waiting. All guests are checked in or out, bills are settled and messages answered.</p>');
+    : '<p class="muted">Nothing needs attention here right now.</p>');
   async function todoCard(limit) {
     const d = await GET('/assistant/tasks').catch(() => null); if (!d) return '';
     const urgent = d.tasks.filter((t) => t.priority === 'urgent').length;
@@ -2486,15 +2505,18 @@
     return `<svg class="fc-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Occupancy forecast for the next ${fc.length} days"><line x1="${pad}" x2="${W - pad}" y1="${H - 26 - (H - 46) * 0.85}" y2="${H - 26 - (H - 46) * 0.85}" stroke="#eb6834" stroke-dasharray="4 4" opacity=".6"/>${bars}</svg>`;
   };
   VIEWS.assistant = async () => {
-    const [d, st] = await Promise.all([GET('/assistant/tasks'), GET('/assistant/status')]);
+    const [d, st, ins] = await Promise.all([GET('/assistant/tasks'), GET('/assistant/status'), GET('/assistant/insights')]);
+    const deptKey = cur('dept', ins.departments.some((x) => x.key === 'front_office') ? 'front_office' : ins.departments[0]?.key);
+    const dept = ins.departments.find((x) => x.key === deptKey) || ins.departments[0];
+    const deptTabs = tabs('dept', ins.departments.map((x) => { const u = x.items.filter((i) => i.priority === 'urgent').length; return [x.key, `${x.name}${x.items.length ? ` (${x.items.length})` : ''}${u ? ' ●' : ''}`]; }), deptKey);
     ui.aiStatus = st; ui.aiChat = ui.aiChat || [];
     const chat = st.ai_enabled ? `<div class="ai-log" id="ai-log">${aiLogHtml()}</div>
         <form class="form ai-ask" data-form="ai-ask"><label class="sr" for="ai-q">Ask the assistant</label><textarea id="ai-q" name="q" rows="2" maxlength="2000" placeholder="e.g. Who still owes money today?  ·  Plan Friday for me  ·  Draft a reply to the latest WhatsApp" required></textarea>
           <div class="row between"><span class="small muted">It reads the system but never changes anything: drafts wait for you to send.</span><span class="row">${ui.aiChat.length ? '<button type="button" class="btn btn-sm btn-ghost" data-action="ai-clear">New chat</button>' : ''}<button class="btn btn-gold">Ask</button></span></div></form>
-        <div class="ai-chips">${['What should I do first?', 'Who still owes money?', 'Which WhatsApps need a reply? Draft them.', 'How busy is the next week? Plan staffing.'].map((q) => `<button type="button" class="btn btn-sm btn-ghost" data-action="ai-quick" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
+        <div class="ai-chips">${['What should I do first?', 'What is not balancing in the accounts?', 'What is running out in the stores?', 'Which WhatsApp leads are ready to book?', 'Whose staff details are missing?', 'How busy is the next week? Plan staffing.'].map((q) => `<button type="button" class="btn btn-sm btn-ghost" data-action="ai-quick" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
       : `<p class="note">The AI part of the assistant is not connected yet. The to-do list works without it.${CAN['settings.manage'] ? ' To switch it on, add an Anthropic API key (ANTHROPIC_API_KEY) in Render → azeli-pms → Environment; see the go-live guide, Part E.' : ' Ask an administrator to connect it.'}</p>`;
-    return `<div class="page-head"><div><h1 class="page">Front-desk assistant</h1><p class="sub">What needs doing now, worked out from the system, and an AI helper that answers questions about the day and drafts WhatsApp replies.</p></div><button class="btn btn-ghost" data-action="refresh-view">Refresh</button></div>
-      <div class="grid ai-grid"><div class="card"><h2 class="sec">To do · ${esc(fdate(d.business_date))}, ${esc(d.local_time)}</h2>${todoList(d.tasks)}</div>
+    return `<div class="page-head"><div><h1 class="page">Assistant</h1><p class="sub">What each department needs to do, worked out from the system: what is due, what does not balance, what is running out, what is missing. Plus an AI helper that answers questions and drafts WhatsApp replies.</p></div><button class="btn btn-ghost" data-action="refresh-view">Refresh</button></div>
+      ${deptTabs}<div class="grid ai-grid"><div class="card"><h2 class="sec">${esc(dept?.name || 'To do')} · ${esc(fdate(d.business_date))}, ${esc(d.local_time)}</h2>${todoList((dept?.items || []).map((i) => ({ ...i, kind: i.dept })))}</div>
         <div class="card"><h2 class="sec">Ask the assistant</h2>${chat}</div></div>
       <div class="card mt"><h2 class="sec">Next 14 days</h2>${fcChart(d.forecast)}<p class="small muted">Bars above the dashed line (85%) are busy days. Hover a bar for arrivals, departures and events.</p>
         ${table(['Date', '#Rooms sold', '#Occupancy', '#Arrivals', '#Departures', 'Events'], d.forecast.map((x) => `<tr><td>${fdate(x.date)}</td><td class="num">${x.sold}/${x.rooms}</td><td class="num">${x.occupancy}%</td><td class="num">${x.arrivals}</td><td class="num">${x.departures}</td><td class="small">${esc(x.events || '')}</td></tr>`))}</div>
@@ -2893,7 +2915,7 @@
       const u = d.id ? (await GET('/users')).find((x) => String(x.id) === d.id) : null;
       modal(u ? `Staff account · ${u.full_name}` : 'New staff account', `<form class="form" data-form="user-form">
         <div class="two"><label>Full name *<input name="full_name" value="${esc(u?.full_name || '')}" required maxlength="120"></label><label>Username *<input name="username" value="${esc(u?.username || '')}" ${u ? 'disabled' : 'required'} pattern="[a-z0-9._\\-]{3,40}" title="3–40 lowercase letters, numbers, dots, dashes or underscores" autocomplete="off"></label></div>
-        <div class="three"><label>Department<select name="department">${opts([['', '–'], ...DEPTS.map((x) => [x, x])], u?.department || '')}</select></label><label>Job title<input name="job_title" value="${esc(u?.job_title || '')}" maxlength="80" placeholder="Receptionist"></label><label>Role (what they can do) *<select name="role">${opts(Object.entries(ROLE), u?.role || 'front_office')}</select></label></div>
+        <div class="three"><label>Department<select name="department">${opts([['', '–'], ...DEPTS.map((x) => [x, x])], u?.department || '')}</select></label><label>Job title<input name="job_title" value="${esc(u?.job_title || '')}" maxlength="80" placeholder="Receptionist"></label><label>Role (what they can do) *<select name="role">${opts(ui.access ? ui.access.roles.map((r) => [r.key, `${r.name}${r.department ? ` · ${r.department}` : ''}`]) : Object.entries(ROLE), u?.role || 'front_office')}</select></label></div>
         <div class="two"><label>Work email<input name="email" type="email" value="${esc(u?.email || '')}" maxlength="120"></label><label>Phone<input name="phone" value="${esc(u?.phone || '')}" maxlength="40"></label></div>
         <label>${u ? 'Reset password (optional)' : 'Password (8+ characters) *'}<input name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label>
         ${u ? `<label class="row"><input type="checkbox" name="active" value="1" ${u.active ? 'checked' : ''}> Account active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
@@ -3015,6 +3037,89 @@
     try { await PUT(`/housekeeping/tasks/${e.target.dataset.task}/assign`, { user_id: e.target.value ? Number(e.target.value) : null }); toast('Reassigned.'); render(); } catch (err) { toast(esc(err.message), true); }
   });
 
+  /* ---------- Phase 17: staff accounts, roles and each person's rights ---------- */
+  const MODULE_ORDER = ['Management', 'Front office', 'Housekeeping', 'Guests & marketing', 'Distribution', 'Food & beverage', 'Stores', 'Finance', 'HR', 'Operations', 'Reports', 'Other'];
+  function permMatrix(cat, checked, { base = null, disabled = false } = {}) {
+    // base: the role's rights, to show what a person gets extra (+) or has taken away (−)
+    const mods = MODULE_ORDER.filter((m) => cat.some((p) => p.module === m));
+    return `<div class="perm-grid">${mods.map((m) => `<fieldset class="perm-mod"><legend>${esc(m)} <button type="button" class="link small" data-action="perm-all" data-mod="${esc(m)}">all</button> · <button type="button" class="link small" data-action="perm-none" data-mod="${esc(m)}">none</button></legend>
+      ${cat.filter((p) => p.module === m).map((p) => {
+        const on = checked.has(p.key), inRole = base ? base.has(p.key) : null;
+        const tag = base ? (on && !inRole ? '<span class="pill ok">extra</span>' : !on && inRole ? '<span class="pill bad">removed</span>' : '') : '';
+        return `<label class="perm" data-mod="${esc(m)}"><input type="checkbox" name="p__${esc(p.key)}" value="1" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span>${esc(p.label)} ${tag}</span></label>`;
+      }).join('')}</fieldset>`).join('')}</div>`;
+  }
+  const checkedPerms = (v) => Object.keys(v).filter((k) => k.startsWith('p__')).map((k) => k.slice(3));
+  const roleLabel = (key) => ui.access?.roles.find((r) => r.key === key)?.name || ROLE[key] || key;
+
+  VIEWS.users = async () => {
+    const t = cur('usr', 'staff');
+    const [users, acc] = await Promise.all([GET('/users'), GET('/access')]);
+    ui.access = acc; ui.users = users;
+    for (const r of acc.roles) ROLE[r.key] = r.name;
+    const head = `<div class="page-head"><div><h1 class="page">Staff & access</h1><p class="sub">Each person has their own sign-in. A role gives them a set of rights; you can add or take away rights for one person.</p></div>
+      <div class="row">${t === 'roles' ? '<button class="btn btn-gold" data-action="role-new">+ New role</button>' : '<button class="btn btn-gold" data-action="user-edit">+ New staff account</button>'}</div></div>
+      ${tabs('usr', [['staff', `Staff (${users.filter((u) => u.active).length})`], ['roles', `Roles (${acc.roles.length})`]], 'staff')}`;
+    if (t === 'roles') {
+      const depts = [...new Set(acc.roles.map((r) => r.department || 'Other'))];
+      return head + depts.map((d) => `<div class="card mt"><h2 class="sec">${esc(d)}</h2>${table(['Role', 'What it is for', '#People', 'Rights', ''], acc.roles.filter((r) => (r.department || 'Other') === d).map((r) => `<tr>
+        <td><b>${esc(r.name)}</b>${r.builtin ? '' : ' ' + pill('custom', 'info')}<br><code class="small">${esc(r.key)}</code></td><td class="small">${esc(r.description || '')}</td><td class="num">${r.people}</td>
+        <td>${r.perms.includes('*') ? pill('Full access', 'ok') : `${r.perms.length} of ${acc.catalogue.length}`}</td>
+        <td class="right nowrap">${r.key === 'admin' ? '' : `<button class="btn btn-sm btn-ghost" data-action="role-edit" data-key="${esc(r.key)}">Edit rights</button>`}</td></tr>`))}</div>`).join('');
+    }
+    const ov = (uid) => { const o = acc.overrides.filter((x) => x.user_id === uid); return { plus: o.filter((x) => x.allow).length, minus: o.filter((x) => !x.allow).length }; };
+    const byDept = [...new Set(users.map((u) => u.department || 'No department'))].sort();
+    return head + byDept.map((d) => `<div class="card mt"><h2 class="sec">${esc(d)}</h2>${table(['Name', 'Role', 'Own rights', 'Contact', 'Sign-in', 'Status', 'Two-step', ''], users.filter((u) => (u.department || 'No department') === d).map((u) => { const o = ov(u.id); return `<tr>
+      <td><b>${esc(u.full_name)}</b>${u.job_title ? `<br><span class="small muted">${esc(u.job_title)}</span>` : ''}</td><td>${esc(roleLabel(u.role))}</td>
+      <td>${o.plus ? pill(`+${o.plus} extra`, 'ok') : ''} ${o.minus ? pill(`−${o.minus} removed`, 'bad') : ''}${!o.plus && !o.minus ? '<span class="muted small">as role</span>' : ''}</td>
+      <td class="small">${esc([u.phone, u.email].filter(Boolean).join(' · '))}</td><td><code>${esc(u.username)}</code></td><td>${u.active ? pill('Active', 'ok') : pill('Disabled', 'bad')}</td>
+      <td>${u.mfa_enabled ? pill('On', 'ok') : (SETTINGS.mfa_required_roles || []).includes(u.role) ? pill('Required', 'warn') : pill('Off')}</td>
+      <td class="right nowrap">${u.mfa_enabled ? `<button class="btn btn-sm btn-ghost" data-action="mfa-reset" data-id="${u.id}" data-name="${esc(u.full_name)}">Reset two-step</button> ` : ''}${u.role === 'admin' ? '' : `<button class="btn btn-sm btn-ghost" data-action="user-rights" data-id="${u.id}">Rights</button> `}<button class="btn btn-sm btn-ghost" data-action="user-edit" data-id="${u.id}">Edit</button></td></tr>`; }))}</div>`).join('');
+  };
+
+  Object.assign(OPS_A, {
+    'perm-all': (d, e) => e.target.closest('form').querySelectorAll(`label.perm[data-mod="${CSS.escape(d.mod)}"] input`).forEach((i) => { if (!i.disabled) i.checked = true; }),
+    'perm-none': (d, e) => e.target.closest('form').querySelectorAll(`label.perm[data-mod="${CSS.escape(d.mod)}"] input`).forEach((i) => { if (!i.disabled) i.checked = false; }),
+    'user-rights': (d) => {
+      const u = ui.users.find((x) => String(x.id) === d.id), acc = ui.access, role = acc.roles.find((r) => r.key === u.role);
+      const base = new Set(role.perms.includes('*') ? acc.catalogue.map((p) => p.key) : role.perms);
+      const mine = acc.overrides.filter((x) => x.user_id === u.id);
+      const checked = new Set([...base].filter((p) => !mine.some((x) => x.perm === p && !x.allow)));
+      mine.filter((x) => x.allow).forEach((x) => checked.add(x.perm));
+      modal(`Rights · ${u.full_name}`, `<form class="form" data-form="rights-form"><p class="small">Role: <b>${esc(role.name)}</b>. Ticks start from the role; tick or untick to give <b>${esc(u.full_name.split(' ')[0])}</b> extra rights or take some away. Changing the role later keeps these differences.</p>
+        ${permMatrix(acc.catalogue, checked, { base })}
+        <div class="actions"><button type="button" class="btn btn-ghost" data-action="rights-reset" data-id="${u.id}">Same as role</button>${cancelBtn}<button class="btn btn-gold">Save rights</button></div></form>`,
+      async (v) => {
+        const now = new Set(checkedPerms(v));
+        await PUT(`/users/${u.id}/permissions`, { grants: [...now].filter((p) => !base.has(p)), removals: [...base].filter((p) => !now.has(p)) });
+        return `Rights saved for ${esc(u.full_name)}.`;
+      });
+      $('#modal .modal').classList.add('wide');
+    },
+    'rights-reset': async (d) => { await PUT(`/users/${d.id}/permissions`, { grants: [], removals: [] }); closeModal(); toast('Back to the role\'s rights.'); render(); },
+    'role-edit': (d) => {
+      const acc = ui.access, r = acc.roles.find((x) => x.key === d.key), full = r.perms.includes('*');
+      modal(`Role · ${r.name}`, `<form class="form" data-form="role-form"><div class="two"><label>Name<input name="name" value="${esc(r.name)}" required maxlength="60"></label><label>What it is for<input name="description" value="${esc(r.description || '')}" maxlength="200"></label></div>
+        <label class="row"><input type="checkbox" name="full_access" value="1" ${full ? 'checked' : ''} data-full> <b>Full access</b>: everything, now and in future modules (general manager level)</label>
+        <div id="role-perms" ${full ? 'hidden' : ''}>${permMatrix(acc.catalogue, new Set(full ? [] : r.perms))}</div>
+        <p class="small muted">Changes apply to everyone with this role (${r.people}) at their next page load.</p>
+        <div class="actions">${r.builtin ? `<button type="button" class="btn btn-ghost" data-action="role-reset" data-key="${esc(r.key)}">Reset to default</button>` : `<button type="button" class="btn btn-bad" data-action="role-delete" data-key="${esc(r.key)}">Delete role</button>`}${cancelBtn}<button class="btn btn-gold">Save role</button></div></form>`,
+      async (v) => { await PUT(`/roles/${r.key}`, { name: v.name, description: v.description, full_access: !!v.full_access, perms: checkedPerms(v) }); return 'Role saved.'; });
+      $('#modal .modal').classList.add('wide');
+    },
+    'role-new': () => {
+      modal('New role', `<form class="form" data-form="role-form"><div class="three"><label>Name *<input name="name" required maxlength="60" placeholder="e.g. Spa manager"></label><label>Department<input name="department" maxlength="60" list="dept-list"></label><label>What it is for<input name="description" maxlength="200"></label></div>
+        <datalist id="dept-list">${DEPTS.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>${permMatrix(ui.access.catalogue, new Set(['staff.self', 'maintenance.report']))}
+        <div class="actions">${cancelBtn}<button class="btn btn-gold">Create role</button></div></form>`,
+      async (v) => { await POST('/roles', { key: v.name, name: v.name, department: v.department, description: v.description, perms: checkedPerms(v) }); BKOPT = null; return 'Role created.'; });
+      $('#modal .modal').classList.add('wide');
+    },
+    'role-reset': async (d) => { if (!confirm('Put this role back to its original rights?')) return; await POST(`/roles/${d.key}/reset`); closeModal(); toast('Role reset.'); render(); },
+    'role-delete': async (d) => { if (!confirm('Delete this role?')) return; await POST(`/roles/${d.key}/delete`); closeModal(); toast('Role deleted.'); render(); },
+  });
+  document.addEventListener('change', (e) => { if (e.target.dataset.full !== undefined) $('#role-perms').hidden = e.target.checked; });
+
+  OPS_A['demo-enter'] = async () => { await POST('/auth/demo'); location.hash = '#dashboard'; await boot(); };
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
@@ -3060,9 +3165,10 @@
   async function boot() {
     try {
       const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings; MFA = me.mfa || {};
-      CAN = (await GET('/meta')).can;
+      const meta = await GET('/meta'); CAN = meta.can; for (const r of meta.role_list || []) ROLE[r.key] = r.name;
       if (MFA.setup_needed) { await renderForcedSetup(); return; }
       if (ME.role === 'housekeeping' && !location.hash) history.replaceState(null, '', '#housekeeping');
+      if (!DEMO) DEMO = await GET('/demo-info').catch(() => ({}));
       shell(); await render();
       clearInterval(ui.badgeTimer); if (CAN['messages.use']) ui.badgeTimer = setInterval(() => { if (ME && route().r !== 'inbox') updateWaBadge(); }, 30000);
     } catch (e) { if (e.message !== 'Signed out') renderLogin(); }

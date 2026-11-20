@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import { HttpError, audit } from '../auth.js';
 import { getSettings } from './frontoffice.js';
+import { refreshIntent } from './intent.js';
 
 const env = process.env;
 export function waConfig() {
@@ -176,10 +177,10 @@ export async function startConversation(db, user, b) {
   return { id: c.id };
 }
 
-const CONV_SELECT = `SELECT c.*, g.first_name, g.last_name, g.vip, g.whatsapp_opt_in, k.name AS contact_name, k.company AS contact_company, u.full_name AS assigned_name,
+const CONV_SELECT = `SELECT c.*, wi.stage AS intent_stage, wi.score AS intent_score, wi.confidence AS intent_confidence, wi.depth AS intent_depth, wi.signals AS intent_signals, wi.first_purchase_signal_at, g.first_name, g.last_name, g.vip, g.whatsapp_opt_in, k.name AS contact_name, k.company AS contact_company, u.full_name AS assigned_name,
     (SELECT row_to_json(x) FROM (SELECT m.body, m.direction, m.kind, m.status, m.created_at FROM wa_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) x) AS last,
     (SELECT rm.number FROM reservations r JOIN rooms rm ON rm.id=r.room_id WHERE r.guest_id=c.guest_id AND r.status='in_house' ORDER BY r.arrival DESC LIMIT 1) AS room
-  FROM wa_conversations c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN contacts k ON k.id=c.contact_id LEFT JOIN users u ON u.id=c.assigned_to`;
+  FROM wa_conversations c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN contacts k ON k.id=c.contact_id LEFT JOIN users u ON u.id=c.assigned_to LEFT JOIN wa_intents wi ON wi.conversation_id=c.id`;
 const decorate = (c) => ({ ...c, phone: formatPhone(c.wa_id), window_open: windowOpen(c), window_ends: c.last_inbound_at ? new Date(new Date(c.last_inbound_at).getTime() + WINDOW_MS).toISOString() : null,
   display_name: c.first_name ? `${c.first_name} ${c.last_name || ''}`.trim() : c.contact_name || c.profile_name || formatPhone(c.wa_id) });
 
@@ -189,6 +190,7 @@ export async function listConversations(db, { filter = 'open', q = '' } = {}) {
   if (filter === 'unread') w.push('c.unread > 0');
   if (filter === 'in_house') w.push("EXISTS (SELECT 1 FROM reservations r WHERE r.guest_id=c.guest_id AND r.status='in_house')");
   if (filter === 'done') w.push("c.status='done'");
+  if (filter === 'hot') w.push("wi.stage IN ('buyer','ready') AND c.status='open'");
   if (q) { p.push(`%${String(q).toLowerCase().slice(0, 60)}%`); w.push(`(lower(coalesce(g.first_name,'') || ' ' || coalesce(g.last_name,'')) LIKE $1 OR lower(coalesce(c.profile_name,'')) LIKE $1 OR lower(coalesce(k.name,'')) LIKE $1 OR c.wa_id LIKE $1)`); }
   const { rows } = await db.query(`${CONV_SELECT} ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY c.last_message_at DESC LIMIT 200`, p);
   return rows.map(decorate);
@@ -349,6 +351,7 @@ export async function handleWebhook(db, payload) {
           ON CONFLICT (wa_message_id) DO NOTHING`, [c.id, kind, body.slice(0, 4096), String(msg.id).slice(0, 200), at]);
         if (!rowCount) continue;
         received++;
+        await refreshIntent(db, c.id);
         await db.query(`UPDATE wa_conversations SET last_inbound_at=GREATEST(COALESCE(last_inbound_at, $2), $2), last_message_at=now(), unread=unread+1, status='open' WHERE id=$1`, [c.id, at]);
         if (kind === 'text' && STOP.test(body) && !c.opted_out_at) {
           await db.query('UPDATE wa_conversations SET opted_out_at=now() WHERE id=$1', [c.id]);

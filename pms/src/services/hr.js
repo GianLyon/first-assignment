@@ -1,5 +1,5 @@
 // Phase 6: HR & payroll — employees, rosters, attendance, leave, staff advances and payroll.
-import { HttpError, audit, can } from '../auth.js';
+import { HttpError, audit, can, hasAll } from '../auth.js';
 import { postJournal } from '../ledger.js';
 import { getSettings } from './frontoffice.js';
 
@@ -130,7 +130,7 @@ export async function decideLeave(db, user, id, { decision, note }) {
   const { rows: [l] } = await db.query('SELECT l.*, e.user_id FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.id=$1 FOR UPDATE OF l', [id]);
   if (!l) throw new HttpError(404, 'Leave request not found.');
   if (l.status !== 'pending') throw new HttpError(409, 'This request has already been decided.');
-  if (l.user_id === user.id && user.role !== 'admin') throw new HttpError(403, 'You cannot approve your own leave.');
+  if (l.user_id === user.id && !hasAll(user)) throw new HttpError(403, 'You cannot approve your own leave.');
   if (!['approved', 'rejected'].includes(decision)) throw new HttpError(400, 'Approve or reject.');
   const n = text(note, 'Note', { required: decision === 'rejected', max: 300 });
   await db.query('UPDATE leave_requests SET status=$2, decided_by=$3, decided_at=now(), decision_note=$4 WHERE id=$1', [id, decision, user.id, n]);
@@ -347,7 +347,7 @@ export async function updateLine(db, user, id, employeeId, b) {
 export async function approveRun(db, user, id) {
   const run = await runForUpdate(db, id);
   if (run.status !== 'draft') throw new HttpError(409, 'Only a draft payroll can be approved.');
-  if (run.created_by === user.id && user.role !== 'admin') throw new HttpError(403, 'Someone other than the person who prepared the payroll must approve it.');
+  if (run.created_by === user.id && !hasAll(user)) throw new HttpError(403, 'Someone other than the person who prepared the payroll must approve it.');
   await db.query("UPDATE payroll_runs SET status='approved', approved_by=$2, approved_at=now() WHERE id=$1", [id, user.id]);
   await audit(db, user, 'hr.payroll_approve', 'payroll_run', id, { period: run.period });
 }

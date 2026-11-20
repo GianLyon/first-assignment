@@ -8,7 +8,7 @@ import { dashboardAnalytics } from '../services/analytics.js';
 import * as demo from '../services/demo.js';
 import { tx } from '../db.js';
 import {
-  HttpError, requireUser, requirePerm, can, ROLES, PERMISSIONS, ALL_PERMISSIONS, hashPassword, verifyPassword, createSession, sessionCookie, clearCookie,
+  HttpError, requireUser, requirePerm, can, ROLES, PERMISSIONS, ALL_PERMISSIONS, PERM_INFO, hasAll, hashPassword, verifyPassword, createSession, sessionCookie, clearCookie,
   destroySession, checkThrottle, recordFailure, clearFailures, audit,
 } from '../auth.js';
 import * as fo from '../services/frontoffice.js';
@@ -114,7 +114,7 @@ export function apiRouter(pool) {
   r.get('/auth/me', requireUser, async (req, res) => {
     const { group_token_hash, ...s } = await fo.getSettings(pool);
     const { rows: [m] } = await pool.query('SELECT cardinality(recovery_codes)::int AS left FROM users WHERE id=$1', [req.user.id]);
-    res.json({ user: req.user, permissions: PERMISSIONS[req.user.role], settings: s, mfa: { enabled: req.user.mfa_enabled, required: req.user.mfa_required, setup_needed: req.user.mfa_required && !req.user.mfa_enabled, recovery_codes_left: m.left } });
+    res.json({ user: { ...req.user, perms: undefined, denied: undefined }, permissions: req.user.perms, settings: s, mfa: { enabled: req.user.mfa_enabled, required: req.user.mfa_required, setup_needed: req.user.mfa_required && !req.user.mfa_enabled, recovery_codes_left: m.left } });
   });
   r.post('/auth/change-password', requireUser, async (req, res) => {
     const { rows: [u] } = await pool.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
@@ -463,7 +463,8 @@ export function apiRouter(pool) {
   r.post('/users', requirePerm('users.manage'), inTx(async (db, req) => {
     const b = req.body || {}; const username = String(b.username || '').trim().toLowerCase();
     if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new HttpError(400, 'Username: 3–40 lowercase letters, numbers, dots, dashes or underscores.');
-    if (!ROLES.includes(b.role)) throw new HttpError(400, 'Choose a role.');
+    if (!(await db.query('SELECT 1 FROM roles WHERE key=$1', [String(b.role || '')])).rows[0]) throw new HttpError(400, 'Choose a role.');
+    if (!hasAll(req.user) && (await db.query("SELECT 1 FROM roles WHERE key=$1 AND '*' = ANY(perms)", [b.role])).rows[0]) throw new HttpError(403, 'Only someone with full access can give full access.');
     if (!String(b.full_name || '').trim()) throw new HttpError(400, 'Full name is required.');
     const exists = await db.query('SELECT 1 FROM users WHERE username=$1', [username]);
     if (exists.rows[0]) throw new HttpError(409, 'That username is taken.');
@@ -474,7 +475,8 @@ export function apiRouter(pool) {
   }));
   r.put('/users/:id', requirePerm('users.manage'), inTx(async (db, req) => {
     const b = req.body || {}; const uid = id(req);
-    if (b.role !== undefined && !ROLES.includes(b.role)) throw new HttpError(400, 'Choose a role.');
+    if (b.role !== undefined && !(await db.query('SELECT 1 FROM roles WHERE key=$1', [String(b.role || '')])).rows[0]) throw new HttpError(400, 'Choose a role.');
+    if (b.role && b.role !== 'admin' && !hasAll(req.user) && (await db.query("SELECT 1 FROM roles WHERE key=$1 AND '*' = ANY(perms)", [b.role])).rows[0]) throw new HttpError(403, 'Only someone with full access can give full access.');
     if (uid === req.user.id && (b.active === false || (b.role && b.role !== req.user.role))) throw new HttpError(400, 'You cannot disable or change the role of your own account.');
     const { rows: [u] } = await db.query('UPDATE users SET full_name=COALESCE($2, full_name), role=COALESCE($3, role), active=COALESCE($4, active) WHERE id=$1 RETURNING id, username, full_name, role, active',
       [uid, b.full_name ? String(b.full_name).trim() : null, b.role || null, typeof b.active === 'boolean' ? b.active : null]);
@@ -489,7 +491,68 @@ export function apiRouter(pool) {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     res.json((await pool.query('SELECT a.*, u.full_name FROM audit_log a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT $1', [limit])).rows);
   });
-  r.get('/meta', (_req, res) => res.json({ roles: ROLES, payment_methods: PAYMENT_METHODS, departments: DEPARTMENTS, can: Object.fromEntries(ALL_PERMISSIONS.map((p) => [p, can(_req.user, p)])) }));
+  /* ---------- access: roles and each person's rights ---------- */
+  const usersMgr = requirePerm('users.manage');
+  r.get('/access', usersMgr, async (_req, res) => {
+    const roles = (await pool.query('SELECT r.*, (SELECT count(*) FROM users u WHERE u.role=r.key AND u.active)::int AS people FROM roles r ORDER BY r.sort, r.name')).rows;
+    const overrides = (await pool.query('SELECT user_id, perm, allow FROM user_permissions ORDER BY user_id, perm')).rows;
+    res.json({ catalogue: ALL_PERMISSIONS.map((p) => ({ key: p, module: PERM_INFO[p]?.[0] || 'Other', label: PERM_INFO[p]?.[1] || p })), roles, overrides });
+  });
+  const cleanPerms = (list) => [...new Set((Array.isArray(list) ? list : []).filter((p) => ALL_PERMISSIONS.includes(p)))];
+  r.post('/roles', usersMgr, inTx(async (db, req) => {
+    const b = req.body || {}, key = String(b.key || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!/^[a-z][a-z0-9_]{1,39}$/.test(key)) throw new HttpError(400, 'Give the role a short name (letters and numbers).');
+    const name = String(b.name || '').trim().slice(0, 60); if (!name) throw new HttpError(400, 'Name is required.');
+    if ((await db.query('SELECT 1 FROM roles WHERE key=$1', [key])).rows[0]) throw new HttpError(409, 'A role with that name exists.');
+    const { rows: [ro] } = await db.query('INSERT INTO roles (key, name, description, department, perms, builtin, sort) VALUES ($1,$2,$3,$4,$5,FALSE,90) RETURNING *',
+      [key, name, String(b.description || '').trim().slice(0, 200) || null, String(b.department || '').trim().slice(0, 60) || null, cleanPerms(b.perms)]);
+    await audit(db, req.user, 'role.create', 'role', null, { key, perms: ro.perms.length });
+    return ro;
+  }));
+  r.put('/roles/:key', usersMgr, inTx(async (db, req) => {
+    const b = req.body || {}, key = String(req.params.key);
+    if (key === 'admin') throw new HttpError(400, 'The administrator always has full access.');
+    const { rows: [cur] } = await db.query('SELECT * FROM roles WHERE key=$1 FOR UPDATE', [key]);
+    if (!cur) throw new HttpError(404, 'Role not found.');
+    if (cur.perms.includes('*') && !hasAll(req.user)) throw new HttpError(403, 'Only someone with full access can change this role.');
+    const perms = b.full_access === true ? ['*'] : cleanPerms(b.perms);
+    if (perms.includes('*') && !hasAll(req.user)) throw new HttpError(403, 'Only someone with full access can give full access.');
+    if (key === req.user.role && !perms.includes('*') && !perms.includes('users.manage')) throw new HttpError(400, 'You would lose access to this page. Ask someone else to change your own role.');
+    const { rows: [ro] } = await db.query('UPDATE roles SET name=$2, description=$3, perms=$4 WHERE key=$1 RETURNING *',
+      [key, String(b.name || cur.name).trim().slice(0, 60), b.description !== undefined ? String(b.description || '').trim().slice(0, 200) || null : cur.description, perms]);
+    await audit(db, req.user, 'role.update', 'role', null, { key, added: perms.filter((p) => !cur.perms.includes(p)), removed: cur.perms.filter((p) => !perms.includes(p)) });
+    return ro;
+  }));
+  r.post('/roles/:key/reset', usersMgr, inTx(async (db, req) => {
+    const key = String(req.params.key);
+    if (!PERMISSIONS[key]) throw new HttpError(400, 'Only built-in roles have defaults.');
+    if (PERMISSIONS[key].includes('*') && !hasAll(req.user)) throw new HttpError(403, 'Only someone with full access can change this role.');
+    await db.query('UPDATE roles SET perms=$2 WHERE key=$1', [key, PERMISSIONS[key]]);
+    await audit(db, req.user, 'role.reset', 'role', null, { key });
+    return { ok: true };
+  }));
+  r.post('/roles/:key/delete', usersMgr, inTx(async (db, req) => {
+    const { rows: [ro] } = await db.query('SELECT builtin, (SELECT count(*) FROM users WHERE role=$1)::int AS n FROM roles WHERE key=$1', [req.params.key]);
+    if (!ro) throw new HttpError(404, 'Role not found.');
+    if (ro.builtin) throw new HttpError(400, 'Built-in roles cannot be deleted.');
+    if (ro.n) throw new HttpError(409, `${ro.n} staff account${ro.n === 1 ? ' has' : 's have'} this role. Give them another role first.`);
+    await db.query('DELETE FROM roles WHERE key=$1', [req.params.key]);
+    await audit(db, req.user, 'role.delete', 'role', null, { key: req.params.key });
+    return { ok: true };
+  }));
+  // one person's rights on top of their role: grants add, removals take away
+  r.put('/users/:id/permissions', usersMgr, inTx(async (db, req) => {
+    const uid = id(req), grants = cleanPerms(req.body?.grants), removals = cleanPerms(req.body?.removals).filter((p) => !grants.includes(p));
+    if (uid === req.user.id && removals.includes('users.manage')) throw new HttpError(400, 'You cannot take away your own access to staff accounts.');
+    if (!(await db.query('SELECT 1 FROM users WHERE id=$1', [uid])).rows[0]) throw new HttpError(404, 'User not found.');
+    await db.query('DELETE FROM user_permissions WHERE user_id=$1', [uid]);
+    for (const p of grants) await db.query('INSERT INTO user_permissions (user_id, perm, allow) VALUES ($1,$2,TRUE)', [uid, p]);
+    for (const p of removals) await db.query('INSERT INTO user_permissions (user_id, perm, allow) VALUES ($1,$2,FALSE)', [uid, p]);
+    await audit(db, req.user, 'user.permissions', 'user', uid, { grants, removals });
+    return { ok: true };
+  }));
+
+  r.get('/meta', async (_req, res) => res.json({ role_list: (await pool.query('SELECT key, name FROM roles ORDER BY sort, name')).rows, roles: ROLES, payment_methods: PAYMENT_METHODS, departments: DEPARTMENTS, can: Object.fromEntries(ALL_PERMISSIONS.map((p) => [p, can(_req.user, p)])) }));
 
   return r;
 }

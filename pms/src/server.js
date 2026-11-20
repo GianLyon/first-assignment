@@ -8,6 +8,7 @@ import { queueGuestEmails } from './services/crm.js';
 import { backupIfDue } from './backup.js';
 import { runAutomations, deliverQueued } from './services/whatsapp.js';
 import { tx } from './db.js';
+import { prepareDemo, nightlyDemoReset } from './demomode.js';
 
 const pool = createPool(config.databaseUrl);
 const applied = await migrate(pool);
@@ -16,6 +17,7 @@ if (config.autoSeed) {
   if (config.production && !process.env.ADMIN_PASSWORD) { console.error('AUTO_SEED needs ADMIN_PASSWORD in production.'); process.exit(1); }
   await seedAll(pool);
 }
+await prepareDemo(pool);
 const server = createApp(pool).listen(config.port, () => console.log(`Azeli PMS running on http://localhost:${config.port}`));
 
 // Push queued availability/rate changes to channels every ARI_PUSH_SECONDS (default 20; 0 = off)
@@ -33,7 +35,8 @@ const mailTimer = setInterval(async () => {
   try { await tx(pool, (db) => generateDue(db)); await tx(pool, (db) => queueGuestEmails(db));
     try { await tx(pool, (db) => runAutomations(db)); await deliverQueued(pool); } catch (e) { console.error('WhatsApp automations failed:', e.message); }
     try { await pullChannex(pool); } catch (e) { console.error('Channex pull failed:', e.message); }
-    await backupIfDue(pool); await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
+    await backupIfDue(pool);
+    try { await nightlyDemoReset(pool); } catch (e) { console.error('Demo reset failed:', e.message); } await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
 }, Number(process.env.REPORT_CHECK_SECONDS || 60) * 1000);
 
 const shutdown = () => { if (timer) clearInterval(timer); clearInterval(mailTimer); server.close(() => pool.end().then(() => process.exit(0))); };

@@ -669,3 +669,28 @@ td a:hover { text-decoration: underline; }
 
 /* phones: one column (the sidebar slides in from the menu button) */
 @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .side { width: 250px; } .top-actions { flex-wrap: wrap; } .topbar .user { display: none; } }
+
+/* rights matrix */
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.perm-mod { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; }
+.perm-mod legend { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 600; padding: 0 4px; }
+.perm-mod legend .link { text-transform: none; letter-spacing: 0; color: var(--accent); }
+.form label.perm { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; color: var(--text); font-size: .82rem; padding: 2px 0; }
+.form label.perm input { width: auto; min-height: 0; margin-top: 3px; }
+.modal:has(form[data-form=rights-form]), .modal:has(form[data-form=role-form]) { width: min(1080px, 100%); }
+
+/* buying signals */
+.intent { border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 12px; background: #fafbfc; }
+.intent.st-ready { border-color: #f3cdc7; background: #fdf6f5; }
+.intent.st-buyer { border-color: #f2dcb0; background: #fffaf0; }
+.intent h3 { margin: 0 0 6px; }
+.meter { display: grid; grid-template-columns: 96px 1fr 38px; gap: 6px; align-items: center; font-size: .76rem; margin: 3px 0; }
+.meter .hk-mini { width: auto; }
+.meter b { text-align: right; font-variant-numeric: tabular-nums; }
+.sig { list-style: none; padding: 0; margin: 8px 0; font-size: .8rem; }
+.sig li { padding: 3px 0; border-bottom: 1px dashed var(--line-2); }
+.sig li b { display: inline-block; min-width: 30px; color: var(--ok); }
+.sig li.neg b { color: var(--bad); }
+
+.demo-strip { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 6px 16px; background: #e8f0fd; border-bottom: 1px solid #c9dbfa; font-size: .82rem; }
+#demo-entry .btn { width: 100%; justify-content: center; }
