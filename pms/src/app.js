@@ -14,6 +14,7 @@ import { crmRouter, marketingPublicRouter } from './routes/crm.js';
 import { apiRouter } from './routes/api.js';
 import { messagingRouter, whatsappWebhookRouter } from './routes/messaging.js';
 import { assistantRouter } from './routes/assistant.js';
+import { demoGuard, demoSignIn, demoMode } from './demomode.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -54,6 +55,10 @@ export function createApp(pool) {
     }
     next();
   });
+  // the public demo (DEMO_MODE=1): one-click sign-in, and the risky parts switched off
+  app.post('/api/auth/demo', async (_req, res) => res.json(await demoSignIn(pool, res)));
+  app.get('/api/demo-info', (_req, res) => res.json({ demo: demoMode(), contact: process.env.DEMO_CONTACT_URL || 'https://azelitech.com/contact.html?service=pms' }));
+  app.use('/api', demoGuard);
   app.use('/api/public', publicRouter(pool));
   app.use('/api/channels', inboundRouter(pool));
   app.use('/api/group', groupPublicRouter(pool));

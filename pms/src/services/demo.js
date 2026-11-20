@@ -9,6 +9,7 @@ import * as fin from './finance.js';
 import * as ops from './operations.js';
 import { receive } from './inventory.js';
 import { normalizePhone } from './whatsapp.js';
+import { refreshIntent } from './intent.js';
 
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const dow = (d) => new Date(d + 'T00:00:00Z').getUTCDay();
@@ -140,7 +141,10 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
           const bal = Number(r.bal);
           if (bal > 0) {
             const method = r.company_id ? 'company_account' : R.weighted([['mobile_money', 38], ['cash', 27], ['card', 30], ['bank_transfer', 5]]);
-            await fo.postPayment(db, user, r.id, { amount: bal, method, company_id: r.company_id || undefined, reference: method === 'mobile_money' ? `MM${R.int(100000000, 999999999)}` : undefined });
+            const pay = (m) => fo.postPayment(db, user, r.id, { amount: bal, method: m, company_id: m === 'company_account' ? r.company_id : undefined, reference: m === 'mobile_money' ? `MM${R.int(100000000, 999999999)}` : undefined });
+            // a company at its credit limit pays this one by bank transfer (as their accounts office would)
+            if (method === 'company_account') { try { await db.query('SAVEPOINT co_pay'); await pay(method); await db.query('RELEASE SAVEPOINT co_pay'); } catch (e) { if (e.status !== 409) throw e; await db.query('ROLLBACK TO SAVEPOINT co_pay'); await pay('bank_transfer'); } }
+            else await pay(method);
           }
           await fo.checkOut(db, user, r.id);
         }
@@ -254,6 +258,8 @@ async function sampleWhatsApp(db) {
       ['in', 'What time is check-out?', 600], ['out', 'Check-out is at 11:00. We can offer a late check-out until 13:00 for UGX 50,000. Shall I book it?', 590]]],
     [coming[0], () => [['in', 'Good morning, can you arrange an airport pickup from Entebbe? My flight lands at 14:20.', 40]]],
     [coming[1], (g) => [['out', `Hello ${g.first_name}, your booking ${g.code} at ${s.property_name} is confirmed. Reply here if you need anything before you arrive.`, 3000, 'booking_confirmed']]],
+    [rows.filter((r) => r.status === 'reserved')[2], () => [['in', 'Hello, do you have a deluxe room available from 12th Dec for 3 nights? We are 2 adults.', 75], ['out', 'Yes we do! The Deluxe Room is UGX 350,000 per night with breakfast.', 70], ['in', 'Great. Can I pay the deposit by mobile money? I want to book it now.', 12]]],
+    [rows.filter((r) => r.status === 'reserved')[3], () => [['in', 'Hi, just checking what you offer. Where are you located?', 300]]],
   ];
   for (const [g, script] of scripts) {
     const waId = g && normalizePhone(g.phone, s.phone_country_code);
@@ -269,6 +275,7 @@ async function sampleWhatsApp(db) {
     }
     const lastIn = msgs.filter(([d]) => d === 'in').map(([, , a]) => a);
     const unread = msgs.length - 1 - msgs.map(([d]) => d).lastIndexOf('out');
+    await refreshIntent(db, c.id);
     await db.query(`UPDATE wa_conversations SET last_inbound_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() - make_interval(mins => $2::int) END,
       last_message_at = now() - make_interval(mins => $3), unread=$4 WHERE id=$1`, [c.id, lastIn.length ? Math.min(...lastIn) : null, Math.min(...msgs.map(([, , a]) => a)), msgs.at(-1)[0] === 'in' ? Math.min(unread, msgs.length) : 0]);
   }
@@ -280,7 +287,7 @@ async function sampleWhatsApp(db) {
 const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox', 'amenity_bookings', 'assets', 'attendance', 'bank_reconciliations', 'bill_grns', 'bill_lines',
   'campaigns', 'channel_log', 'companies', 'depreciation_runs', 'email_outbox', 'employees', 'event_extras', 'event_payments', 'events', 'expenses', 'folio_charges', 'goods_received',
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
-  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks',
+  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
   'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
 

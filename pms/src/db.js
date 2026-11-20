@@ -46,5 +46,13 @@ export async function migrate(pool) {
     });
     applied.push(file);
   }
+  // built-in roles live in the code; make sure the database has them (loaded here to keep db.js free of imports)
+  if (files.includes('017_access.sql')) await (await import('./auth.js')).syncRoles(pool);
+  // first start with buying signals: score the WhatsApp conversations already in the inbox
+  if (applied.includes('018_intent.sql')) {
+    const { refreshIntent } = await import('./services/intent.js');
+    const { rows } = await pool.query("SELECT DISTINCT conversation_id AS id FROM wa_messages WHERE direction='in' AND created_at > now() - interval '14 days'");
+    for (const r of rows) await refreshIntent(pool, r.id);
+  }
   return applied;
 }

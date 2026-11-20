@@ -4,7 +4,7 @@
 //  2. An AI assistant (Claude) that answers questions about the hotel's day using read-only tools and drafts
 //     WhatsApp replies. It never changes anything itself: staff review and send.
 import Anthropic from '@anthropic-ai/sdk';
-import { HttpError } from '../auth.js';
+import { HttpError, can } from '../auth.js';
 import { getSettings } from './frontoffice.js';
 
 const addDays = (d, n) => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
@@ -149,6 +149,8 @@ How you work:
 
 const TOOLS = [
   { name: 'get_todo_list', description: "Today's front-desk to-do list worked out from the system: departures to check out and settle, payments to collect, arrivals, overbookings, open bills, WhatsApps waiting, busy days ahead. Start here for questions like 'what should I do now'.", input_schema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'get_department_insights', description: "What needs attention in one department or all: management, front_office, finance (what does not balance, overdue invoices and bills, bank reconciliation, payroll, voids), procurement (running out, below zero, orders and requisitions waiting, stock counts), marketing (quiet weeks, OTA share, consent, WhatsApp leads ready to book), housekeeping (rooms, repairs, blocks), fnb (recipes, food cost, voids), hr (missing staff details, leave, roster).", input_schema: { type: 'object', properties: { department: { type: 'string', enum: ['all', 'management', 'front_office', 'finance', 'procurement', 'marketing', 'housekeeping', 'fnb', 'hr'] } }, additionalProperties: false } },
+  { name: 'get_whatsapp_leads', description: 'WhatsApp conversations ranked by buying intent: stage (explorer, interested, buyer, ready to book), score, confidence, depth and the signals seen.', input_schema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'get_day', description: 'Arrivals, departures and in-house guests for one date, with room, balance and status.', input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD. Omit for the current business date.' } }, additionalProperties: false } },
   { name: 'get_forecast', description: 'Rooms sold, occupancy %, arrivals, departures and events for each of the coming days. Use for planning busy days and staffing.', input_schema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 60 } }, additionalProperties: false } },
   { name: 'find_guest', description: 'Search guests by name, phone or booking number. Returns their bookings with dates, room, balance and contact.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } },
@@ -166,6 +168,19 @@ async function runTool(db, nameOf, input, out) {
       const { rows } = await db.query(`${BALANCES} WHERE r.status IN ('reserved','in_house','checked_out') AND r.arrival <= $1 AND r.departure >= $1 ORDER BY r.status, rm.number`, [d]);
       const pick = (r) => ({ booking: r.code, guest: name(r), vip: r.vip, room: r.room, room_type: r.room_type, status: r.status, arrival: r.arrival, departure: r.departure, source: r.source, balance: r.charges - r.paid, company_account: !!r.company_id });
       return { date: d, arrivals: rows.filter((r) => r.arrival === d && r.status !== 'checked_out').map(pick), departures: rows.filter((r) => r.departure === d).map(pick), in_house_staying: rows.filter((r) => r.status === 'in_house' && r.departure > d && r.arrival < d).map(pick) };
+    }
+    case 'get_department_insights': {
+      const { insights, DEPT_PERMS } = await import('./insights.js');
+      const allowed = Object.entries(DEPT_PERMS).filter(([, perms]) => perms.some((p) => out.can(p))).map(([d]) => d);
+      const want = input.department && input.department !== 'all' ? [input.department].filter((d) => allowed.includes(d)) : allowed;
+      if (!want.length) return { error: 'This user cannot see that department.' };
+      const r = await insights(db, { only: want });
+      return { business_date: r.business_date, departments: r.departments.map((d) => ({ department: d.name, items: d.items.map(({ link, dept, ...x }) => x) })) };
+    }
+    case 'get_whatsapp_leads': {
+      const { rows } = await db.query(`SELECT c.id, COALESCE(g.first_name || ' ' || g.last_name, c.profile_name, '+' || c.wa_id) AS who, i.stage, i.score, i.confidence, i.depth, i.signals, i.updated_at
+        FROM wa_intents i JOIN wa_conversations c ON c.id=i.conversation_id LEFT JOIN guests g ON g.id=c.guest_id WHERE c.status='open' ORDER BY i.score DESC LIMIT 15`);
+      return { leads: rows.map((r) => ({ ...r, signals: r.signals.map((x) => x.label) })) };
     }
     case 'get_forecast': return { from: bd, days: await forecast(db, bd, Math.min(60, Math.max(1, Number(input.days) || 14))) };
     case 'find_guest': {
@@ -249,7 +264,7 @@ export async function chat(pool, user, history) {
   const s = await getSettings(pool), local = localNow(s.timezone, new Date());
   // today's facts as a system message after the history, so the cached prefix stays the same
   msgs.push({ role: 'system', content: `Hotel: ${s.property_name}. Business date: ${dayName(ymd(s.business_date))} (${ymd(s.business_date)}). Local time: ${local.hm}. Check-in from ${String(s.check_in_time).slice(0, 5)}, check-out by ${String(s.check_out_time).slice(0, 5)}. You are talking to ${user.full_name} (${user.role.replace('_', ' ')}).` });
-  const out = { drafts: [] };
+  const out = { drafts: [], can: (p) => can(user, p) };
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
   let reply = '', ok = false;
   try {

@@ -114,7 +114,7 @@ test('AI assistant: tools read the system, drafts are never sent, the request sh
     assert.deepEqual(first.body.cache_control, { type: 'ephemeral' });
     assert.match(first.body.system[0].text, /front-desk assistant inside Azeli PMS/);
     assert.ok(!/2026-11-11/.test(first.body.system[0].text)); // the cached part has no dates
-    assert.deepEqual(first.body.tools.map((x) => x.name), ['get_todo_list', 'get_day', 'get_forecast', 'find_guest', 'get_whatsapp_inbox', 'get_whatsapp_conversation', 'draft_whatsapp_reply']);
+    assert.deepEqual(first.body.tools.map((x) => x.name), ['get_todo_list', 'get_department_insights', 'get_whatsapp_leads', 'get_day', 'get_forecast', 'find_guest', 'get_whatsapp_inbox', 'get_whatsapp_conversation', 'draft_whatsapp_reply']);
     assert.equal(first.body.messages[0].content, 'What should I do first?');
     assert.equal(first.body.messages[1].role, 'system'); assert.match(first.body.messages[1].content, /Business date: Wed 11 Nov/);
     // tool results went back, as one user message with both results

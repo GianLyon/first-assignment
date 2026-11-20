@@ -11,6 +11,10 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'dist-site');
 const SITE = 'https://azelitech.com';
 const PAGES = ['index.html', 'services.html', 'work.html', 'how-we-work.html', 'packages.html', 'contact.html', 'pms.html'];
+const BLOG = ['blog/index.html', 'blog/why-azeli-hotel-marketing.html', 'blog/how-to-increase-hotel-occupancy.html', 'blog/best-hotel-pms-uganda.html', 'blog/ota-management-made-easy.html'];
+// the live PMS demo (a separate Azeli PMS service running with DEMO_MODE=1). Without it the
+// website links to the small browser-only mock in pms-demo/.
+const DEMO_URL = (process.env.DEMO_URL || '').replace(/\/+$/, '');
 const CONSOLE_URL = (process.env.CONSOLE_URL || '').replace(/\/+$/, '');
 
 // what the pages contain in the repository (replaced by the published values)
@@ -66,8 +70,10 @@ export async function build() {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
   const content = await fetchContent();
-  for (const page of PAGES) {
+  await mkdir(path.join(OUT, 'blog'), { recursive: true });
+  for (const page of [...PAGES, ...BLOG]) {
     let html = await readFile(path.join(ROOT, page), 'utf8');
+    if (DEMO_URL) html = html.split('href="pms-demo/index.html"').join(`href="${esc(DEMO_URL)}/" target="_blank" rel="noopener"`);
     if (content) {
       html = applyContact(html, content.contact);
       html = block(html, 'announcement', render.announcement(content.announcement));
@@ -93,7 +99,7 @@ export async function build() {
   for (const dir of ['images', 'pms-demo']) await cp(path.join(ROOT, dir), path.join(OUT, dir), { recursive: true, filter: (src) => !/README[^/]*$/i.test(src) });
   await writeFile(path.join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
   const today = new Date().toISOString().slice(0, 10);
-  await writeFile(path.join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['', ...PAGES.filter((p) => p !== 'index.html')].map((p) => `  <url><loc>${SITE}/${p}</loc><lastmod>${today}</lastmod></url>`).join('\n')}\n</urlset>\n`);
+  await writeFile(path.join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['', ...PAGES.filter((p) => p !== 'index.html'), ...BLOG.map((p) => p.replace(/index\.html$/, ''))].map((p) => `  <url><loc>${SITE}/${p}</loc><lastmod>${today}</lastmod></url>`).join('\n')}\n</urlset>\n`);
   const count = async (d) => (await readdir(d, { withFileTypes: true })).reduce(async (n, e) => (await n) + (e.isDirectory() ? await count(path.join(d, e.name)) : 1), Promise.resolve(0));
   console.log(`Website built in dist-site/ (${await count(OUT)} files).`);
 }

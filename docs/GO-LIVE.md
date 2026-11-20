@@ -207,6 +207,34 @@ Booking.com, Expedia and Agoda only connect to systems they have certified, and 
 
 If a booking cannot be saved (usually a room type that is not mapped), it is not acknowledged: it stays in Channex, the channel shows **Error** with the reason in **Log**, and Channex emails the hotel after 30 minutes. Fix the mapping and press **Get bookings**.
 
+# Part G: the public demo (for the website)
+
+The **Try the live demo** buttons on azelitech.com open a small browser-only mock until this is done. With it, they open the real Azeli PMS with a sample hotel, so prospective clients always see the current version.
+
+**What it costs:** a second Render web service (*Starter*, $7 a month) and a small database (*Basic-256mb*, about $6 a month). Nothing else: the demo sends no emails or WhatsApps and uses no AI unless you add a key to it.
+
+1. Render → **New → PostgreSQL**: name `azeli-demo-db`, region Frankfurt, plan *Basic-256mb*. **Create**.
+2. Render → **New → Web Service** → this repository, branch `main`. Name `azeli-demo`, root directory `pms`, build `npm ci`, start `npm start`, region Frankfurt, plan *Starter*.
+3. **Environment**:
+   | Key | Value |
+   |---|---|
+   | `DATABASE_URL` | the *Internal Database URL* of `azeli-demo-db` |
+   | `DEMO_MODE` | `1` |
+   | `NODE_ENV` | `production` |
+   | `TRUST_PROXY` | `1` |
+   | `AUTO_SEED` | `1` |
+   | `PROPERTY_NAME` | `Azeli Demo Hotel` |
+   | `ADMIN_PASSWORD` | a long random password (only you use it) |
+   | `PUBLIC_URL` | `https://demo.azelitech.com` |
+   | `DEMO_CONTACT_URL` | `https://azelitech.com/contact.html?service=pms` |
+
+   Do **not** add the WhatsApp, Channex, email, backup or Anthropic keys of a real hotel.
+4. **Create Web Service.** On first start it fills itself with the sample hotel (about two minutes).
+5. **Address**: in the service → **Settings → Custom domains** add `demo.azelitech.com`, then in Cloudflare add the CNAME record Render shows (as in Step 5).
+6. **Vercel** → the website project → **Settings → Environment Variables** → add `DEMO_URL` = `https://demo.azelitech.com` → **Deployments → Redeploy**. Every *Try the live demo* button now opens the real system.
+
+Visitors press **Explore the demo hotel** and are in as a general manager. They can take bookings, check guests in, sell in the restaurant and try every page, but cannot change passwords, users or roles, take backups, or send anything outside the system. Everything they do is wiped at 03:00 Kampala time, when the sample hotel is rebuilt. Because the demo runs the same code as the hotels, it updates itself whenever `main` changes.
+
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 

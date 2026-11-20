@@ -1,6 +1,6 @@
 // Phase 5: Accounting & finance — receivables, payables, expenses, transfers, chart of accounts,
 // manual journals, books lock, financial statements, VAT summary and bank reconciliation.
-import { HttpError, audit } from '../auth.js';
+import { HttpError, audit, hasAll } from '../auth.js';
 import { postJournal, vatPortion, REVENUE } from '../ledger.js';
 import { getSettings } from './frontoffice.js';
 
@@ -363,7 +363,7 @@ export async function setLock(db, user, until) {
   if (until !== null && !isDate(until)) throw new HttpError(400, 'Choose a date.');
   if (until && until >= s.business_date) throw new HttpError(400, 'You can only close dates before the current business date.');
   const current = s.books_locked_until ? String(s.books_locked_until).slice(0, 10) : null;
-  if (current && (until === null || until < current) && user.role !== 'admin') throw new HttpError(403, 'Only an administrator can reopen closed dates.');
+  if (current && (until === null || until < current) && !hasAll(user)) throw new HttpError(403, 'Only an administrator can reopen closed dates.');
   await db.query('UPDATE settings SET books_locked_until=$1 WHERE id=1', [until]);
   await audit(db, user, 'finance.books_lock', 'settings', 1, { from: current, to: until });
   return { books_locked_until: until };

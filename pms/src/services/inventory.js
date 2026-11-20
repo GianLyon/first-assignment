@@ -1,7 +1,7 @@
 // Phase 3: Inventory, purchasing, requisitions, recipes and stock counts.
 // Stock is valued at weighted average cost per item. Every movement is recorded in stock_movements
 // and every change in value posts a balanced journal entry.
-import { HttpError, audit, can } from '../auth.js';
+import { HttpError, audit, can, hasAll } from '../auth.js';
 import { postJournal } from '../ledger.js';
 import { getSettings } from './frontoffice.js';
 
@@ -18,7 +18,7 @@ const text = (v, field, { required = false, max = 200 } = {}) => {
 };
 const posQty = (v, field = 'Quantity') => { const n = q3(v); if (!(n > 0) || n > 1e9) throw new HttpError(400, `${field} must be more than zero.`); return n; };
 const cost = (v) => { const n = Math.round(Number(v) * 100) / 100; if (!(n >= 0) || n > 1e12) throw new HttpError(400, 'Unit cost must be zero or more.'); return n; };
-const isAdmin = (u) => u.role === 'admin';
+const isAdmin = (u) => hasAll(u);
 
 async function store(db, id) {
   const { rows: [s] } = await db.query('SELECT * FROM stores WHERE id=$1 AND active', [Number(id)]);
