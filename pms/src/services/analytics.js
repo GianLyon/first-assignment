@@ -43,7 +43,7 @@ export async function dashboardAnalytics(db, { from, to } = {}) {
     WHERE a.type='expense' AND e.business_date BETWEEN $1 AND $2 GROUP BY 1, 2, 3`, [from, to]);
   const audits = await q("SELECT to_char(business_date,'YYYY-MM-DD') AS d, room_charges_posted AS sold, room_revenue FROM night_audits WHERE business_date BETWEEN $1 AND $2", [from, to]);
   const col = await q(`SELECT to_char(business_date,'YYYY-MM-DD') AS d, SUM(amount)::bigint AS amount FROM (
-      SELECT business_date, amount FROM payments WHERE NOT voided AND method <> 'company_account' AND business_date BETWEEN $1 AND $2
+      SELECT business_date, amount FROM payments WHERE NOT voided AND method NOT IN ('company_account','ota_commission') AND business_date BETWEEN $1 AND $2
       UNION ALL SELECT business_date, amount FROM pos_payments WHERE method <> 'room' AND business_date BETWEEN $1 AND $2) x GROUP BY 1`, [from, to]);
 
   const arms = Object.fromEntries(Object.keys(ARMS).map((k) => [k, 0]));

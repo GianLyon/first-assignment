@@ -7,6 +7,7 @@
 // Room types and rate plans are matched through the channel's mapping: room code = Channex room type id, rate
 // code = Channex rate plan id. Keys: CHANNEX_API_KEY; CHANNEX_API_BASE (default production; staging for testing).
 import { tx } from '../db.js';
+import { cardFacts, saveCard, cardBookingCancelled, withoutCard } from '../services/otacards.js';
 
 const env = process.env;
 export const channexBase = () => (env.CHANNEX_API_BASE || 'https://app.channex.io/api/v1').replace(/\/+$/, '');
@@ -101,6 +102,8 @@ export async function applyRevision(db, channel, rev, handleInbound) {
     const { rows } = await db.query("SELECT external_ref FROM reservations WHERE channel_id=$1 AND (external_ref=$2 OR external_ref LIKE $2 || '#%') AND status <> 'cancelled' ORDER BY id", [channel.id, m.booking_id]);
     for (const r of rows) results.push(await handleInbound(db, channel, { event: 'booking.cancelled', booking: { id: r.external_ref } }));
     if (!rows.length) results.push({ status: 'cancelled', duplicate: true });
+    const { rows: [first] } = await db.query('SELECT id FROM reservations WHERE channel_id=$1 AND external_ref=$2', [channel.id, m.booking_id]);
+    if (first) await cardBookingCancelled(db, first.id);
   } else {
     for (const msg of m.messages) {
       const r = await handleInbound(db, channel, msg);
@@ -109,6 +112,10 @@ export async function applyRevision(db, channel, rev, handleInbound) {
     }
     const { rows: extra } = await db.query("SELECT external_ref FROM reservations WHERE channel_id=$1 AND external_ref LIKE $2 || '#%' AND status='reserved'", [channel.id, m.booking_id]);
     for (const r of extra) if (Number(r.external_ref.split('#')[1]) > m.rooms) results.push(await handleInbound(db, channel, { event: 'booking.cancelled', booking: { id: r.external_ref } }));
+    // who collects the money, and the card's safe facts (never the number), on the booking's first room
+    const a = rev?.attributes || rev || {};
+    const { rows: [first] } = await db.query('SELECT id FROM reservations WHERE channel_id=$1 AND external_ref=$2', [channel.id, m.booking_id]);
+    if (first) await saveCard(db, { reservationId: first.id, channelId: channel.id, ota: m.ota, otaRef: a.ota_reservation_code, facts: cardFacts(a) });
   }
   return { ...m, results };
 }
@@ -135,7 +142,7 @@ export async function pullBookings(pool, channel, { handleInbound, logChannel })
         summary = `${out.ota} ${out.status}: ${out.results.map((x) => `${x.reservation_code || ''}${x.duplicate ? ' (already received)' : ''}${x.overbooked ? ' · OVERBOOKED' : ''}`).join(', ')}`;
       } catch (e) {
         failed++;
-        await logChannel(pool, channel.id, 'in', 'channex.revision', 'error', `${rev.attributes?.ota_name || ''} ${rev.attributes?.ota_reservation_code || rev.id}: ${e.message}`.trim().slice(0, 300), { id: rev.id, attributes: rev.attributes });
+        await logChannel(pool, channel.id, 'in', 'channex.revision', 'error', `${rev.attributes?.ota_name || ''} ${rev.attributes?.ota_reservation_code || rev.id}: ${e.message}`.trim().slice(0, 300), { id: rev.id, attributes: withoutCard(rev.attributes) });
         continue;
       }
       await call('POST', `/booking_revisions/${encodeURIComponent(rev.id)}/ack`);

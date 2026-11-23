@@ -30,13 +30,26 @@ export function publicRouter(pool) {
     const s = await getSettings(pool);
     res.json({ property_name: s.property_name, booking_enabled: s.booking_enabled, intro: s.booking_intro, cancellation_policy: s.cancellation_policy,
       check_in_time: String(s.check_in_time).slice(0, 5), check_out_time: String(s.check_out_time).slice(0, 5), today: s.business_date,
-      horizon_days: s.booking_horizon_days, contact_phone: s.contact_phone, contact_email: s.contact_email, currency: s.currency, online_payments: s.online_payments });
+      horizon_days: s.booking_horizon_days, contact_phone: s.contact_phone, contact_email: s.contact_email, currency: s.currency, online_payments: !!pay.activeProvider(s),
+      payment_mode: pay.activeProvider(s) ? s.online_payment_mode : 'none', hold_minutes: s.payment_hold_minutes, accent: s.booking_accent });
   });
   r.get('/availability', reads, async (req, res) => res.json(await dist.quote(pool, { arrival: req.query.arrival, departure: req.query.departure, adults: req.query.adults })));
-  r.post('/bookings', writes, async (req, res) => res.json(await tx(pool, (db) => dist.createPublicBooking(db, req.body || {}))));
+  r.post('/bookings', writes, async (req, res) => {
+    const b = await tx(pool, (db) => dist.createPublicBooking(db, req.body || {}));
+    // a hotel that requires online payment: go straight to the payment page (the room is held until pay_by)
+    if (b.pay_required) {
+      try { b.payment = await tx(pool, (db) => pay.startPayment(db, b.code, b.email)); } catch (e) { b.payment_error = e.message; }
+    }
+    res.json(b);
+  });
   r.post('/bookings/lookup', writes, async (req, res) => res.json(await dist.lookupPublicBooking(pool, req.body?.code, req.body?.email)));
   r.post('/bookings/pay', writes, async (req, res) => res.json(await tx(pool, (db) => pay.startPayment(db, req.body?.code, req.body?.email))));
   r.get('/pay/:token', reads, async (req, res) => res.json(await pay.intentInfo(pool, req.params.token)));
+  // the guest is back from the provider's page: ask the provider, record the outcome, say what happened
+  r.get('/pay/:token/status', reads, async (req, res) => {
+    try { await pay.refreshByReference(pool, { token: req.params.token }); } catch (e) { if (e.status === 404) throw e; console.error('Payment check failed:', e.message); }
+    res.json(await pay.intentInfo(pool, req.params.token));
+  });
   // Test checkout only: confirms a payment without a real provider. Refused unless the simulator is the active provider.
   r.post('/pay/test', writes, async (req, res) => {
     const s = await getSettings(pool);
@@ -44,6 +57,20 @@ export function publicRouter(pool) {
     res.json(await tx(pool, (db) => pay.completePayment(db, { token: req.body?.token, status: req.body?.outcome === 'paid' ? 'paid' : 'failed', provider_ref: 'TEST-' + Date.now(), method: req.body?.method })));
   });
   r.post('/bookings/cancel', writes, async (req, res) => res.json(await tx(pool, (db) => dist.cancelPublicBooking(db, req.body?.code, req.body?.email))));
+  return r;
+}
+
+/* ---------- payment provider notifications (no sign-in; we ask the provider instead of trusting the call) ---------- */
+export function paymentsRouter(pool) {
+  const r = express.Router();
+  // Pesapal calls this (GET) when a payment changes; it must get this exact answer back
+  r.get('/pesapal/ipn', limiter(240, 60e3), async (req, res) => {
+    const trackingId = String(req.query.OrderTrackingId || ''), merchantRef = String(req.query.OrderMerchantReference || ''), type = String(req.query.OrderNotificationType || 'IPNCHANGE');
+    let status = 200;
+    try { await pay.refreshByReference(pool, { token: merchantRef, providerRef: trackingId, provider: 'pesapal' }); }
+    catch (e) { status = 500; console.error('Pesapal notification failed:', e.message); }
+    res.json({ orderNotificationType: type, orderTrackingId: trackingId, orderMerchantReference: merchantRef, status });
+  });
   return r;
 }
 
@@ -162,8 +189,9 @@ export function distributionRouter(pool) {
     if (!/^\d{2}:\d{2}$/.test(b.check_in_time || '') || !/^\d{2}:\d{2}$/.test(b.check_out_time || '')) throw new HttpError(400, 'Times must be HH:MM.');
     const str = (v, max) => String(v ?? '').trim().slice(0, max);
     const { rows: [s] } = await db.query(
-      `UPDATE settings SET booking_enabled=$1, booking_intro=$2, cancellation_policy=$3, check_in_time=$4, check_out_time=$5, booking_horizon_days=$6, contact_phone=$7, contact_email=$8 WHERE id=1 RETURNING *`,
-      [b.booking_enabled !== false, str(b.booking_intro, 500), str(b.cancellation_policy, 1000), b.check_in_time, b.check_out_time, horizon, str(b.contact_phone, 40) || null, str(b.contact_email, 120) || null]);
+      `UPDATE settings SET booking_enabled=$1, booking_intro=$2, cancellation_policy=$3, check_in_time=$4, check_out_time=$5, booking_horizon_days=$6, contact_phone=$7, contact_email=$8, booking_accent=COALESCE($9, booking_accent) WHERE id=1 RETURNING *`,
+      [b.booking_enabled !== false, str(b.booking_intro, 500), str(b.cancellation_policy, 1000), b.check_in_time, b.check_out_time, horizon, str(b.contact_phone, 40) || null, str(b.contact_email, 120) || null,
+        /^#[0-9a-f]{6}$/i.test(b.booking_accent || '') ? b.booking_accent : null]);
     await audit(db, req.user, 'distribution.booking_settings', 'settings', 1, { booking_enabled: s.booking_enabled });
     return s;
   }));

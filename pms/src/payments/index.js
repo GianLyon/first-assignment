@@ -2,14 +2,21 @@
 //
 //  simulator  Built-in test checkout page (/pay/test.html). Lets you try the full flow before you
 //             have a provider account. Never switch it on for real guests: anyone can "pay" with it.
+//  pesapal    Pesapal API 3.0: cards and MTN / Airtel mobile money (see pesapal.js).
 //
-// A real provider (e.g. Flutterwave, Pesapal, DPO) plugs in here with two functions:
-//   createCheckout(intent, ctx) -> { checkout_url }   send the guest to the provider's page
-//   parseWebhook(req)            -> { token, status: 'paid'|'failed', provider_ref, method }   verify the provider's signed callback
-// and the provider's callback is pointed at /api/payments/<provider>/webhook.
+// A provider has:
+//   label, configured() -> bool          shown under Finance → Online payments
+//   createCheckout(intent, ctx)          -> { checkout_url, provider_ref? }  where to send the guest
+//   checkStatus(intent)                  -> { status: 'paid'|'failed'|'reversed'|'pending', amount, currency, method, provider_ref, confirmation }
+//                                           (asked after every notification and when the guest comes back; never trust the call itself)
+import { pesapal } from './pesapal.js';
+
 export const providers = {
   simulator: {
     label: 'Test checkout (simulator)',
+    configured: () => true,
+    mode: () => 'test',
     async createCheckout(intent) { return { checkout_url: `/pay/test.html?t=${encodeURIComponent(intent.token)}` }; },
   },
+  pesapal,
 };

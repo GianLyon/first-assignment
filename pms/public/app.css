@@ -694,3 +694,9 @@ td a:hover { text-decoration: underline; }
 
 .demo-strip { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 6px 16px; background: #e8f0fd; border-bottom: 1px solid #c9dbfa; font-size: .82rem; }
 #demo-entry .btn { width: 100%; justify-content: center; }
+
+.snip { display: flex; gap: 8px; align-items: flex-start; } .snip textarea { flex: 1; font-size: .78rem; background: #f6f8fa; resize: vertical; min-width: 0; }
+tr.row-hot td { background: #fff8e6; }
+@media (max-width: 860px) { .snip { flex-direction: column; align-items: stretch; } }
+.card-acts { display: flex; flex-direction: column; gap: 4px; align-items: stretch; min-width: 112px; }
+.card-acts .btn { justify-content: center; }

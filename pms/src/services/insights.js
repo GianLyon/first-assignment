@@ -35,6 +35,14 @@ async function finance(db, bd) {
   const stockValue = Number((await one(db, 'SELECT COALESCE(SUM(b.qty * i.avg_cost),0) AS v FROM stock_balances b JOIN stock_items i ON i.id=b.item_id')).v);
   const gl1300 = await bal('1300');
   if (Math.abs(gl1300 - stockValue) > Math.max(5000, Math.abs(stockValue) * 0.005)) add({ priority: 'high', title: 'Inventory in the accounts does not match the stock on hand', detail: `Accounts ${ugx(gl1300)}, stock valued at ${ugx(stockValue)} (difference ${ugx(gl1300 - stockValue)}). A stock count or a manual journal may be missing.`, link: '#invreports' });
+  // OTA virtual cards ready to charge, and online payments that need a person
+  const vcc = await one(db, `SELECT count(*)::int AS n, COALESCE(SUM(oc.amount),0)::bigint AS amt, string_agg(r.code, ', ' ORDER BY r.departure) AS codes FROM ota_cards oc JOIN reservations r ON r.id=oc.reservation_id
+    WHERE oc.status='to_charge' AND COALESCE(oc.charge_from, r.departure) <= $1`, [bd]);
+  if (vcc.n) add({ priority: 'high', title: `${vcc.n} OTA virtual card${vcc.n > 1 ? 's' : ''} ready to charge`, detail: `${vcc.codes.slice(0, 120)}${Number(vcc.amt) ? ` · about ${ugx(vcc.amt)}` : ''}. Charge them before they expire and record each charge.`, link: '#cards' });
+  const expiring = await one(db, `SELECT count(*)::int AS n FROM ota_cards WHERE status='to_charge' AND charge_until IS NOT NULL AND charge_until <= $1::date + 3`, [bd]);
+  if (expiring.n) add({ priority: 'urgent', title: `${expiring.n} virtual card${expiring.n > 1 ? 's expire' : ' expires'} within 3 days`, detail: 'An expired virtual card cannot be charged; the OTA has to be chased for the money.', link: '#cards' });
+  const stray = await one(db, `SELECT count(*)::int AS n, string_agg(r.code, ', ') AS codes FROM payment_intents i JOIN reservations r ON r.id=i.reservation_id WHERE i.status='paid' AND i.payment_id IS NULL`);
+  if (stray.n) add({ priority: 'urgent', title: `${stray.n} online payment${stray.n > 1 ? 's' : ''} arrived for a released or cancelled booking`, detail: `${stray.codes}: refund the guest or re-book them. See Booking engine → Online payment.`, link: '#bookingengine' });
   // 2. money owed to us
   const overdue = await many(db, `SELECT c.name, i.number, to_char(i.due_date,'YYYY-MM-DD') AS due, i.total - COALESCE((SELECT SUM(a.amount) FROM ar_allocations a WHERE a.invoice_id=i.id),0) AS open
     FROM invoices i JOIN companies c ON c.id=i.company_id WHERE i.status='issued' AND i.due_date < $1 ORDER BY i.due_date`, [bd]);

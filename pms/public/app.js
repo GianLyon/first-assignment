@@ -108,7 +108,7 @@
     ['Distribution', [['rates', 'Rates & availability', 'reservations.view'], ['plans', 'Rate plans', 'distribution.manage'], ['channels', 'Channels (OTAs)', 'distribution.manage'], ['bookingengine', 'Booking engine', 'settings.manage']]],
     ['Food & beverage', [['pos', 'Point of sale', 'pos.use'], ['kitchen', 'Kitchen & bar screen', 'pos.kitchen'], ['menu', 'Menu & tables', 'pos.manage'], ['possales', 'F&B sales', 'reports.view']]],
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
-    ['Finance', [['reports', 'Reports', 'reports.view'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
+    ['Finance', [['reports', 'Reports', 'reports.view'], ['cards', 'OTA virtual cards', 'payments.post'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
     ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage'], ['whatsapp', 'WhatsApp set-up', 'messages.manage']]],
@@ -614,23 +614,46 @@
         <p><code class="mono">${esc(location.origin)}/api/channels/&lt;channel code&gt;/inbound</code></p><p class="small muted">Every message in both directions is signed with the channel's secret (HMAC-SHA256 in the X-Azeli-Signature header). Use the <b>simulator</b> channel to try everything before going live.</p></div>`;
   };
 
+  const PAYSTATUS = { pending: ['Waiting', 'warn'], paid: ['Paid', 'ok'], failed: ['Failed', 'bad'], expired: ['Replaced', ''] };
   VIEWS.bookingengine = async () => {
     const s = await GET('/settings');
-    const url = `${location.origin}/book/`;
-    return `<div class="page-head"><div><h1 class="page">Booking engine</h1><p class="sub">The page guests use to book directly. Link it from the hotel website's “Book now” button.</p></div><a class="btn btn-gold" href="/book/" target="_blank" rel="noopener">Open booking page</a></div>
-      <div class="card"><p>Booking page address: <code class="mono">${esc(url)}</code></p>
-      <form class="form" data-form="booking-settings">
-        <label class="row"><input type="checkbox" name="booking_enabled" value="1" ${s.booking_enabled ? 'checked' : ''}> Accept online bookings</label>
-        <label>Welcome text<input name="booking_intro" value="${esc(s.booking_intro)}" maxlength="500"></label>
-        <label>Cancellation policy (shown to guests)<textarea name="cancellation_policy" rows="2" maxlength="1000">${esc(s.cancellation_policy)}</textarea></label>
-        <div class="three"><label>Check-in from<input name="check_in_time" value="${String(s.check_in_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Check-out by<input name="check_out_time" value="${String(s.check_out_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Bookable up to (days ahead)<input name="booking_horizon_days" type="number" min="7" max="730" value="${s.booking_horizon_days}"></label></div>
-        <div class="two"><label>Contact phone<input name="contact_phone" value="${esc(s.contact_phone || '')}" maxlength="40"></label><label>Contact email<input name="contact_email" type="email" value="${esc(s.contact_email || '')}" maxlength="120"></label></div>
-        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
-      ${await (async () => { const op = await GET('/finance/online-payments').catch(() => null); if (!op) return ''; return `<div class="card mt"><h2 class="sec">Online payment</h2>
-        <form class="form" data-form="online-pay"><label class="row"><input type="checkbox" name="enabled" value="1" ${op.enabled ? 'checked' : ''}> Let guests pay online (non-refundable rates in full, other rates the first night)</label>
-        <label>Payment provider<select name="provider">${opts(op.providers.map((p) => [p.id, p.label]), op.provider)}</select></label>
-        ${op.provider === 'simulator' ? '<p class="note err">The test checkout lets anyone mark a payment as paid. Use it only for testing; connect a real provider (e.g. Flutterwave or Pesapal) before switching this on for guests.</p>' : ''}
-        <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`; })()}`;
+    const op = await GET('/finance/online-payments').catch(() => null);
+    const url = `${location.origin}/book/`, js = `${location.origin}/book/widget.js`;
+    const snip = {
+      bar: `<div id="azeli-booking"></div>\n<script src="${js}" async></script>`,
+      button: `<script src="${js}" data-style="button" data-label="Book now" async></script>`,
+      floating: `<script src="${js}" data-style="floating" data-color="${s.booking_accent || '#1f5fd1'}" async></script>`,
+    };
+    const tab = ui.tab.be || 'page';
+    const prov = op ? op.providers.find((x) => x.id === op.provider) : null;
+    const body = {
+      page: `<div class="card"><p>Booking page address: <code class="mono">${esc(url)}</code></p>
+        <form class="form" data-form="booking-settings">
+          <label class="row"><input type="checkbox" name="booking_enabled" value="1" ${s.booking_enabled ? 'checked' : ''}> Accept online bookings</label>
+          <label>Welcome text<input name="booking_intro" value="${esc(s.booking_intro)}" maxlength="500"></label>
+          <label>Cancellation policy (shown to guests)<textarea name="cancellation_policy" rows="2" maxlength="1000">${esc(s.cancellation_policy)}</textarea></label>
+          <div class="three"><label>Check-in from<input name="check_in_time" value="${String(s.check_in_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Check-out by<input name="check_out_time" value="${String(s.check_out_time).slice(0, 5)}" pattern="\\d{2}:\\d{2}" required></label><label>Bookable up to (days ahead)<input name="booking_horizon_days" type="number" min="7" max="730" value="${s.booking_horizon_days}"></label></div>
+          <div class="three"><label>Contact phone<input name="contact_phone" value="${esc(s.contact_phone || '')}" maxlength="40"></label><label>Contact email<input name="contact_email" type="email" value="${esc(s.contact_email || '')}" maxlength="120"></label><label>Hotel colour (buttons)<input name="booking_accent" type="color" value="${esc(s.booking_accent || '#1f5fd1')}"></label></div>
+          <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>`,
+      widget: `<div class="card"><p>Put the booking engine on the hotel's own website (WordPress, Wix, any site). Paste one of these where it should appear: in WordPress use a <b>Custom HTML</b> block, in Wix an <b>Embed code</b> element. Guests choose dates on the hotel's site and land on this hotel's booking page with the rooms and prices for those dates; the booking arrives in Reservations straight away and the room closes on every OTA.</p>
+        ${[['bar', 'Search bar (dates and guests)', 'Best on the home page, under the main photo.'], ['button', '“Book now” button', 'For the menu or a rooms page.'], ['floating', 'Floating button on every page', 'Stays in the bottom corner while guests scroll.']].map(([k, l, d]) => `<h2 class="sec mt">${esc(l)}</h2><p class="small muted">${esc(d)}</p>
+          <div class="snip"><textarea class="mono" rows="${snip[k].split('\n').length}" readonly id="snip-${k}">${esc(snip[k])}</textarea><button type="button" class="btn btn-ghost" data-action="copy-snip" data-k="${k}">Copy</button></div>`).join('')}
+        <p class="small muted mt">Options on the script tag: <code>data-color="#1f5fd1"</code> button colour · <code>data-label="Reserve"</code> button text · <code>data-target="_blank"</code> open in a new tab. Bookings show which website they came from.</p></div>`,
+      pay: !op ? '<div class="card"><p class="muted">You cannot see the online payment settings.</p></div>' : `<div class="card"><h2 class="sec">Online payment</h2>
+        <form class="form" data-form="online-pay">
+          <label class="row"><input type="checkbox" name="enabled" value="1" ${op.enabled ? 'checked' : ''}> Let guests pay online (non-refundable rates in full, other rates the first night)</label>
+          <div class="three"><label>Payment provider<select name="provider">${opts(op.providers.map((p) => [p.id, `${p.label}${p.configured ? '' : ' (keys not set)'}`]), op.provider)}</select></label>
+          <label>Payment at booking<select name="mode">${opts([['optional', 'Optional: guests may pay online'], ['required', 'Required: pay now or the room is released']], op.mode)}</select></label>
+          <label>Hold an unpaid room for (minutes)<input name="hold_minutes" type="number" min="10" max="1440" value="${op.hold_minutes}"></label></div>
+          ${op.provider === 'simulator' ? '<p class="note err">The test checkout lets anyone mark a payment as paid. Use it only for testing; switch to Pesapal before guests use it.</p>' : ''}
+          ${prov && prov.id === 'pesapal' ? `<p class="note">Pesapal is in <b>${prov.mode === 'live' ? 'live' : 'sandbox (test)'}</b> mode${prov.configured ? '' : ', and its keys are not set yet'}. Payment notifications come to <code class="mono">${esc(op.notify_url)}</code> (registered with Pesapal automatically).${op.public_url ? '' : ' <b>PUBLIC_URL is not set</b>: Pesapal needs the hotel\'s https address.'}</p>` : ''}
+          <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+        <div class="card mt"><h2 class="sec">Recent online payments</h2>${op.attention ? `<p class="err">${op.attention} payment(s) arrived for a booking that had already been released or cancelled: refund the guest or re-book them.</p>` : ''}
+        ${table(['When', 'Booking', 'Guest', '#Amount', 'Provider', 'Status', 'Notes'], op.recent.map((x) => `<tr><td class="nowrap">${ftime(x.created_at)}</td><td><a href="#res/${x.reservation_id}">${esc(x.code)}</a></td><td>${esc(x.guest)}</td>
+          <td class="num">${ugx(x.amount)}</td><td>${esc(x.provider)}${x.method ? ` · ${esc(x.method.replace('_', ' '))}` : ''}</td><td>${pill(...(PAYSTATUS[x.status] || [x.status]))}${x.status === 'paid' && !x.payment_id ? ' ' + pill('Needs a person', 'bad') : ''}</td><td class="small">${esc(x.note || '')}</td></tr>`), 'No online payments yet.')}</div>`,
+    };
+    return `<div class="page-head"><div><h1 class="page">Booking engine</h1><p class="sub">The hotel's own booking page, the widget for its website, and online payment.</p></div><a class="btn btn-gold" href="/book/" target="_blank" rel="noopener">Open booking page</a></div>
+      ${tabs('be', [['page', 'Booking page'], ['widget', 'Website widget'], ['pay', 'Online payment']], 'page')}${body[tab] || body.page}`;
   };
 
 
@@ -1592,7 +1615,7 @@
       <div class="lh-right"><div class="lh-title">${esc(title)}</div>${meta.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')}<div><span>Printed</span> ${esc(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} by ${esc(ME.full_name)}</div></div></div>`;
   }
   // views that print a report: every page except the ones that are only for working (POS, set-up forms…)
-  const NO_PRINT = new Set(['assistant', 'inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
+  const NO_PRINT = new Set(['assistant', 'cards', 'inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
   function addPrinting(view) {
     if (NO_PRINT.has(view)) return;
     const head = $('#view .page-head');
@@ -2164,7 +2187,7 @@
     },
     'rec-start': async (v) => { const r = await POST('/finance/reconciliations', { ...v, statement_balance: Number(v.statement_balance) }); location.hash = `#rec/${r.id}`; },
     lock: async (v) => { await PUT('/finance/lock', { until: v.until || null }); await refreshSettings(); toast(v.until ? `Books closed up to ${fdate(v.until)}.` : 'Books reopened.'); render(); },
-    'online-pay': async (v) => { await PUT('/finance/online-payments', { enabled: !!v.enabled, provider: v.provider }); toast('Online payment settings saved.'); render(); },
+    'online-pay': async (v) => { await PUT('/finance/online-payments', { enabled: !!v.enabled, provider: v.provider, mode: v.mode, hold_minutes: Number(v.hold_minutes) }); toast('Online payment settings saved.'); render(); },
     'rate-from': (v) => { ui.q.rateFrom = v.from; render(); },
     'booking-settings': async (v) => { await PUT('/distribution/booking-settings', { ...v, booking_enabled: !!v.booking_enabled, booking_horizon_days: Number(v.booking_horizon_days) }); toast('Booking engine settings saved.'); render(); },
 
@@ -3120,6 +3143,50 @@
   document.addEventListener('change', (e) => { if (e.target.dataset.full !== undefined) $('#role-perms').hidden = e.target.checked; });
 
   OPS_A['demo-enter'] = async () => { await POST('/auth/demo'); location.hash = '#dashboard'; await boot(); };
+  /* ---------- OTA virtual cards ---------- */
+  const CARDSTATUS = { to_charge: ['To charge', 'warn'], charged: ['Charged', 'ok'], failed: ['Failed', 'bad'], not_needed: ['Not needed', ''] };
+  VIEWS.cards = async () => {
+    const f = ui.cardFilter || 'to_charge';
+    const d = await GET(`/finance/cards?status=${f}`);
+    ui.cardList = d.cards;
+    const ready = d.cards.filter((c) => c.ready).length;
+    return `<div class="page-head"><div><h1 class="page">OTA virtual cards</h1><p class="sub">Bookings the OTA collected for (Expedia, Agoda, Booking.com Payments): the OTA pays the hotel with a virtual card. Charge it in the secure card store once it is active, then record the charge here.</p></div></div>
+      <div class="card note-card"><p class="small">The PMS never stores card numbers. Open the full card in the channel manager's secure card view (Channex → Bookings → the booking → card), charge it on the hotel's card terminal or payment provider, then press <b>Record charge</b>. ${ready ? `<b>${ready} ready to charge now.</b>` : ''}</p></div>
+      <div class="wa-filters mt">${[['to_charge', 'To charge'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${k === f ? 'on' : ''}" data-action="card-filter" data-f="${k}">${l}</button>`).join('')}</div>
+      <div class="card mt">${table(['Booking', 'Guest', 'OTA', 'Stay', 'Card', 'Charge window', '#Card amount', '#Bill balance', 'Status', ''], d.cards.map((c) => `<tr class="${c.ready ? 'row-hot' : ''}">
+        <td><a href="#res/${c.reservation_id}">${esc(c.code)}</a>${c.ota_ref ? `<br><span class="small muted">${esc(c.ota_ref)}</span>` : ''}</td><td>${esc(c.guest)}</td>
+        <td>${esc(c.ota || '')}<br><span class="small muted">${c.collect === 'ota' ? 'OTA collects' : c.collect === 'property' ? 'Hotel collects' : ''}</span></td>
+        <td class="small">${fdate(c.arrival)} →<br>${fdate(c.departure)}</td>
+        <td>${c.is_virtual ? pill('Virtual') + '<br>' : ''}${esc(c.card_type || '')} ${c.last4 ? `<span class="nowrap">•••• ${esc(c.last4)}</span>` : ''}${c.expiry ? `<br><span class="small muted">exp ${esc(c.expiry)}</span>` : ''}</td>
+        <td class="small">${c.charge_from ? `from ${fdate(c.charge_from)}` : '<span class="muted">at check-out</span>'}${c.charge_until ? `<br>until ${fdate(c.charge_until)}` : ''}</td>
+        <td class="num">${c.amount ? `${Number(c.amount).toLocaleString('en-US')} ${esc(c.currency || '')}` : ''}</td><td class="num">${ugx(c.balance)}</td>
+        <td>${pill(...(CARDSTATUS[c.status] || [c.status]))}${c.ready ? ' ' + pill('Ready', 'ok') : ''}${c.note ? `<br><span class="small muted">${esc(c.note)}</span>` : ''}</td>
+        <td class="right card-acts">${c.status === 'to_charge' || c.status === 'failed' ? `<button class="btn btn-sm" data-action="card-charge" data-id="${c.reservation_id}">Record charge</button> <button class="btn btn-sm btn-ghost" data-action="card-fail" data-id="${c.reservation_id}">Failed</button>` : ''}${c.status !== 'charged' && c.status !== 'not_needed' ? ` <button class="btn btn-sm btn-ghost" data-action="card-skip" data-id="${c.reservation_id}">Not needed</button>` : ''}</td></tr>`), f === 'to_charge' ? 'No virtual cards waiting.' : 'Nothing here.')}</div>`;
+  };
+  OPS_A['card-filter'] = async (d) => { ui.cardFilter = d.f; render(); };
+  OPS_A['copy-snip'] = async (d) => { const t = $(`#snip-${d.k}`); t.select(); try { await navigator.clipboard.writeText(t.value); } catch { document.execCommand('copy'); } toast('Copied. Paste it into the hotel website.'); };
+  OPS_A['card-charge'] = async (d) => {
+    const c = (ui.cardList || []).find((x) => x.reservation_id === Number(d.id)); if (!c) return;
+    const guess = c.currency === 'UGX' && c.amount ? Math.round(Number(c.amount)) : Math.max(0, Number(c.balance));
+    modal(`Record charge · ${c.code}`, `<form class="form" data-form="ops-modal">
+      <p class="small">${esc(c.ota || 'OTA')} ${c.is_virtual ? 'virtual card' : 'card'} ${c.last4 ? `•••• ${esc(c.last4)}` : ''}. Bill balance <b>${ugx(c.balance)}</b>${c.amount ? ` · card amount ${Number(c.amount).toLocaleString('en-US')} ${esc(c.currency || '')}` : ''}.</p>
+      <div class="two"><label>Amount charged (UGX)<input name="amount" type="number" min="1" step="1" value="${guess || ''}" required></label><label>Approval code<input name="auth_code" maxlength="20" required></label></div>
+      <label>Card type<select name="card_brand">${opts([['Visa', 'Visa'], ['Mastercard', 'Mastercard'], ['Amex', 'Amex'], ['UnionPay', 'UnionPay'], ['Other', 'Other']], /master/i.test(c.card_type || '') ? 'Mastercard' : /amex|american/i.test(c.card_type || '') ? 'Amex' : 'Visa')}</select></label>
+      ${c.collect === 'ota' ? `<label class="row"><input type="checkbox" name="settle_commission" value="1" checked> The OTA paid the net amount: settle what is left on the bill as the OTA's commission</label>` : ''}
+      <label>Note (optional)<input name="note" maxlength="300"></label>
+      <div class="actions"><button class="btn btn-gold">Record charge</button></div></form>`,
+    async (v) => { const r = await POST(`/finance/cards/${c.reservation_id}/charge`, { amount: Number(v.amount), auth_code: v.auth_code, card_brand: v.card_brand, settle_commission: !!v.settle_commission, note: v.note });
+      return `Charge recorded on ${c.code}.${r.settled_commission ? ` ${ugx(r.settled_commission)} settled as OTA commission.` : ''}`; });
+  };
+  OPS_A['card-fail'] = async (d) => {
+    modal('Charge failed', `<form class="form" data-form="ops-modal"><label>What happened?<input name="note" maxlength="300" required placeholder="Declined / not active yet / amount differs"></label>
+      <p class="small muted">The card stays on the list so you can try again or chase the OTA.</p><div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { await POST(`/finance/cards/${d.id}/status`, { status: 'failed', note: v.note }); return 'Marked as failed.'; });
+  };
+  OPS_A['card-skip'] = async (d) => {
+    modal('No charge needed', `<form class="form" data-form="ops-modal"><label>Why?<input name="note" maxlength="300" placeholder="e.g. OTA pays by bank transfer"></label><div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await POST(`/finance/cards/${d.id}/status`, { status: 'not_needed', note: v.note }); return 'Updated.'; });
+  };
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
