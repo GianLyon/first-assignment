@@ -7,7 +7,7 @@
   <meta name="description" content="Book directly with the hotel for the best rate." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="book.css" />
 </head>
 <body>
@@ -39,7 +39,7 @@
         <label class="consent"><input type="checkbox" name="marketing_consent" value="1"> Send me occasional offers and news by email. I can unsubscribe at any time.</label>
         <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
         <p class="policy" id="policy"></p>
-        <p class="note">You pay at the hotel. No card is needed to book.</p>
+        <p class="note" id="pay-note">You pay at the hotel. No card is needed to book.</p>
         <p class="err" id="book-err" role="alert"></p>
         <div class="row"><button type="button" class="btn btn-ghost" id="back">Back</button><button class="btn btn-gold" type="submit">Confirm booking</button></div>
       </form>

@@ -4,6 +4,7 @@ import { HttpError, requirePerm, can, audit } from '../auth.js';
 import * as fin from '../services/finance.js';
 import { getSettings } from '../services/frontoffice.js';
 import { providers } from '../payments/index.js';
+import * as cards from '../services/otacards.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -70,12 +71,32 @@ export function financeRouter(pool) {
   r.put('/reconciliations/:id/lines', books, inTx((db, req) => fin.markCleared(db, req.user, id(req), req.body?.line_ids, !!req.body?.cleared)));
   r.post('/reconciliations/:id/finish', books, inTx((db, req) => fin.finishReconciliation(db, req.user, id(req))));
 
+  /* ---------- OTA virtual cards ---------- */
+  const takePay = requirePerm('payments.post');
+  r.get('/cards', takePay, async (req, res) => res.json(await cards.listCards(pool, { status: String(req.query.status || 'to_charge') })));
+  r.post('/cards/:id/charge', takePay, inTx((db, req) => cards.recordCharge(db, req.user, id(req), req.body || {})));
+  r.post('/cards/:id/status', takePay, inTx((db, req) => cards.setCardStatus(db, req.user, id(req), req.body || {})));
+
   /* ---------- online payment settings ---------- */
-  r.get('/online-payments', view, async (_req, res) => { const s = await getSettings(pool); res.json({ enabled: s.online_payments, provider: s.payment_provider, providers: Object.entries(providers).map(([k, p]) => ({ id: k, label: p.label })) }); });
+  r.get('/online-payments', view, async (_req, res) => {
+    const s = await getSettings(pool);
+    const { rows: recent } = await pool.query(`SELECT i.id, i.amount, i.currency, i.provider, i.status, i.method, i.provider_ref, i.note, i.created_at, i.paid_at, i.payment_id, r.id AS reservation_id, r.code, r.status AS booking_status,
+        trim(g.first_name || ' ' || g.last_name) AS guest
+      FROM payment_intents i JOIN reservations r ON r.id=i.reservation_id JOIN guests g ON g.id=r.guest_id ORDER BY i.id DESC LIMIT 40`);
+    res.json({ enabled: s.online_payments, provider: s.payment_provider, mode: s.online_payment_mode, hold_minutes: s.payment_hold_minutes,
+      notify_url: `${(process.env.PUBLIC_URL || '').replace(/\/+$/, '')}/api/payments/pesapal/ipn`, public_url: process.env.PUBLIC_URL || null,
+      providers: Object.entries(providers).map(([k, p]) => ({ id: k, label: p.label, configured: p.configured ? p.configured() : true, mode: p.mode ? p.mode() : null })),
+      recent, attention: recent.filter((x) => x.status === 'paid' && !x.payment_id).length });
+  });
   r.put('/online-payments', requirePerm('settings.manage'), inTx(async (db, req) => {
-    const p = String(req.body?.provider || 'simulator'); if (!providers[p]) throw new HttpError(400, 'Unknown provider.');
-    await db.query('UPDATE settings SET online_payments=$1, payment_provider=$2 WHERE id=1', [!!req.body?.enabled, p]);
-    await audit(db, req.user, 'finance.online_payments', 'settings', 1, { enabled: !!req.body?.enabled, provider: p });
+    const b = req.body || {};
+    const p = String(b.provider || 'simulator'); if (!providers[p]) throw new HttpError(400, 'Unknown provider.');
+    if (b.enabled && providers[p].configured && !providers[p].configured()) throw new HttpError(400, `${providers[p].label}: the keys are not set in the hosting settings yet (see the go-live guide).`);
+    const mode = b.mode === 'required' ? 'required' : 'optional';
+    const hold = b.hold_minutes === undefined ? 30 : Number(b.hold_minutes);
+    if (!(Number.isInteger(hold) && hold >= 10 && hold <= 1440)) throw new HttpError(400, 'Hold time must be 10–1440 minutes.');
+    await db.query('UPDATE settings SET online_payments=$1, payment_provider=$2, online_payment_mode=$3, payment_hold_minutes=$4 WHERE id=1', [!!b.enabled, p, mode, hold]);
+    await audit(db, req.user, 'finance.online_payments', 'settings', 1, { enabled: !!b.enabled, provider: p, mode, hold });
     return { ok: true };
   }));
   return r;

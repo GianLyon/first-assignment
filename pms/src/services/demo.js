@@ -231,6 +231,7 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
       await db.query("UPDATE rooms SET hk_status='dirty' WHERE id IN (SELECT room_id FROM reservations WHERE status='in_house' AND room_id IS NOT NULL ORDER BY room_id LIMIT 6)");
       await db.query("UPDATE rooms SET hk_status='dirty' WHERE id IN (SELECT id FROM rooms WHERE active AND id NOT IN (SELECT room_id FROM reservations WHERE status='in_house' AND room_id IS NOT NULL) ORDER BY number DESC LIMIT 2)");
       await sampleWhatsApp(db);
+      await sampleCards(db);
       await audit(db, user, 'demo.done', 'settings', 1, { days });
     });
     Object.assign(status, { running: false, step: 'Done', done: status.total, finished_at: new Date().toISOString() });
@@ -239,6 +240,23 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
     Object.assign(status, { running: false, error: e.message, step: 'Stopped' });
     console.error('Sample data failed:', e);
     throw e;
+  }
+}
+
+/** Expedia and Agoda bookings paid by virtual card (sample: only the last 4 digits, as in real life). */
+async function sampleCards(db) {
+  const { rows } = await db.query(`SELECT r.id, r.code, r.source, to_char(r.arrival,'YYYY-MM-DD') AS arrival, to_char(r.departure,'YYYY-MM-DD') AS departure,
+      (SELECT COALESCE(SUM(rate),0) FROM reservation_nights n WHERE n.reservation_id=r.id)::bigint AS total
+    FROM reservations r WHERE r.status IN ('in_house','reserved') AND r.source IN ('Expedia','Agoda','Booking.com') ORDER BY r.departure LIMIT 5`);
+  let i = 0;
+  for (const r of rows) {
+    const virtual = r.source !== 'Booking.com';
+    await db.query(`INSERT INTO ota_cards (reservation_id, ota, ota_ref, collect, is_virtual, card_type, last4, expiry, holder, charge_from, charge_until, amount, currency, status, note)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'12/2027',$8,$9,$10,$11,'UGX',$12,$13) ON CONFLICT DO NOTHING`,
+    [r.id, r.source, `${r.source.slice(0, 2).toUpperCase()}${7310452 + i * 97}`, virtual ? 'ota' : 'property', virtual, i % 2 ? 'Mastercard' : 'Visa', String(4417 + i * 1311).slice(-4),
+      virtual ? `${r.source} virtual card` : null, virtual ? r.arrival : null, virtual ? r.departure : null, virtual ? Math.round(Number(r.total) * 0.82) : null,
+      virtual ? 'to_charge' : 'not_needed', virtual ? null : 'Guarantee card: the guest pays at the hotel.']);
+    i++;
   }
 }
 
@@ -287,7 +305,7 @@ async function sampleWhatsApp(db) {
 const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox', 'amenity_bookings', 'assets', 'attendance', 'bank_reconciliations', 'bill_grns', 'bill_lines',
   'campaigns', 'channel_log', 'companies', 'depreciation_runs', 'email_outbox', 'employees', 'event_extras', 'event_payments', 'events', 'expenses', 'folio_charges', 'goods_received',
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
-  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents',
+  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents', 'ota_cards',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
   'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
 

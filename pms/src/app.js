@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { HttpError, loadUser, requireUser } from './auth.js';
 import { posRouter } from './routes/pos.js';
 import { inventoryRouter } from './routes/inventory.js';
-import { publicRouter, inboundRouter, distributionRouter } from './routes/distribution.js';
+import { publicRouter, inboundRouter, distributionRouter, paymentsRouter } from './routes/distribution.js';
 import { financeRouter } from './routes/finance.js';
 import { hrRouter } from './routes/hr.js';
 import { operationsRouter } from './routes/operations.js';
@@ -61,6 +61,7 @@ export function createApp(pool) {
   app.use('/api', demoGuard);
   app.use('/api/public', publicRouter(pool));
   app.use('/api/channels', inboundRouter(pool));
+  app.use('/api/payments', paymentsRouter(pool));
   app.use('/api/group', groupPublicRouter(pool));
   app.use('/api/marketing', marketingPublicRouter(pool));
   app.use('/api/whatsapp', whatsappWebhookRouter(pool));

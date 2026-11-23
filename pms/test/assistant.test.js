@@ -170,7 +170,8 @@ test('Channex: OTA bookings arrive, are acknowledged once saved, block the room 
       arrival_date: '2026-12-10', departure_date: '2026-12-12', customer: { name: 'Anna', surname: 'Berg', mail: 'anna@example.com', phone: '+46 70 123 45 67' },
       rooms: Array.from({ length: rooms }, () => ({ room_type_id: 'rt-ste-uuid', rate_plan_id: 'rp-flex-uuid', checkin_date: '2026-12-10', checkout_date: '2026-12-12', days: { '2026-12-10': '550000', '2026-12-11': '600000' }, occupancy: { adults: 2 } })), ...extra } });
     // a booking for two suites from Booking.com, and one for an unmapped room (kept in the feed, not acknowledged)
-    const good = booking('new', 2), bad = { id: 'rev-bad', attributes: { ...booking('new').attributes, booking_id: 'bk-200', ota_name: 'Expedia', rooms: [{ room_type_id: 'unknown', rate_plan_id: 'x', checkin_date: '2026-12-10', checkout_date: '2026-12-11' }] } };
+    const good = booking('new', 2, { payment_collect: 'ota', guarantee: { card_number: '4111111111114242', cvv: '999', card_type: 'visa', is_virtual: true, expiration_date: '01/2028' } });
+    const bad = { id: 'rev-bad', attributes: { ...booking('new').attributes, booking_id: 'bk-200', ota_name: 'Expedia', guarantee: { card_number: '4000000000000002', cvv: '321' }, rooms: [{ room_type_id: 'unknown', rate_plan_id: 'x', checkin_date: '2026-12-10', checkout_date: '2026-12-11' }] } };
     revs.push(good, bad);
     const r = ok(await admin.post(`/api/distribution/channels/${ch.id}/pull`));
     assert.deepEqual(r, [{ channel: 'chx', saved: 1, failed: 1 }]);
@@ -181,6 +182,11 @@ test('Channex: OTA bookings arrive, are acknowledged once saved, block the room 
     const { rows } = await ctx.pool.query("SELECT r.external_ref, r.source, r.status, r.adults, r.rate, g.first_name, g.email FROM reservations r JOIN guests g ON g.id=r.guest_id WHERE r.channel_id=$1 ORDER BY r.external_ref", [ch.id]);
     assert.deepEqual(rows.map((x) => [x.external_ref, x.source, x.status, x.adults, Number(x.rate), x.first_name, x.email]),
       [['bk-100', 'Booking.com', 'reserved', 2, 550000, 'Anna', 'anna@example.com'], ['bk-100#2', 'Booking.com', 'reserved', 2, 550000, 'Anna', 'anna@example.com']]);
+    // the virtual card is kept as safe facts on the first room; no card number anywhere in the database
+    const { rows: [card] } = await ctx.pool.query("SELECT oc.* FROM ota_cards oc JOIN reservations r ON r.id=oc.reservation_id WHERE r.external_ref='bk-100'");
+    assert.equal(card.last4, '4242'); assert.equal(card.is_virtual, true); assert.equal(card.status, 'to_charge'); assert.equal(card.collect, 'ota');
+    const dump = (await ctx.pool.query("SELECT string_agg(t::text, ' ') AS s FROM (SELECT row_to_json(x) AS t FROM channel_log x UNION ALL SELECT row_to_json(y) FROM ota_cards y) z")).rows[0].s;
+    assert.ok(!/4111111111114242|4000000000000002|"999"|"321"/.test(dump), 'card numbers must never be stored');
     const log = ok(await admin.get(`/api/distribution/channels/${ch.id}/log`));
     assert.ok(log.some((l) => l.status === 'error' && /Expedia/.test(l.summary) && /No mapping/.test(l.summary)));
     assert.match(ok(await admin.get('/api/distribution/channels')).channels.find((c) => c.code === 'chx').last_error, /1 could not be saved/);
@@ -204,6 +210,7 @@ test('Channex: OTA bookings arrive, are acknowledged once saved, block the room 
     const hr = await hook(secret);
     assert.equal(hr.status, 200);
     assert.deepEqual((await ctx.pool.query("SELECT external_ref, status FROM reservations WHERE external_ref LIKE 'bk-100%' ORDER BY external_ref")).rows.map((x) => x.status), ['cancelled', 'cancelled']);
+    assert.equal((await ctx.pool.query("SELECT oc.status FROM ota_cards oc JOIN reservations r ON r.id=oc.reservation_id WHERE r.external_ref='bk-100'")).rows[0].status, 'not_needed');
     // a repeated delivery of the same cancellation does no harm
     revs.push(booking('cancelled'));
     assert.equal(ok(await admin.post(`/api/distribution/channels/${ch.id}/pull`))[0].saved, 1);

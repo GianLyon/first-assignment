@@ -4,7 +4,7 @@ import { HttpError } from './auth.js';
 
 export const ACCOUNTS = {
   cash: '1000', card: '1010', mobile_money: '1020', bank_transfer: '1030',
-  guestLedger: '1100', company_account: '1200', vat: '2100', payable: '2000', commissionsPayable: '2300', commissions: '5300', bankCharges: '5800',
+  guestLedger: '1100', company_account: '1200', vat: '2100', payable: '2000', commissionsPayable: '2300', ota_commission: '2300', commissions: '5300', bankCharges: '5800',
 };
 export const REVENUE = { rooms: '4000', fnb: '4100', amenities: '4200', events: '4300', other: '4900' };
 export const PAYMENT_METHODS = ['cash', 'card', 'mobile_money', 'bank_transfer', 'company_account'];

@@ -98,10 +98,14 @@ export async function createPublicBooking(db, b) {
     room_type_id: t.room_type.id, arrival: q.arrival, departure: q.departure, adults: q.adults, rate: p.nightly[0].rate, source: 'Website',
     guest: { first_name: g.first_name, last_name: g.last_name, email, phone: g.phone, nationality: g.nationality, marketing_consent: g.marketing_consent === true }, notes: b.notes,
   });
-  await db.query('UPDATE reservations SET rate_plan_id=$2 WHERE id=$1', [r.id, p.id]);
+  // which website the guest booked from (the booking widget passes the site's address)
+  const from = /^[a-z0-9.-]{3,100}$/i.test(String(b.src || '')) ? String(b.src).toLowerCase() : null;
+  // the hotel requires online payment and can take it: hold the room for a while, then release it if unpaid
+  const payRequired = s.online_payments && s.online_payment_mode === 'required' && (await import('./onlinepay.js')).activeProvider(s) !== null;
+  await db.query(`UPDATE reservations SET rate_plan_id=$2, booked_from=$3, pay_by=CASE WHEN $4 THEN now() + make_interval(mins => $5) END WHERE id=$1`, [r.id, p.id, from, payRequired, s.payment_hold_minutes]);
   await saveNights(db, r.id, p.nightly);
-  await audit(db, null, 'booking_engine.booking', 'reservation', r.id, { code: r.code, plan: p.code, total: p.total });
-  return { code: r.code, arrival: q.arrival, departure: q.departure, nights: q.nights, room_type: t.room_type.name, rate_plan: p.name, refundable: p.refundable, breakfast: p.breakfast, total: p.total, email };
+  await audit(db, null, 'booking_engine.booking', 'reservation', r.id, { code: r.code, plan: p.code, total: p.total, from });
+  return { pay_required: payRequired, hold_minutes: payRequired ? s.payment_hold_minutes : null, code: r.code, arrival: q.arrival, departure: q.departure, nights: q.nights, room_type: t.room_type.name, rate_plan: p.name, refundable: p.refundable, breakfast: p.breakfast, total: p.total, email };
 }
 
 async function findPublicBooking(db, code, email, lock = false) {

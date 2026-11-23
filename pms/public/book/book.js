@@ -12,7 +12,7 @@
     if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
     return data;
   }
-  let INFO = null, QUOTE = null, CHOICE = null;
+  let INFO = null, QUOTE = null, CHOICE = null, SRC = null;
 
   async function init() {
     INFO = await api('GET', '/info');
@@ -25,7 +25,24 @@
     f.arrival.min = INFO.today; f.departure.min = addDays(INFO.today, 1);
     f.arrival.max = addDays(INFO.today, INFO.horizon_days);
     f.arrival.value = INFO.today; f.departure.value = addDays(INFO.today, 2);
-    if (!INFO.booking_enabled) { $('#results').innerHTML = '<div class="card"><p>Online booking is not available right now. Please contact the hotel.</p></div>'; f.querySelector('button').disabled = true; }
+    // the hotel's colour, with readable text on it
+    if (/^#[0-9a-f]{6}$/i.test(INFO.accent || '')) {
+      const n = parseInt(INFO.accent.slice(1), 16), lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      document.documentElement.style.setProperty('--accent', INFO.accent);
+      document.documentElement.style.setProperty('--on-accent', lum > 0.62 ? '#142133' : '#ffffff');
+    }
+    if (INFO.payment_mode === 'required') $('#pay-note').textContent = `You pay online straight after booking (card or MTN / Airtel mobile money). The room is held for ${INFO.hold_minutes} minutes while you pay.`;
+    else if (INFO.payment_mode === 'optional') $('#pay-note').textContent = 'No payment is needed to book. You can pay online afterwards (card or mobile money) or at the hotel.';
+    if (!INFO.booking_enabled) { $('#results').innerHTML = '<div class="card"><p>Online booking is not available right now. Please contact the hotel.</p></div>'; f.querySelector('button').disabled = true; return; }
+    // dates passed in by the booking widget on the hotel's own website
+    const q = new URLSearchParams(location.search), ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && d >= INFO.today;
+    SRC = /^[a-z0-9.-]{3,100}$/i.test(q.get('src') || '') ? q.get('src') : null;
+    if (q.get('cancelled')) $('#results').innerHTML = '<div class="card"><p>The payment was cancelled. Your booking is kept until the time shown in your confirmation; use “Manage a booking” below to pay.</p></div>';
+    if (ok(q.get('arrival')) && ok(q.get('departure')) && q.get('departure') > q.get('arrival')) {
+      f.arrival.value = q.get('arrival'); f.departure.min = addDays(q.get('arrival'), 1); f.departure.value = q.get('departure');
+      if (/^[1-9]$/.test(q.get('adults') || '')) { if (![...f.adults.options].some((o) => o.value === q.get('adults'))) f.adults.add(new Option(q.get('adults'))); f.adults.value = q.get('adults'); }
+      f.requestSubmit();
+    }
   }
 
   function renderResults() {
@@ -67,13 +84,16 @@
     const f = e.target, btn = f.querySelector('button[type=submit]'); btn.disabled = true; $('#book-err').textContent = '';
     try {
       const r = await api('POST', '/bookings', { arrival: QUOTE.arrival, departure: QUOTE.departure, adults: QUOTE.adults, room_type_id: CHOICE.t.room_type.id, rate_plan_id: CHOICE.p.id,
-        guest: { first_name: f.first_name.value, last_name: f.last_name.value, email: f.email.value, phone: f.phone.value, marketing_consent: f.marketing_consent.checked }, notes: f.notes.value, website: f.website.value });
+        guest: { first_name: f.first_name.value, last_name: f.last_name.value, email: f.email.value, phone: f.phone.value, marketing_consent: f.marketing_consent.checked }, notes: f.notes.value, website: f.website.value, src: SRC });
+      // payment required by the hotel: straight to the payment page
+      if (r.pay_required && r.payment?.checkout_url) { location.href = r.payment.checkout_url; return; }
       $('#details').hidden = true;
       $('#confirm').hidden = false;
       $('#confirm').innerHTML = `<h2>You're booked!</h2><p>Your booking code</p><p class="code">${esc(r.code)}</p>
-        <div class="summary"><b>${esc(r.room_type)}</b> · ${esc(r.rate_plan)}<br>${fdate(r.arrival)} to ${fdate(r.departure)} · ${r.nights} night(s)<br>Total <b>${ugx(r.total)}</b>, payable at the hotel</div>
+        <div class="summary"><b>${esc(r.room_type)}</b> · ${esc(r.rate_plan)}<br>${fdate(r.arrival)} to ${fdate(r.departure)} · ${r.nights} night(s)<br>Total <b>${ugx(r.total)}</b>${r.pay_required ? '' : ', payable at the hotel'}</div>
+        ${r.pay_required ? `<p class="err">${esc(r.payment_error || 'The payment page could not be opened.')} Your room is held for ${r.hold_minutes} minutes: press Pay now to try again.</p>` : ''}
         <p class="note">Keep your code and the email you used (${esc(r.email)}) to view or ${r.refundable ? 'cancel' : 'check'} your booking below.</p>
-        ${INFO.online_payments ? `<button class="btn btn-gold pay-now" data-code="${esc(r.code)}" data-email="${esc(r.email)}">${r.refundable ? 'Pay the first night now (optional)' : 'Pay now'}</button>` : ''}`;
+        ${INFO.online_payments ? `<button class="btn btn-gold pay-now" data-code="${esc(r.code)}" data-email="${esc(r.email)}">${r.pay_required ? 'Pay now' : r.refundable ? 'Pay the first night now (optional)' : 'Pay now'}</button><p class="pay-methods">Visa, Mastercard, MTN and Airtel mobile money</p>` : ''}`;
       $('#confirm').scrollIntoView({ behavior: 'smooth' });
       f.reset();
     } catch (err) { $('#book-err').textContent = err.message; } finally { btn.disabled = false; }

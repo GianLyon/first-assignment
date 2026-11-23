@@ -9,6 +9,7 @@ import { backupIfDue } from './backup.js';
 import { runAutomations, deliverQueued } from './services/whatsapp.js';
 import { tx } from './db.js';
 import { prepareDemo, nightlyDemoReset } from './demomode.js';
+import { paymentHousekeeping } from './services/onlinepay.js';
 
 const pool = createPool(config.databaseUrl);
 const applied = await migrate(pool);
@@ -35,6 +36,7 @@ const mailTimer = setInterval(async () => {
   try { await tx(pool, (db) => generateDue(db)); await tx(pool, (db) => queueGuestEmails(db));
     try { await tx(pool, (db) => runAutomations(db)); await deliverQueued(pool); } catch (e) { console.error('WhatsApp automations failed:', e.message); }
     try { await pullChannex(pool); } catch (e) { console.error('Channex pull failed:', e.message); }
+    try { await paymentHousekeeping(pool); } catch (e) { console.error('Online payment check failed:', e.message); }
     await backupIfDue(pool);
     try { await nightlyDemoReset(pool); } catch (e) { console.error('Demo reset failed:', e.message); } await sendEmails(pool); } catch (e) { console.error('Report emails failed:', e.message); } finally { mailing = false; }
 }, Number(process.env.REPORT_CHECK_SECONDS || 60) * 1000);

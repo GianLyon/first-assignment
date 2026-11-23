@@ -383,12 +383,13 @@ export function paymentDetails(method, amount, d) {
 }
 const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ''));
 
-export async function postPayment(db, user, id, body) {
+// opts.internal: the system itself settles a bill, e.g. the commission an OTA kept ('ota_commission'); never from a form
+export async function postPayment(db, user, id, body, opts = {}) {
   const r = await getReservationForUpdate(db, id);
   if (!['reserved', 'in_house', 'checked_out'].includes(r.status)) throw new HttpError(409, 'Payments cannot be taken on a cancelled or no-show booking.');
   const s = await getSettings(db);
   const method = String(body.method || '');
-  if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, 'Choose a payment method.');
+  if (!PAYMENT_METHODS.includes(method) && !(opts.internal === true && method === 'ota_commission')) throw new HttpError(400, 'Choose a payment method.');
   const amount = money(body.amount, 'Amount');
   let companyId = null;
   if (method === 'company_account') {

@@ -235,6 +235,37 @@ The **Try the live demo** buttons on azelitech.com open a small browser-only moc
 
 Visitors press **Explore the demo hotel** and are in as a general manager. They can take bookings, check guests in, sell in the restaurant and try every page, but cannot change passwords, users or roles, take backups, or send anything outside the system. Everything they do is wiped at 03:00 Kampala time, when the sample hotel is rebuilt. Because the demo runs the same code as the hotels, it updates itself whenever `main` changes.
 
+# Part H: online payments with Pesapal, the website widget and OTA virtual cards
+
+## Pesapal (cards and mobile money)
+Each hotel has its **own** Pesapal merchant account, so guests' money settles straight to the hotel's bank.
+
+**What it costs:** no monthly fee from Azeli; Pesapal charges a percentage per transaction. Ask Pesapal for the current card and mobile money rates and the settlement time.
+
+1. **Merchant account:** apply at pesapal.com (Business → Get started) in the hotel's name, with its company documents. Ask Pesapal for **API 3.0** keys.
+2. **Test first:** Pesapal also gives sandbox (test) keys. In Render → the hotel's PMS (`azeli-pms`) → **Environment** add:
+   | Key | Value |
+   |---|---|
+   | `PESAPAL_CONSUMER_KEY` | the consumer key |
+   | `PESAPAL_CONSUMER_SECRET` | the consumer secret |
+   | `PESAPAL_ENV` | `sandbox` |
+   | `PUBLIC_URL` | the hotel's address, e.g. `https://amaya.azelitech.com` (already set if the hotel is live) |
+3. In the PMS → **Booking engine → Online payment**: tick *Let guests pay online*, choose **Pesapal**, choose *Optional* or *Required* (required: the room is held for the minutes you set, then released if not paid), **Save**. The notification address is registered with Pesapal automatically.
+4. Make a booking on the booking page and pay with Pesapal's sandbox test card or test mobile number. It appears on the bill as a payment, under **Recent online payments**, and in the accounts.
+5. **Go live:** replace the two keys with the live ones and set `PESAPAL_ENV` = `live`.
+
+## The booking widget on the hotel's own website
+PMS → **Booking engine → Website widget**: copy one of the three snippets and paste it into the hotel's website (WordPress: a *Custom HTML* block; Wix: *Embed code*). Choose the hotel's colour under **Booking page**. Nothing else to set up.
+
+## OTA virtual cards
+When Expedia, Agoda or Booking.com (Payments by Booking.com) collect from the guest, they pay the hotel with a virtual card. The PMS lists these under **Finance → OTA virtual cards** with the last 4 digits and the dates they can be charged; it never stores the full number.
+
+To charge one, the full card details must come from a secure card store:
+- **Channex:** ask Channex to enable card details (PCI) for the property and what it costs; then the card can be opened from the booking in Channex.
+- **Charging:** use the hotel's card machine, or ask Pesapal whether it allows the hotel to key in a card (a "virtual terminal" / MOTO). If neither, ask each OTA to pay by bank transfer instead (in the extranet's payment settings, where offered).
+
+Then press **Record charge** in the PMS: it posts the card payment on the guest's bill and, when the OTA paid the net amount, settles the rest as the OTA's commission.
+
 ## Adding another hotel
 Copy the `azeli-pms` service and `azeli-pms-db` database in `render.yaml`, rename them (e.g. `hotel2-pms`, `hotel2-pms-db`), push, then repeat Step 4 (that service only), its record in Step 5 (`hotel2`), Step 6.2–6.3.
 
