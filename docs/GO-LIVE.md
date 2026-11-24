@@ -20,6 +20,8 @@ The PMS and the console run on Render because they must be on all the time (nigh
 
 ---
 
+> **Beta:** how to install the app on phones and computers, run the beta, and what to pay for and when: see [BETA.md](BETA.md).
+
 # Part A: website and systems live (do this now)
 
 ## Step 1: Domain ✅ done

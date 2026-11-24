@@ -1,6 +1,6 @@
 {
   "name": "azeli-pms",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Azeli PMS: hotel property management system (front office, folios, night audit, accounting core).",
   "type": "module",

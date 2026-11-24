@@ -29,6 +29,8 @@ services:
         sync: false
       - key: PUBLIC_URL         # e.g. https://amaya.azelitech.com
         sync: false
+      - key: SUPPORT_EMAIL      # staff feedback from the app is emailed here (beta)
+        sync: false
       - key: EMAIL_TRANSPORT
         value: smtp
       - key: SMTP_URL           # from Brevo: smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587
