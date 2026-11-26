@@ -96,7 +96,7 @@ test('website enquiries: CORS for the site only, honeypot, rate limit, follow-up
 
 test('website content: defaults, validation, draft, publish with deploy hook', async () => {
   let site = await (await fetch(base + '/api/public/site')).json();
-  assert.equal(site.contact.email, 'hello@azelitech.com');
+  assert.equal(site.contact.email, 'support@azelitech.com');
   assert.equal(site.packages.items.length, 3);
   assert.equal((await editor.put('/api/content/contact', { email: 'x', phone: '+256', phone_display: 'x', whatsapp: '1' })).status, 400);
   assert.equal((await editor.put('/api/content/hero', { eyebrow: 'A', title: '<script>', lead: 'L' })).status, 400);
@@ -105,7 +105,7 @@ test('website content: defaults, validation, draft, publish with deploy hook', a
   ok(await editor.put('/api/content/announcement', { active: true, text: 'Now booking PMS demos for December', link_text: 'Book a demo', link_url: 'contact.html?package=Growth' }));
   // drafts are not live until published
   site = await (await fetch(base + '/api/public/site')).json();
-  assert.equal(site.contact.email, 'hello@azelitech.com');
+  assert.equal(site.contact.email, 'support@azelitech.com');
   const c = ok(await editor.get('/api/content'));
   assert.equal(c.sections.contact.changed, true);
   assert.equal(c.sections.contact.draft.phone, '+256700123456');

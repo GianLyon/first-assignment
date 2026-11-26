@@ -11,7 +11,7 @@ You do the account sign-ups and payments; everything else is already set up in t
 | `admin.azelitech.com` | **Azeli Console**: your admin panel (enquiries, website editing, client hotels, team) | **Render** Starter + Postgres Basic-256MB, Frankfurt | $7 + $6 = $13 / month |
 | `amaya.azelitech.com` | Amaya's **Azeli PMS** (each hotel gets its own, e.g. `hotel2.azelitech.com`) | **Render** Starter + Postgres Basic-1GB, Frankfurt, continuous backups | $7 + $19 = $26 / month per hotel |
 | (domain and DNS) | azelitech.com | **Cloudflare** | ≈ $11 / year |
-| later: team mailboxes | `you@`, `hello@`, `sales@`… | Google Workspace Business Starter | ≈ $7 / user / month |
+| team mailboxes | `support@`, `sales@`, your own | Zoho Mail (bought Nov 2026) | per Zoho plan |
 | later: system email | reports, guest emails, enquiry alerts | Brevo Starter | ≈ $9 / month |
 
 **Website, console and Amaya's PMS: about $60 a month. With 5 mailboxes and Brevo: about $105.** Each extra hotel adds about $26.
@@ -95,14 +95,14 @@ Set **every one to "DNS only" (grey cloud)**: Vercel and Render issue the HTTPS 
 
 # Part B: email (when you are ready)
 
-1. **Google Workspace** (workspace.google.com) → *Business Starter* with `azelitech.com`; when it asks to verify, choose **Cloudflare** and let it add the records. Create mailboxes and a `hello@` group. In the Admin console → *Apps → Gmail → Authenticate email*, generate **DKIM** and add it in Cloudflare.
+1. **Google Workspace** (workspace.google.com) → *Business Starter* with `azelitech.com`; when it asks to verify, choose **Cloudflare** and let it add the records. Create mailboxes and a `support@` mailbox. In the Admin console → *Apps → Gmail → Authenticate email*, generate **DKIM** and add it in Cloudflare.
 2. **Brevo** (brevo.com) → *Starter*. **Senders, Domains & Dedicated IPs → Domains**: add `azelitech.com` and the records it shows (DNS only). **SMTP & API → SMTP**: generate a key.
 3. Cloudflare DNS, once:
    - TXT `@`: `v=spf1 include:_spf.google.com include:spf.brevo.com ~all` (only one `v=spf1` record may exist)
-   - TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:hello@azelitech.com`
+   - TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:support@azelitech.com`
 4. Render:
    - `azeli-pms`: `SMTP_URL` = `smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587` and `EMAIL_FROM` = `Amaya Hotel & Luxury Suites <reports@azelitech.com>`
-   - `azeli-console`: the same `SMTP_URL`, `EMAIL_FROM` = `Azeli Console <console@azelitech.com>` and `LEAD_NOTIFY` = `hello@azelitech.com` (new enquiries are emailed to the team)
+   - `azeli-console`: the same `SMTP_URL`, `EMAIL_FROM` = `Azeli Console <console@azelitech.com>` and `LEAD_NOTIFY` = `support@azelitech.com` (new enquiries are emailed to the team)
    Render restarts the services with the new settings.
 5. In Amaya's PMS: **Automatic emails** → add the review link and switch on the pre-arrival and thank-you emails; **Department reports** → schedules.
 

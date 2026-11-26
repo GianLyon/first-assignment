@@ -18,7 +18,7 @@ const DEMO_URL = (process.env.DEMO_URL || '').replace(/\/+$/, '');
 const CONSOLE_URL = (process.env.CONSOLE_URL || '').replace(/\/+$/, '');
 
 // what the pages contain in the repository (replaced by the published values)
-const SOURCE_CONTACT = { email: 'hello@azelitech.com', phone: '+27787094814', phone_display: '+27 78 709 4814', whatsapp: '27787094814' };
+const SOURCE_CONTACT = { email: 'support@azelitech.com', phone: '+27787094814', phone_display: '+27 78 709 4814', whatsapp: '27787094814' };
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const bold = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');

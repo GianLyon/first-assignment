@@ -3,7 +3,7 @@
 import { HttpError } from './auth.js';
 
 export const DEFAULTS = {
-  contact: { email: 'hello@azelitech.com', phone: '+27787094814', phone_display: '+27 78 709 4814', whatsapp: '27787094814' },
+  contact: { email: 'support@azelitech.com', phone: '+27787094814', phone_display: '+27 78 709 4814', whatsapp: '27787094814' },
   announcement: { active: false, text: '', link_text: '', link_url: '' },
   hero: {
     eyebrow: 'Hospitality marketing consultants',
