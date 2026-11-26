@@ -6,6 +6,9 @@ import { HttpError, loadUser, requireUser } from './auth.js';
 import { posRouter } from './routes/pos.js';
 import { inventoryRouter } from './routes/inventory.js';
 import { publicRouter, inboundRouter, distributionRouter, paymentsRouter } from './routes/distribution.js';
+import { betaRouter } from './routes/beta.js';
+import { version, recordError } from './services/beta.js';
+import { readFileSync } from 'node:fs';
 import { financeRouter } from './routes/finance.js';
 import { hrRouter } from './routes/hr.js';
 import { operationsRouter } from './routes/operations.js';
@@ -59,6 +62,7 @@ export function createApp(pool) {
   app.post('/api/auth/demo', async (_req, res) => res.json(await demoSignIn(pool, res)));
   app.get('/api/demo-info', (_req, res) => res.json({ demo: demoMode(), contact: process.env.DEMO_CONTACT_URL || 'https://azelitech.com/contact.html?service=pms' }));
   app.use('/api', demoGuard);
+  app.use('/api', betaRouter(pool));
   app.use('/api/public', publicRouter(pool));
   app.use('/api/channels', inboundRouter(pool));
   app.use('/api/payments', paymentsRouter(pool));
@@ -78,6 +82,13 @@ export function createApp(pool) {
   app.use('/api', apiRouter(pool));
   app.use('/api', (_req, _res) => { throw new HttpError(404, 'Not found.'); });
 
+  // the installable app: the service worker carries the version, so each deploy updates the app on every device
+  const swSource = readFileSync(new URL('./sw.template.js', import.meta.url), 'utf8');
+  app.get('/sw.js', (_req, res) => {
+    res.set({ 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' });
+    res.send(swSource.replace('__VERSION__', version().label.replace(/[^\w.+-]/g, '')));
+  });
+  app.get('/manifest.webmanifest', (_req, res) => { res.set({ 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' }); res.sendFile(path.join(PUBLIC, 'manifest.webmanifest')); });
   app.use(express.static(PUBLIC, { index: 'index.html', maxAge: '1h' }));
 
   // eslint-disable-next-line no-unused-vars
@@ -87,7 +98,11 @@ export function createApp(pool) {
     else if (err.code === '23503') { status = 400; message = 'A referenced record does not exist.'; }
     else if (err.code === '22P02' || err.code === '22007' || err.code === '22008') { status = 400; message = 'One of the values is not valid.'; }
     else if (err.type === 'entity.parse.failed') { status = 400; message = 'Invalid JSON.'; }
-    if (status >= 500) { console.error(err); message = status === 500 && !err.status ? 'Something went wrong. Please try again.' : message; }
+    if (status >= 500) {
+      console.error(err);
+      if (!err.status) recordError(pool, { kind: 'server', message: err.message, source: `${req.method} ${req.path}`, stack: err.stack, page: req.headers.referer, userId: req.user?.id, userAgent: req.headers['user-agent'] });
+      message = status === 500 && !err.status ? 'Something went wrong. Please try again.' : message;
+    }
     res.status(status).json({ error: message, ...(details ? { details } : {}) });
   });
   return app;

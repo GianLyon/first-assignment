@@ -38,7 +38,7 @@
   const pill = (t, c = '') => `<span class="pill ${c}">${esc(t)}</span>`;
   const statusPill = (s) => pill(...(STATUS[s] || [s, '']));
   const opts = (list, sel) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`).join('');
-  const table = (head, rows, empty = 'Nothing to show.') => `<div class="tbl-wrap"><table><thead><tr>${head.map((h) => `<th class="${h.startsWith('#') ? 'num' : ''}">${esc(h.replace(/^#/, ''))}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.join('') : `<tr><td colspan="${head.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table></div>`;
+  const table = (head, rows, empty = 'Nothing to show.') => `<div class="tbl-wrap"><table class="list"><thead><tr>${head.map((h) => `<th class="${h.startsWith('#') ? 'num' : ''}">${esc(h.replace(/^#/, ''))}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.join('') : `<tr><td colspan="${head.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table></div>`;
   const tabs = (key, list, def) => { const cur = ui.tab[key] || def || list[0][0]; return `<div class="tabs" role="tablist">${list.map(([v, l]) => `<button type="button" role="tab" aria-selected="${v === cur}" class="${v === cur ? 'on' : ''}" data-action="tab" data-key="${key}" data-val="${v}">${esc(l)}</button>`).join('')}</div>`; };
   const cur = (key, def) => ui.tab[key] || def;
   const formErr = (form, msg) => { let n = form.querySelector('.form-err'); if (!n) { n = document.createElement('p'); n.className = 'note err form-err'; form.prepend(n); } n.textContent = msg; };
@@ -113,20 +113,42 @@
     ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
     ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage'], ['whatsapp', 'WhatsApp set-up', 'messages.manage']]],
     ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
-    ['Administration', [['settings', 'Settings', 'settings.manage'], ['users', 'Staff & access', 'users.manage'], ['log', 'Audit log', 'auditlog.view']]],
+    ['Administration', [['golive', 'Go-live checklist', 'settings.manage'], ['settings', 'Settings', 'settings.manage'], ['users', 'Staff & access', 'users.manage'], ['health', 'System health & feedback', 'settings.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
   const route = () => { const [r, id] = (location.hash.replace('#', '') || 'dashboard').split('/'); return { r, id }; };
   function shell() {
     $('#root').innerHTML = `<div class="app">
-      <aside class="side" aria-label="Modules"><div class="brand"><img class="mark" src="/brand/azeli-mark-light.svg" alt="" width="32" height="32"><span>Azeli <em>PMS</em></span></div><nav id="side-nav"></nav></aside>
+      <aside class="side" aria-label="Modules"><div class="brand"><img class="mark" src="/brand/azeli-mark-light.svg" alt="" width="32" height="32"><span>Azeli <em>PMS</em></span><span class="beta-tag">Beta</span></div><nav id="side-nav"></nav>
+        <div class="side-account"><div class="grp">${esc(ME.full_name)} · ${esc(ROLE[ME.role] || ME.role)}</div>
+          <a href="#" data-action="feedback">Report a problem or idea</a><a href="#" data-action="install-app" class="install-link" hidden>Install the app</a>
+          <a href="#" data-action="mfa-manage">Two-step sign-in</a><a href="#" data-action="change-password">Change password</a><a href="#" data-action="logout">Sign out</a></div>
+        <div class="side-foot"><span id="app-version"></span></div></aside>
       <div class="main"><header class="topbar">
         <button class="menu-btn" type="button" data-action="toggle-nav" aria-label="Show menu">☰</button>
         <div class="prop"><b id="prop-name"></b><span id="biz-date"></span></div>
         <form class="gsearch" role="search" data-form="gsearch"><input id="gq" autocomplete="off" placeholder="Search booking, room or guest" aria-label="Search bookings, rooms and guests"><kbd>Ctrl K</kbd><div class="gresults" id="gres" hidden></div></form>
         <div class="top-actions user-menu">${CAN['reservations.manage'] ? '<button class="btn btn-gold btn-sm" data-action="new-res">+ Booking</button>' : ''}<span class="user">${esc(ME.full_name)} · ${esc(ROLE[ME.role])}</span>
+          <button class="btn btn-ghost btn-sm install-btn" data-action="install-app" hidden>Install app</button><button class="btn btn-ghost btn-sm" data-action="feedback">Feedback</button>
           <button class="btn btn-ghost btn-sm" data-action="mfa-manage">Two-step</button><button class="btn btn-ghost btn-sm" data-action="change-password">Password</button><button class="btn btn-ghost btn-sm" data-action="logout">Sign out</button></div>
-      </header><main id="view" tabindex="-1"></main></div></div>`;
+      </header><div id="net-strip" class="net-strip" hidden></div><main id="view" tabindex="-1"></main></div>
+      <nav class="tabbar" id="tabbar" aria-label="Quick menu"></nav></div>`;
+    APP.showInstall();
+    GET('/version').then((v) => { APP.version = v; const el = $('#app-version'); if (el) el.textContent = `Version ${v.label}`; }).catch(() => {});
+  }
+  // the bottom bar on phones: the four places this person uses most, then "More" for everything else
+  const TAB_ICON = { dashboard: '⌂', board: '▦', housekeeping: '✓', reservations: '☰', inbox: '✉', pos: '◫', kitchen: '♨', assistant: '★', reports: '▤', stock: '▣', cards: '▭', myhr: '☺', maintenance: '⚒', events: '◷', companies: '▥' };
+  const TAB_ORDER = { housekeeping: ['housekeeping', 'maintenance', 'myhr'], hk_supervisor: ['housekeeping', 'board', 'maintenance', 'assistant'], pos_cashier: ['pos', 'kitchen', 'myhr'], waiter: ['pos', 'kitchen', 'myhr'], kitchen: ['kitchen', 'myhr'],
+    accountant: ['dashboard', 'reports', 'cards', 'companies'], finance_manager: ['dashboard', 'assistant', 'reports', 'cards'], storekeeper: ['stock', 'requisitions', 'purchasing', 'myhr'], stores_manager: ['stock', 'purchasing', 'assistant', 'reports'] };
+  function renderTabbar() {
+    const bar = $('#tabbar'); if (!bar) return;
+    const { r } = route();
+    const label = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, l]) => [id, l])));
+    const pref = [...(TAB_ORDER[ME.role] || []), 'dashboard', 'board', 'reservations', 'inbox', 'housekeeping', 'pos', 'assistant', 'reports', 'stock', 'myhr'];
+    const tabs = [...new Set(pref)].filter((id) => VIEW_PERM[id] && CAN[VIEW_PERM[id]]).slice(0, 4);
+    const short = { reservations: 'Bookings', board: 'Rooms', housekeeping: 'Housekeeping', inbox: 'WhatsApp', pos: 'Sales', kitchen: 'Kitchen', assistant: 'To do', reports: 'Reports', stock: 'Stock', myhr: 'My HR', cards: 'Cards', companies: 'Companies', dashboard: 'Today', maintenance: 'Repairs', requisitions: 'Requests', purchasing: 'Orders' };
+    bar.innerHTML = tabs.map((id) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') ? 'on' : ''}"><span aria-hidden="true">${TAB_ICON[id] || '•'}</span>${esc(short[id] || label[id])}${id === 'inbox' ? '<i class="tab-badge" id="tab-wa" hidden></i>' : ''}</a>`).join('')
+      + '<button type="button" data-action="toggle-nav"><span aria-hidden="true">⋯</span>More</button>';
   }
   function demoBanner() {
     if (!DEMO?.demo || $('#demo-strip')) return;
@@ -137,7 +159,7 @@
   function renderNav() {
     const { r } = route();
     $('#side-nav').innerHTML = NAV.map(([g, items]) => { const vis = items.filter(([, , p]) => CAN[p]); return vis.length ? `<div class="grp">${g}</div>` + vis.map(([id, l]) => `<a href="#${id}" class="${r === id || (r === 'res' && id === 'reservations') || ({ event: 'events', eventedit: 'events', beo: 'events', asset: 'assets', reportrun: 'schedules', guest: 'guests', campaign: 'campaigns' }[r] === id) ? 'on' : ''}">${l}</a>`).join('') : ''; }).join('');
-    demoBanner();
+    demoBanner(); renderTabbar();
     $('#prop-name').textContent = SETTINGS.property_name;
     $('#prop-name').classList.toggle('has-demo', !!SETTINGS.demo_data);
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
@@ -161,7 +183,7 @@
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) { $('#view').innerHTML = html; addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'events') { const th = $('.cal thead th.today'), w = $('.cal-wrap'); if (th && w) w.scrollLeft = Math.max(0, th.offsetLeft - 190); } if (view === 'inbox') { scrollWa(); const t = $('form[data-form=wa-send] textarea'); if (ui.waDraft && t && ui.waDraft.id === route().id) { t.value = ui.waDraft.text; t.focus(); } ui.waDraft = null; } else updateWaBadge(); }
+      if (seq === renderSeq) { $('#view').innerHTML = html; labelTables(); addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'events') { const th = $('.cal thead th.today'), w = $('.cal-wrap'); if (th && w) w.scrollLeft = Math.max(0, th.offsetLeft - 190); } if (view === 'inbox') { scrollWa(); const t = $('form[data-form=wa-send] textarea'); if (ui.waDraft && t && ui.waDraft.id === route().id) { t.value = ui.waDraft.text; t.focus(); } ui.waDraft = null; } else updateWaBadge(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -172,6 +194,7 @@
     const occPct = d.rooms.sellable ? Math.round((d.in_house / d.rooms.sellable) * 100) : 0;
     return `<div class="page-head"><div><h1 class="page">Today at ${esc(d.property_name)}</h1><p class="sub">${fdateLong(d.business_date)}</p></div>
       <div class="row">${CAN['reservations.manage'] ? '<button class="btn btn-gold" data-action="new-res">+ New reservation</button>' : ''}<a class="btn btn-ghost" href="#board">Room board</a></div></div>
+      ${CAN['settings.manage'] ? await GET('/system/golive').then((g) => (g.required_done < g.required_total ? `<div class="card golive-card"><div><b>Getting ready to go live: ${g.required_done} of ${g.required_total} essentials done.</b> <span class="small muted">Next: ${esc(g.items.find((i) => i.required && !i.done)?.title || '')}</span></div><a class="btn btn-sm btn-gold" href="#golive">Open the checklist</a></div>` : '')).catch(() => '') : ''}
       ${CAN['assistant.use'] ? await todoCard(6) : ''}
       <div class="grid g4 mt">
         <div class="card kpi"><span>In-house</span><b>${d.in_house}</b><small>${occPct}% of ${d.rooms.sellable} sellable rooms</small></div>
@@ -2373,6 +2396,7 @@
     const a = $('#side-nav a[href="#inbox"]'); if (!a) return;
     let b = a.querySelector('.badge'); if (!b) { b = document.createElement('span'); b.className = 'badge'; a.appendChild(b); }
     b.textContent = n || ''; b.hidden = !n;
+    const t = $('#tab-wa'); if (t) { t.textContent = n || ''; t.hidden = !n; }
   }
 
   VIEWS.phonebook = async () => {
@@ -3187,6 +3211,125 @@
     modal('No charge needed', `<form class="form" data-form="ops-modal"><label>Why?<input name="note" maxlength="300" placeholder="e.g. OTA pays by bank transfer"></label><div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
       async (v) => { await POST(`/finance/cards/${d.id}/status`, { status: 'not_needed', note: v.note }); return 'Updated.'; });
   };
+  /* ---------- the app: install, updates, connection, error reports ---------- */
+  function labelTables() {
+    for (const t of document.querySelectorAll('#view table.list, #modal-body table.list')) {
+      const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+      for (const tr of t.querySelectorAll('tbody tr')) {
+        let i = 0;
+        for (const td of tr.children) { if (heads[i]) td.setAttribute('data-label', heads[i]); i += Number(td.getAttribute('colspan') || 1); }
+      }
+    }
+  }
+  const APP = {
+    installEvent: null, version: null, sentErrors: 0,
+    isIos: /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream,
+    standalone: () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+    showInstall() {
+      const can = !APP.standalone() && (APP.installEvent || APP.isIos);
+      document.querySelectorAll('[data-action=install-app]').forEach((b) => { b.hidden = !can; });
+    },
+    offlineScreen() {
+      $('#root').innerHTML = `<div class="login-wrap"><div class="login form"><div class="brand login-brand"><img class="mark" src="/brand/azeli-mark.svg" alt="" width="48" height="48"><span>Azeli<small>Property Management Software</small></span></div>
+        <h1>No connection</h1><p>Azeli PMS needs the internet to show live bookings and rooms. Check the Wi-Fi or mobile data.</p><button class="btn btn-gold" type="button" data-action="reload-app">Try again</button></div></div>`;
+    },
+    net(online) {
+      const st = $('#net-strip'); if (!st) return;
+      st.hidden = online; st.className = 'net-strip';
+      if (!online) st.innerHTML = '<b>No connection.</b> You can look around, but nothing can be saved until the connection is back.';
+    },
+    updateReady(worker) {
+      const st = $('#net-strip'); if (!st) return;
+      st.hidden = false; st.className = 'net-strip update';
+      st.innerHTML = '<span><b>A new version of Azeli PMS is ready.</b> Save what you are doing, then reload.</span><button type="button" class="btn btn-sm btn-gold" data-action="apply-update">Reload</button>';
+      APP.waiting = worker;
+    },
+    reportError(message, source, stack) {
+      if (APP.sentErrors >= 10 || !message || /Signed out|ResizeObserver|Script error\.?$|extension:\/\//.test(String(message) + String(source || ''))) return;
+      APP.sentErrors++;
+      fetch('/api/client-errors', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: String(message).slice(0, 500), source: String(source || '').slice(0, 300), stack: String(stack || '').slice(0, 4000), page: location.hash.slice(0, 200) }) }).catch(() => {});
+    },
+  };
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); APP.installEvent = e; APP.showInstall(); });
+  window.addEventListener('appinstalled', () => { APP.installEvent = null; APP.showInstall(); toast('Azeli PMS is installed. Open it from your home screen or app list.'); });
+  window.addEventListener('online', () => APP.net(true));
+  window.addEventListener('offline', () => APP.net(false));
+  window.addEventListener('error', (e) => APP.reportError(e.message, `${e.filename || ''}:${e.lineno || ''}`, e.error?.stack));
+  window.addEventListener('unhandledrejection', (e) => { const r = e.reason; if (r && r.message && !/^(Signed out|Failed to fetch)$/.test(r.message) && !r.status) APP.reportError(r.message, 'promise', r.stack); });
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((reg) => {
+      const watch = (w) => w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) APP.updateReady(w); });
+      if (reg.waiting && navigator.serviceWorker.controller) APP.updateReady(reg.waiting);
+      reg.addEventListener('updatefound', () => watch(reg.installing));
+      setInterval(() => reg.update().catch(() => {}), 30 * 60e3); // look for a new version every half hour
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (APP.updating && !reloading) { reloading = true; location.reload(); } });
+  }
+  OPS_A['apply-update'] = async () => { APP.updating = true; if (APP.waiting) APP.waiting.postMessage('activate-now'); else location.reload(); };
+  OPS_A['reload-app'] = async () => location.reload();
+  OPS_A['install-app'] = async () => {
+    if (APP.installEvent) { APP.installEvent.prompt(); const c = await APP.installEvent.userChoice.catch(() => null); if (c?.outcome === 'accepted') APP.installEvent = null; APP.showInstall(); return; }
+    modal('Install Azeli PMS', `<div class="form"><p>On iPhone or iPad, in <b>Safari</b>:</p><ol class="steps"><li>Tap the <b>Share</b> button (the square with an arrow).</li><li>Choose <b>Add to Home Screen</b>.</li><li>Tap <b>Add</b>. Azeli PMS opens from the home screen like any other app.</li></ol>
+      <p class="small muted">On Android (Chrome) and on computers (Chrome or Edge), use <b>Install app</b> in the browser menu.</p></div>`);
+  };
+  OPS_A.feedback = async () => {
+    modal('Report a problem or an idea', `<form class="form" data-form="ops-modal">
+      <p class="small">Azeli PMS is in <b>beta</b>. Tell us what went wrong, what is confusing, or what would help. It goes to the hotel's administrator${APP.version ? '' : ''} and to the Azeli team.</p>
+      <label>What is it?<select name="kind">${opts([['problem', 'Something is not working'], ['idea', 'An idea or something missing'], ['question', 'A question']], 'problem')}</select></label>
+      <label>Tell us more<textarea name="message" rows="5" maxlength="4000" required placeholder="What were you doing, what did you expect, what happened instead?"></textarea></label>
+      <p class="small muted">We add the page you are on (${esc(location.hash || '#dashboard')}) and the app version. No guest details are sent unless you type them.</p>
+      <div class="actions"><button class="btn btn-gold">Send</button></div></form>`,
+    async (v) => { await POST('/feedback', { kind: v.kind, message: v.message, page: location.hash }); return 'Thank you. Your report has been sent.'; });
+  };
+
+  /* ---------- go-live checklist ---------- */
+  VIEWS.golive = async () => {
+    const g = await GET('/system/golive');
+    const groups = [...new Set(g.items.map((i) => i.group))];
+    const pct = Math.round((g.required_done / g.required_total) * 100);
+    return `<div class="page-head"><div><h1 class="page">Go-live checklist</h1><p class="sub">What this hotel needs before real guests are entered, and the paid services to switch on when you are ready.</p></div></div>
+      <div class="card"><div class="golive-bar"><div><b>${g.required_done} of ${g.required_total}</b> essentials done</div><progress max="100" value="${pct}" aria-label="Essentials done">${pct}%</progress></div>
+      <p class="small muted">${g.required_done === g.required_total ? 'Ready for real guests. Paid services can be switched on one at a time.' : 'Work down the list; each line links to the page where it is done.'}</p></div>
+      ${groups.map((grp) => `<div class="card mt"><h2 class="sec">${esc(grp)}</h2><ul class="checklist">${g.items.filter((i) => i.group === grp).map((i) => `<li class="${i.done ? 'done' : i.required ? 'todo' : 'opt'}">
+        <span class="tick" aria-hidden="true">${i.done ? '✓' : i.required ? '!' : '○'}</span><div><b>${esc(i.title)}</b>${i.required ? '' : ' <span class="pill">optional</span>'}<br><span class="small muted">${esc(i.detail || '')}</span>${i.paid ? `<br><span class="small">Cost: ${esc(i.paid)}</span>` : ''}</div>
+        ${i.link && !i.done ? `<a class="btn btn-sm btn-ghost" href="${esc(i.link)}">Open</a>` : ''}</li>`).join('')}</ul></div>`).join('')}`;
+  };
+
+  /* ---------- system health & feedback ---------- */
+  const STATE = { live: ['Live', 'ok'], test: ['Test / practice', 'warn'], off: ['Off', ''] };
+  const bytes = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} KB`);
+  VIEWS.health = async () => {
+    const [h, fb] = await Promise.all([GET('/system/health'), GET(`/feedback?status=${ui.fbFilter || 'open'}`)]);
+    ui.fbList = fb;
+    const up = h.uptime_s > 86400 ? `${Math.floor(h.uptime_s / 86400)} days` : `${Math.floor(h.uptime_s / 3600)} h ${Math.floor((h.uptime_s % 3600) / 60)} min`;
+    return `<div class="page-head"><div><h1 class="page">System health &amp; feedback</h1><p class="sub">Version ${esc(h.version.label)} (beta) · running ${up} · ${esc(h.public_url || 'no public address set')}</p></div><button class="btn btn-ghost" data-action="refresh-view">Refresh</button></div>
+      <div class="kpis">
+        <div class="kpi"><span>Night audit</span><b>${h.night_audit.last ? fdate(h.night_audit.last) : 'never'}</b><small>${h.night_audit.days_behind > 1 ? `${h.night_audit.days_behind} days behind` : 'up to date'}</small></div>
+        <div class="kpi"><span>Last backup</span><b>${h.backup ? pill(h.backup.status, h.backup.status === 'ok' ? 'ok' : 'bad') : 'none'}</b><small>${h.backup?.finished_at ? ftime(h.backup.finished_at) : ''}${h.backup?.size_bytes ? ' · ' + bytes(h.backup.size_bytes) : ''}</small></div>
+        <div class="kpi"><span>Errors (24 h)</span><b>${h.errors_24h}</b><small>${h.errors.length} kinds kept</small></div>
+        <div class="kpi"><span>Feedback open</span><b>${h.feedback.open}</b><small>${h.feedback.new} new</small></div>
+        <div class="kpi"><span>Database</span><b>${bytes(h.database.bytes)}</b><small>${h.users.active} staff · ${h.users.week} signed in this week</small></div>
+      </div>
+      <div class="card mt"><h2 class="sec">Connected services</h2>${table(['Service', 'Status', 'Details', 'Paid'], h.integrations.map((i) => `<tr><td>${esc(i.name)}</td><td>${pill(...(STATE[i.state] || [i.state]))}</td><td class="small">${esc(i.note)}</td><td class="small">${i.paid ? 'yes' : 'free'}</td></tr>`))}
+        ${h.email.failed || h.email.queued > 20 ? `<p class="err small">Email: ${h.email.queued} waiting, ${h.email.failed} failed.</p>` : ''}${h.ari.pending > 50 ? `<p class="err small">${h.ari.pending} availability updates waiting to go to the channels.</p>` : ''}
+        ${h.channel_errors.map((c) => `<p class="err small">${esc(c.name)}: ${esc(c.last_error)}</p>`).join('')}</div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Feedback from staff</h2><div class="wa-filters">${[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${k === (ui.fbFilter || 'open') ? 'on' : ''}" data-action="fb-filter" data-f="${k}">${l}</button>`).join('')}</div></div>
+        ${table(['When', 'From', 'Kind', 'Message', 'Page', 'Status', ''], fb.map((f) => `<tr><td class="nowrap small">${ftime(f.created_at)}</td><td>${esc(f.full_name || '')}<br><span class="small muted">${esc(ROLE[f.role] || f.role || '')}</span></td>
+          <td>${pill(f.kind, f.kind === 'problem' ? 'bad' : f.kind === 'idea' ? 'ok' : '')}</td><td class="pre-wrap">${esc(f.message)}${f.reply ? `<br><span class="small muted">Reply: ${esc(f.reply)}</span>` : ''}</td><td class="small mono">${esc(f.page || '')}</td>
+          <td>${pill(f.status, f.status === 'new' ? 'warn' : f.status === 'done' ? 'ok' : '')}</td><td class="right nowrap">${f.status !== 'done' ? `<button class="btn btn-sm" data-action="fb-done" data-id="${f.id}">Done</button>` : ''}${f.status === 'new' ? ` <button class="btn btn-sm btn-ghost" data-action="fb-seen" data-id="${f.id}">Seen</button>` : ''}</td></tr>`), 'No feedback here.')}</div>
+      <div class="card mt"><div class="row between"><h2 class="sec">Errors</h2>${h.errors.length ? '<button class="btn btn-sm btn-ghost" data-action="errors-clear">Clear the list</button>' : ''}</div>
+        <p class="small muted">Errors seen by the app on someone's screen or by the server, each kept once with a count. Send the list to Azeli support if something keeps failing.</p>
+        ${table(['Last seen', 'Where', 'Error', 'Page', '#Times', 'Version'], h.errors.map((e) => `<tr><td class="nowrap small">${ftime(e.last_at)}</td><td>${pill(e.kind === 'server' ? 'Server' : 'Screen', e.kind === 'server' ? 'bad' : 'warn')}</td><td class="small">${esc(e.message)}${e.source ? `<br><span class="muted mono">${esc(e.source)}</span>` : ''}</td><td class="small mono">${esc(e.page || '')}</td><td class="num">${e.count}</td><td class="small mono">${esc(e.version || '')}</td></tr>`), 'No errors recorded.')}</div>`;
+  };
+  OPS_A['fb-filter'] = async (d) => { ui.fbFilter = d.f; render(); };
+  OPS_A['fb-done'] = async (d) => {
+    modal('Mark as done', `<form class="form" data-form="ops-modal"><label>Reply or what was done (optional)<textarea name="reply" rows="3" maxlength="2000"></textarea></label><div class="actions"><button class="btn btn-gold">Mark done</button></div></form>`,
+      async (v) => { await PUT(`/feedback/${d.id}`, { status: 'done', reply: v.reply }); return 'Marked as done.'; });
+  };
+  OPS_A['fb-seen'] = async (d) => { await PUT(`/feedback/${d.id}`, { status: 'seen' }); render(); };
+  OPS_A['errors-clear'] = async () => { if (!confirm('Clear the error list?')) return; await POST('/system/errors/clear', {}); render(); };
+
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
@@ -3241,5 +3384,5 @@
     } catch (e) { if (e.message !== 'Signed out') renderLogin(); }
   }
   // initial load: show login if not signed in
-  fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => (r.ok ? boot() : renderLogin()));
+  fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => (r.ok ? boot() : renderLogin())).catch(() => APP.offlineScreen());
 })();

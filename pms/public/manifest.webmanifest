@@ -1,0 +1,25 @@
+{
+  "name": "Azeli PMS",
+  "short_name": "Azeli PMS",
+  "description": "Hotel property management: front desk, housekeeping, restaurant, stores, accounts and guests.",
+  "id": "/",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#101a28",
+  "theme_color": "#142133",
+  "categories": ["business", "productivity", "travel"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Room board", "url": "/#board", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Housekeeping", "url": "/#housekeeping", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Reservations", "url": "/#reservations", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "WhatsApp inbox", "url": "/#inbox", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
