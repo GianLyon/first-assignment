@@ -24,7 +24,7 @@ async function cashAccount(db, code) {
 
 /* =============================== AMENITIES =============================== */
 export async function saveAmenity(db, user, id, b) {
-  const cats = ['spa', 'transport', 'tour', 'laundry', 'leisure', 'other'];
+  const cats = ['spa', 'fitness', 'transport', 'tour', 'laundry', 'leisure', 'other'];
   const vals = [text(b.name, 'Name', { required: true, max: 120 }), cats.includes(b.category) ? b.category : 'other', money0(b.price, 'Price'),
     b.duration_min ? Math.max(5, Number(b.duration_min) || 0) : null, text(b.description, 'Description', { max: 300 })];
   let a;
@@ -52,6 +52,28 @@ export async function bookAmenity(db, user, b) {
     resId = r.id; guest = guest || `${r.first_name} ${r.last_name}`;
   }
   if (!guest) throw new HttpError(400, 'Enter the guest name.');
+  // spa: a therapist and a treatment room, each never double-booked
+  const dur = am.duration_min || 60;
+  let therapist = null, spaRoom = null;
+  if (b.therapist_id) {
+    ({ rows: [therapist] } = await db.query('SELECT * FROM spa_therapists WHERE id=$1 AND active', [Number(b.therapist_id)]));
+    if (!therapist) throw new HttpError(400, 'Choose a therapist.');
+  }
+  if (b.spa_room_id) {
+    ({ rows: [spaRoom] } = await db.query('SELECT * FROM spa_rooms WHERE id=$1 AND active', [Number(b.spa_room_id)]));
+    if (!spaRoom) throw new HttpError(400, 'Choose a treatment room.');
+  }
+  if ((therapist || spaRoom) && !b.start_time) throw new HttpError(400, 'Choose the time of the treatment.');
+  const overlap = `ab.service_date=$1 AND ab.status IN ('booked','arrived','in_progress') AND ab.start_time IS NOT NULL
+         AND ab.start_time < ($2::time + make_interval(mins => $3)) AND ($2::time) < COALESCE(ab.end_time, ab.start_time + make_interval(mins => COALESCE(a.duration_min, 60)))`;
+  if (therapist) {
+    const { rows: [clash] } = await db.query(`SELECT ab.code, to_char(ab.start_time,'HH24:MI') AS t FROM amenity_bookings ab JOIN amenities a ON a.id=ab.amenity_id WHERE ${overlap} AND ab.therapist_id=$4`, [date, b.start_time, dur, therapist.id]);
+    if (clash) throw new HttpError(409, `${therapist.name} already has a treatment at ${clash.t} (${clash.code}).`);
+  }
+  if (spaRoom) {
+    const { rows: [used] } = await db.query(`SELECT count(*)::int AS n FROM amenity_bookings ab JOIN amenities a ON a.id=ab.amenity_id WHERE ${overlap} AND ab.spa_room_id=$4`, [date, b.start_time, dur, spaRoom.id]);
+    if (used.n >= spaRoom.beds) throw new HttpError(409, `${spaRoom.name} is full at that time.`);
+  }
   // the same staff member cannot be booked twice at the same time
   if (b.staff && b.start_time && am.duration_min) {
     const { rows: [clash] } = await db.query(
@@ -62,9 +84,10 @@ export async function bookAmenity(db, user, b) {
     if (clash) throw new HttpError(409, `${String(b.staff).trim()} is already booked at that time (${clash.code}).`);
   }
   const { rows: [bk] } = await db.query(
-    `INSERT INTO amenity_bookings (amenity_id, service_date, start_time, qty, unit_price, reservation_id, guest_name, phone, staff, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [am.id, date, b.start_time || null, qty, am.price, resId, guest, text(b.phone, 'Phone', { max: 40 }), text(b.staff, 'Staff', { max: 80 }), text(b.notes, 'Notes', { max: 300 }), user.id]);
+    `INSERT INTO amenity_bookings (amenity_id, service_date, start_time, qty, unit_price, reservation_id, guest_name, phone, staff, notes, created_by, therapist_id, spa_room_id, end_time)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, CASE WHEN $3::time IS NULL THEN NULL ELSE $3::time + make_interval(mins => $14) END) RETURNING *`,
+    [am.id, date, b.start_time || null, qty, am.price, resId, guest, text(b.phone, 'Phone', { max: 40 }), therapist ? therapist.name : text(b.staff, 'Staff', { max: 80 }), text(b.notes, 'Notes', { max: 300 }), user.id,
+      therapist?.id || null, spaRoom?.id || null, dur]);
   await audit(db, user, 'amenity.book', 'amenity_booking', bk.id, { code: bk.code, amenity: am.name, date, qty });
   return bk;
 }
@@ -73,7 +96,7 @@ export async function bookAmenity(db, user, b) {
 export async function completeAmenity(db, user, id, { settle_by }) {
   const { rows: [bk] } = await db.query('SELECT ab.*, a.name FROM amenity_bookings ab JOIN amenities a ON a.id=ab.amenity_id WHERE ab.id=$1 FOR UPDATE OF ab', [id]);
   if (!bk) throw new HttpError(404, 'Booking not found.');
-  if (bk.status !== 'booked') throw new HttpError(409, 'This booking is already closed.');
+  if (!['booked', 'arrived', 'in_progress'].includes(bk.status)) throw new HttpError(409, 'This booking is already closed.');
   const s = await getSettings(db);
   if (String(bk.service_date).slice(0, 10) > s.business_date) throw new HttpError(409, 'The service date has not arrived yet.');
   const amount = bk.qty * bk.unit_price;
@@ -94,8 +117,9 @@ export async function completeAmenity(db, user, id, { settle_by }) {
   return { amount };
 }
 export async function closeAmenity(db, user, id, status) {
-  if (!['cancelled', 'no_show'].includes(status)) throw new HttpError(400, 'Unknown status.');
-  const { rowCount } = await db.query("UPDATE amenity_bookings SET status=$2 WHERE id=$1 AND status='booked'", [id, status]);
+  if (!['cancelled', 'no_show', 'arrived', 'in_progress'].includes(status)) throw new HttpError(400, 'Unknown status.');
+  const from = status === 'in_progress' ? ['booked', 'arrived'] : status === 'arrived' ? ['booked'] : ['booked', 'arrived'];
+  const { rowCount } = await db.query(`UPDATE amenity_bookings SET status=$2${status === 'arrived' ? ', arrived_at=now()' : ''} WHERE id=$1 AND status = ANY($3)`, [id, status, from]);
   if (!rowCount) throw new HttpError(409, 'This booking is already closed.');
   await audit(db, user, `amenity.${status}`, 'amenity_booking', id);
 }

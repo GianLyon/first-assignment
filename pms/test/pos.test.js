@@ -45,7 +45,7 @@ test('shift, bill, items and sending orders to kitchen and bar', async () => {
   assert.equal((await waiter.post('/api/pos/checks', { outlet_id: outlet('Restaurant').id, table_id: t1.id })).status, 409); // table busy
   ok(await waiter.post(`/api/pos/checks/${check.id}/lines`, { item_id: item('Chicken luwombo').id, qty: 1 }));
   ok(await waiter.post(`/api/pos/checks/${check.id}/lines`, { item_id: item('Chicken luwombo').id, qty: 1 })); // merges
-  ok(await waiter.post(`/api/pos/checks/${check.id}/lines`, { item_id: item('Beef fillet steak').id, qty: 1, note: 'medium rare' }));
+  ok(await waiter.post(`/api/pos/checks/${check.id}/lines`, { item_id: item('Beef fillet steak').id, qty: 1, option: 'Medium', note: 'no sauce' }));
   const lager = ok(await waiter.post(`/api/pos/checks/${check.id}/lines`, { item_id: item('Local lager (500ml)').id, qty: 3 }));
   ok(await waiter.patch(`/api/pos/lines/${lager.id}`, { qty: 2 })); // unsent: change freely
   ok(await waiter.patch(`/api/pos/lines/${lager.id}`, { note: 'very cold' }));
@@ -59,7 +59,7 @@ test('shift, bill, items and sending orders to kitchen and bar', async () => {
   // kitchen display
   const kt = ok(await chef.get('/api/pos/tickets?station=kitchen'));
   assert.equal(kt.length, 1); assert.equal(kt[0].table_name, 'T1');
-  assert.ok(kt[0].items.some((i) => i.note === 'medium rare'));
+  assert.ok(kt[0].items.some((i) => i.note === 'no sauce' && i.option === 'Medium'));
   assert.ok(ok(await chef.get('/api/pos/tickets?station=bar'))[0].items.some((i) => i.note === 'very cold'));
   assert.equal((await waiter.patch(`/api/pos/lines/${lager.id}`, { note: 'too late' })).status, 409); // already sent
   ok(await chef.post(`/api/pos/tickets/${kt[0].id}/status`, { status: 'ready' }));
