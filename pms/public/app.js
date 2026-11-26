@@ -110,9 +110,9 @@
     ['Stores & purchasing', [['stock', 'Stock', 'inventory.view'], ['requisitions', 'Requisitions', 'requisition.create'], ['purchasing', 'Purchasing', 'inventory.receive'], ['counts', 'Stock counts', 'stock.count'], ['stockitems', 'Items & recipes', 'inventory.manage'], ['invreports', 'Inventory reports', 'inventory.view']]],
     ['Finance', [['reports', 'Reports', 'reports.view'], ['cards', 'OTA virtual cards', 'payments.post'], ['companies', 'Company accounts', 'finance.view'], ['payables', 'Suppliers & bills', 'finance.view'], ['money', 'Expenses & transfers', 'finance.view'], ['bankrec', 'Bank reconciliation', 'finance.view'], ['statements', 'Financial statements', 'finance.view'], ['accounts', 'Trial balance & journal', 'accounts.view'], ['chart', 'Chart of accounts', 'accounts.journal']]],
     ['People', [['myhr', 'My HR', 'staff.self'], ['employees', 'Employees', 'hr.view'], ['roster', 'Rosters', 'roster.manage'], ['attendance', 'Attendance', 'attendance.record'], ['leave', 'Leave', 'hr.view'], ['payroll', 'Payroll', 'hr.view']]],
-    ['Operations', [['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
+    ['Operations', [['spa', 'Spa', 'amenities.sell'], ['club', 'Health club', 'amenities.sell'], ['amenities', 'Amenities & services', 'amenities.sell'], ['events', 'Events & banqueting', 'events.view'], ['maintenance', 'Maintenance', 'maintenance.report'], ['assets', 'Assets', 'assets.manage']]],
     ['Guests & marketing', [['guests', 'Guest profiles', 'reservations.view'], ['campaigns', 'Campaigns', 'marketing.manage'], ['guestemails', 'Automatic emails', 'marketing.manage'], ['whatsapp', 'WhatsApp set-up', 'messages.manage']]],
-    ['Reports & group', [['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
+    ['Reports & group', [['library', 'Reports library', 'reports.library'], ['group', 'Group dashboard', 'group.view'], ['schedules', 'Department reports', 'reports.view']]],
     ['Administration', [['golive', 'Go-live checklist', 'settings.manage'], ['settings', 'Settings', 'settings.manage'], ['users', 'Staff & access', 'users.manage'], ['health', 'System health & feedback', 'settings.manage'], ['log', 'Audit log', 'auditlog.view']]],
   ];
   const VIEW_PERM = Object.fromEntries(NAV.flatMap(([, items]) => items.map(([id, , perm]) => [id, perm])));
@@ -183,7 +183,7 @@
     const seq = ++renderSeq;
     try {
       const html = await VIEWS[view](id);
-      if (seq === renderSeq) { $('#view').innerHTML = html; labelTables(); addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'events') { const th = $('.cal thead th.today'), w = $('.cal-wrap'); if (th && w) w.scrollLeft = Math.max(0, th.offsetLeft - 190); } if (view === 'inbox') { scrollWa(); const t = $('form[data-form=wa-send] textarea'); if (ui.waDraft && t && ui.waDraft.id === route().id) { t.value = ui.waDraft.text; t.focus(); } ui.waDraft = null; } else updateWaBadge(); }
+      if (seq === renderSeq) { $('#view').innerHTML = html; labelTables(); addPrinting(view); paintSwatches(); if (view === 'settings' && $('#backups-card')) fillBackups(); if (view === 'settings' && $('#network-card')) fillNetwork(); if (view === 'events') { const th = $('.cal thead th.today'), w = $('.cal-wrap'); if (th && w) w.scrollLeft = Math.max(0, th.offsetLeft - 190); } if (view === 'inbox') { scrollWa(); const t = $('form[data-form=wa-send] textarea'); if (ui.waDraft && t && ui.waDraft.id === route().id) { t.value = ui.waDraft.text; t.focus(); } ui.waDraft = null; } else updateWaBadge(); }
     } catch (e) { if (e.message !== 'Signed out' && seq === renderSeq) $('#view').innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`; }
   }
   const refresh = async () => { await refreshSettings(); await render(); };
@@ -347,6 +347,7 @@
         <p class="small">Require a code from an authenticator app, as well as the password, for these roles. Each person sets it up at their next sign-in. Recommended for everyone who sees money or guest data.</p>
         <div class="chips-row">${Object.entries(ROLE).map(([k, l]) => `<label class="row small"><input type="checkbox" name="r_${k}" value="1" ${(SETTINGS.mfa_required_roles || []).includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
         <div class="actions"><button class="btn btn-gold">Save</button></div></form></div>
+      <div class="card mt" id="network-card"><h2 class="sec">Hotel network only</h2><p class="small muted">Loading…</p></div>
       <div class="card mt" id="backups-card"><h2 class="sec">Backups</h2><p class="small muted">Loading…</p></div>` : ''}
       `,
       data: () => `${CAN['users.manage'] ? `<div class="card"><h2 class="sec">Sample data (for trying the system)</h2>${SETTINGS.demo_data
@@ -1638,7 +1639,7 @@
       <div class="lh-right"><div class="lh-title">${esc(title)}</div>${meta.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')}<div><span>Printed</span> ${esc(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))} by ${esc(ME.full_name)}</div></div></div>`;
   }
   // views that print a report: every page except the ones that are only for working (POS, set-up forms…)
-  const NO_PRINT = new Set(['assistant', 'cards', 'inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
+  const NO_PRINT = new Set(['assistant', 'cards', 'library', 'spa', 'club', 'check', 'inbox', 'whatsapp', 'pos', 'check', 'kitchen', 'menu', 'settings', 'users', 'plans', 'channels', 'bookingengine', 'eventedit', 'campaign', 'guestemails', 'beo', 'payslip', 'res']);
   function addPrinting(view) {
     if (NO_PRINT.has(view)) return;
     const head = $('#view .page-head');
@@ -2965,9 +2966,10 @@
         <div class="three"><label>Department<select name="department">${opts([['', '–'], ...DEPTS.map((x) => [x, x])], u?.department || '')}</select></label><label>Job title<input name="job_title" value="${esc(u?.job_title || '')}" maxlength="80" placeholder="Receptionist"></label><label>Role (what they can do) *<select name="role">${opts(ui.access ? ui.access.roles.map((r) => [r.key, `${r.name}${r.department ? ` · ${r.department}` : ''}`]) : Object.entries(ROLE), u?.role || 'front_office')}</select></label></div>
         <div class="two"><label>Work email<input name="email" type="email" value="${esc(u?.email || '')}" maxlength="120"></label><label>Phone<input name="phone" value="${esc(u?.phone || '')}" maxlength="40"></label></div>
         <label>${u ? 'Reset password (optional)' : 'Password (8+ characters) *'}<input name="password" type="password" minlength="8" ${u ? '' : 'required'} autocomplete="new-password"></label>
-        ${u ? `<label class="row"><input type="checkbox" name="active" value="1" ${u.active ? 'checked' : ''}> Account active</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+        ${u ? `<label class="row"><input type="checkbox" name="active" value="1" ${u.active ? 'checked' : ''}> Account active</label>` : ''}
+        <label class="row"><input type="checkbox" name="network_exempt" value="1" ${u?.network_exempt ? 'checked' : ''}> Can use the system away from the hotel network (e.g. a manager working from home)</label><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
       async (v) => {
-        const extra = { email: v.email, phone: v.phone, department: v.department, job_title: v.job_title };
+        const extra = { email: v.email, phone: v.phone, department: v.department, job_title: v.job_title, network_exempt: !!v.network_exempt };
         if (u) await PUT(`/users/${u.id}`, { full_name: v.full_name, role: v.role, active: !!v.active, password: v.password || undefined, ...extra }); else await POST('/users', v); return 'Staff account saved.';
       });
     },
@@ -3330,6 +3332,376 @@
   OPS_A['fb-seen'] = async (d) => { await PUT(`/feedback/${d.id}`, { status: 'seen' }); render(); };
   OPS_A['errors-clear'] = async () => { if (!confirm('Clear the error list?')) return; await POST('/system/errors/clear', {}); render(); };
 
+  /* ================= Phase 20: hotel network only ================= */
+  async function fillNetwork() {
+    const n = await GET('/settings/network').catch(() => null); const el = $('#network-card'); if (!n || !el) return;
+    ui.net = n;
+    el.innerHTML = `<h2 class="sec">Hotel network only</h2>
+      <p class="small">When this is on, staff can only use Azeli PMS from the hotel's own internet (the hotel Wi-Fi and office network). The roles ticked below, and anyone you exempt on their staff account, can still sign in from anywhere.</p>
+      <p class="small">You are connecting from <b class="mono">${esc(n.your_address)}</b> ${n.on_allowed ? pill('a hotel network', 'ok') : pill('not on the list', 'warn')}</p>
+      <form class="form" data-form="ops-network">
+        <label class="row"><input type="checkbox" name="network_lock" value="1" ${n.network_lock ? 'checked' : ''}> Only allow staff on the hotel network</label>
+        <label>Hotel network addresses (one per line; an address like 41.210.140.17 or a range like 41.210.140.0/28)<textarea name="allowed_networks" rows="3" class="mono">${esc((n.allowed_networks || []).join('\n'))}</textarea></label>
+        <div class="row"><button type="button" class="btn btn-sm btn-ghost" data-action="net-add-mine">Add this network (${esc(n.your_address)})</button></div>
+        <p class="small muted">Do this while connected to the hotel Wi-Fi. Ask the internet provider for a <b>fixed (static) address</b>; if it changes, staff are locked out until the new address is added here by someone exempt.</p>
+        <div><b class="small">Can sign in from anywhere</b><div class="chips-row">${Object.entries(ROLE).map(([k, l]) => `<label class="row small"><input type="checkbox" name="x_${k}" value="1" ${(n.network_exempt_roles || []).includes(k) || k === 'admin' ? 'checked' : ''} ${k === 'admin' ? 'disabled' : ''}> ${esc(l)}</label>`).join('')}</div></div>
+        ${n.exempt_people.length ? `<p class="small">Also exempt (on their staff account): ${n.exempt_people.map((u) => esc(u.full_name)).join(', ')}</p>` : ''}
+        <div class="actions"><button class="btn btn-gold">Save</button></div></form>`;
+  }
+  OPS_A['net-add-mine'] = async () => { const t = $('form[data-form=ops-network] textarea[name=allowed_networks]'); if (!t || !ui.net) return; const list = t.value.split(/\s+/).filter(Boolean); if (!list.includes(ui.net.your_address)) list.push(ui.net.your_address); t.value = list.join('\n'); };
+  OPS_FORMS['ops-network'] = async (v) => {
+    const roles = Object.keys(v).filter((k) => k.startsWith('x_')).map((k) => k.slice(2));
+    if (!roles.includes('admin')) roles.push('admin');
+    if (v.network_lock && !confirm('Staff not on the hotel network will be signed out on their next click. Continue?')) return;
+    await PUT('/settings/network', { network_lock: !!v.network_lock, allowed_networks: v.allowed_networks.split(/\s+/).filter(Boolean), network_exempt_roles: roles });
+    toast(v.network_lock ? 'Saved. Staff can now only use the system on the hotel network.' : 'Saved.'); fillNetwork();
+  };
+
+  /* ================= Phase 20: printing (80 mm slips) ================= */
+  function printSlip(html) {
+    let el = $('#print-slip'); if (!el) { el = document.createElement('div'); el.id = 'print-slip'; document.body.appendChild(el); }
+    el.innerHTML = html;
+    document.body.classList.add('printing-slip');
+    const done = () => { document.body.classList.remove('printing-slip'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+    setTimeout(done, 2000);
+  }
+  const slipDate = (t) => new Date(t || Date.now()).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const slipHead = (title, copy) => `<div class="slip-h"><b>${esc(SETTINGS.legal_name || SETTINGS.property_name)}</b>${SETTINGS.address ? `<br>${esc(SETTINGS.address)}` : ''}${SETTINGS.contact_phone ? `<br>Tel ${esc(SETTINGS.contact_phone)}` : ''}${SETTINGS.tin ? `<br>TIN ${esc(SETTINGS.tin)}` : ''}</div>
+    <div class="slip-title">${esc(title)}${copy ? ' · COPY' : ''}</div>`;
+  const slipWho = (c) => c.table_name ? `Table ${esc(c.table_name)}` : c.room_number ? `Room ${esc(c.room_number)} · ${esc(c.last_name || '')}` : esc(c.guest_name || 'Walk-in');
+  function billSlip(d, kind, copy) {
+    const c = d.check, live = d.lines.filter((l) => l.status !== 'voided');
+    return `${slipHead(kind === 'receipt' ? 'RECEIPT' : 'BILL', copy)}
+      <div class="slip-meta"><span>${esc(c.outlet_name)} · ${esc(c.code)}</span><span>${slipWho(c)} · ${c.covers} pax</span><span>${c.waiter_name ? 'Served by ' + esc(c.waiter_name) : ''}</span><span>${slipDate(kind === 'receipt' ? c.settled_at : null)}</span></div>
+      <table class="slip-lines">${live.map((l) => `<tr><td>${l.qty}</td><td>${esc(l.name)}${l.option ? ` (${esc(l.option)})` : ''}</td><td>${num(l.unit_price * l.qty)}</td></tr>`).join('')}</table>
+      <div class="slip-tot">${d.discount ? `<div><span>Subtotal</span><span>${num(d.gross)}</span></div><div><span>Discount</span><span>-${num(d.discount)}</span></div>` : ''}
+        <div class="big"><span>TOTAL UGX</span><span>${num(d.total)}</span></div><div class="small"><span>VAT included</span><span>${num(d.vat)}</span></div></div>
+      ${kind === 'receipt' ? `<div class="slip-pay">${c.settle_kind !== 'sale' ? `<div><b>${c.settle_kind === 'complimentary' ? 'COMPLIMENTARY' : 'HOUSE USE'}</b></div>` : d.payments.map((p) => `<div><span>${PMETHOD[p.method]}${p.room_number ? ' ' + esc(p.room_number) : ''}${p.reference ? ' · ' + esc(p.reference) : ''}</span><span>${num(p.amount)}</span></div>`).join('')}
+        <div class="small">Cashier: ${esc(c.settled_by_name || '')}</div></div>${c.reservation_id && d.payments.some((p) => p.method === 'room') ? '<div class="slip-sign">Guest signature ______________________</div>' : ''}`
+        : '<div class="slip-note">This is not a receipt. Please pay the cashier.</div>'}
+      <div class="slip-foot">${esc(c.receipt_footer || 'Thank you!')}</div>`;
+  }
+  function kotSlip(t, copy) {
+    const station = t.station === 'bar' ? 'BAR' : 'KITCHEN';
+    const byCourse = {};
+    for (const i of t.items) (byCourse[i.course || 1] = byCourse[i.course || 1] || []).push(i);
+    return `<div class="slip-title kot">${station} ORDER${copy ? ' · COPY' : ''}</div>
+      <div class="kot-who">${t.table_name ? 'TABLE ' + esc(t.table_name) : t.room_number ? 'ROOM ' + esc(t.room_number) : 'WALK-IN'}</div>
+      <div class="slip-meta"><span>${esc(t.code)} · ${esc(t.outlet_name)} · ${t.covers || ''} pax</span><span>${esc(t.waiter_name || '')}</span><span>${slipDate(t.created_at)}</span></div>
+      ${Object.entries(byCourse).map(([crs, items]) => `${Object.keys(byCourse).length > 1 || Number(crs) > 1 ? `<div class="kot-course">${COURSE[crs] || 'Course ' + crs}</div>` : ''}
+        <ul class="kot-items">${items.map((i) => `<li class="${i.voided ? 'void' : ''}"><b>${i.qty} ×</b> ${esc(i.name)}${i.option ? `<div class="kot-opt">${esc(i.option)}</div>` : ''}${i.note ? `<div class="kot-note">** ${esc(i.note)} **</div>` : ''}${i.voided ? ' <b>VOID</b>' : ''}</li>`).join('')}</ul>`).join('')}`;
+  }
+  async function printKot(t) { const r = await POST('/pos/prints', { ticket_id: t.id, kind: 'kot' }); printSlip(kotSlip(t, r.copy)); }
+  OPS_A['print-bill'] = async (d) => { const c = await GET(`/pos/checks/${d.id}`); const r = await POST('/pos/prints', { check_id: Number(d.id), kind: d.kind }); printSlip(billSlip(c, d.kind, r.copy)); if (r.copy) toast(`Printed as COPY (print ${r.n}).`); };
+  OPS_A['print-kot'] = async (d) => { const t = (ui.tickets || []).find((x) => x.id === Number(d.id)); if (t) await printKot(t); };
+
+  /* ================= Phase 20: the bill screen ================= */
+  const COURSE = { 1: 'Starters & drinks', 2: 'Mains', 3: 'Desserts', 4: 'Later' };
+  const KIND_L = { restaurant: 'Restaurant', bar: 'Bar', room_service: 'Room service', spa: 'Spa', health_club: 'Health club', pool_bar: 'Pool bar', other: 'Other' };
+  VIEWS.check = async (id) => {
+    const [d, setup] = await Promise.all([GET(`/pos/checks/${id}`), posSetup()]);
+    ui.checkData = d;
+    const c = d.check, open = c.status === 'open';
+    const cats = setup.categories.filter((x) => x.active && (!x.outlet_ids?.length || x.outlet_ids.includes(c.outlet_id)));
+    const cat = cats.find((x) => x.id === ui.posCat) || cats[0];
+    const items = setup.items.filter((i) => i.active && i.category_id === cat?.id);
+    const pending = d.lines.filter((l) => l.status === 'pending' && !l.held).length, held = d.lines.filter((l) => l.status === 'pending' && l.held);
+    const course = ui.posCourse || 1, hold = !!ui.posHold;
+    const lineRow = (l) => `<div class="cart-line ${l.status === 'voided' ? 'void-line' : ''} ${l.held ? 'held-line' : ''}"><span>${esc(l.name)}${l.option ? ` <span class="pill">${esc(l.option)}</span>` : ''}${l.happy ? ' <span class="pill ok">happy hour</span>' : ''}${l.note ? `<br><small class="muted">${esc(l.note)}</small>` : ''}
+        <br><small class="muted">${l.station === 'none' ? (l.status === 'pending' ? 'not yet added' : 'added') : { pending: l.held ? `waiting · ${COURSE[l.course] || ''}` : 'not sent', sent: l.station === 'bar' ? 'sent to bar' : 'sent to kitchen', voided: 'void: ' + esc(l.void_reason || '') }[l.status]}</small></span>
+      ${open && l.status === 'pending' ? `<span class="qty">${l.station !== 'none' ? `<button class="link small" data-action="line-hold" data-id="${l.id}" data-hold="${l.held ? 0 : 1}">${l.held ? 'release' : 'hold'}</button> ` : ''}<button class="link small" data-action="line-note" data-id="${l.id}" data-note="${esc(l.note || '')}">note</button> <button data-action="line-qty" data-id="${l.id}" data-qty="${l.qty - 1}" aria-label="Less">−</button>${l.qty}<button data-action="line-qty" data-id="${l.id}" data-qty="${l.qty + 1}" aria-label="More">+</button></span>`
+        : `<span class="qty">${l.qty}${open && l.status === 'sent' && CAN['pos.void'] ? ` <button class="link small" data-action="line-void" data-id="${l.id}">void</button>` : ''}</span>`}
+      <b>${num(l.unit_price * l.qty)}</b></div>`;
+    const kindL = c.settle_kind === 'complimentary' ? pill('Complimentary', 'info') : c.settle_kind === 'house_use' ? pill('House use', 'info') : '';
+    return `<div class="page-head"><div><p class="sub"><a href="#pos">← Floor</a>${c.parent_code ? ` · split from <a href="#check/${c.parent_id}">${esc(c.parent_code)}</a>` : ''}</p><h1 class="page">${slipWho(c)}</h1>
+        <p class="sub">${esc(c.code)} · ${esc(c.outlet_name)} · ${c.covers} guest(s) · waiter ${esc(c.waiter_name || '—')}${open ? ` <button class="link small" data-action="check-waiter" data-id="${c.id}">change</button>` : ''} · ${open ? 'open ' + since(c.opened_at) : statusPillPos(c.status) + ' ' + kindL}</p></div>
+        ${open ? `<div class="row">${c.table_id ? `<button class="btn btn-ghost" data-action="move-check" data-id="${c.id}">Move table</button>` : ''}<button class="btn btn-ghost" data-action="check-split" data-id="${c.id}">Split bill</button><button class="btn btn-ghost" data-action="check-merge" data-id="${c.id}">Merge</button>
+          <button class="btn btn-ghost" data-action="check-discount" data-id="${c.id}">Discount</button><button class="btn btn-ghost" data-action="print-bill" data-id="${c.id}" data-kind="bill">Print bill${c.bill_prints ? ` (${c.bill_prints})` : ''}</button><button class="btn btn-ghost" data-action="void-check" data-id="${c.id}">Void</button></div>` : ''}</div>
+      ${d.splits.length ? `<p class="note">Split bills: ${d.splits.map((x) => `<a href="#check/${x.id}">${esc(x.code)}</a> ${statusPillPos(x.status)}`).join(' · ')}</p>` : ''}
+      <div class="pos">
+        <div>${open ? `<div class="pos-course"><span class="small muted">Adding to</span>${[1, 2, 3].map((n) => `<button type="button" class="${course === n ? 'on' : ''}" data-action="pos-course" data-n="${n}">${COURSE[n]}</button>`).join('')}
+            <label class="row small hold-tog"><input type="checkbox" data-change="pos-hold" ${hold ? 'checked' : ''}> Hold until fired</label></div>
+          <div class="tabs">${cats.map((x) => `<button class="${x.id === cat?.id ? 'on' : ''}" data-action="pos-cat" data-id="${x.id}">${esc(x.name)}</button>`).join('')}</div>
+          <div class="items">${items.map((i) => `<button class="item" data-action="add-item2" data-check="${c.id}" data-id="${i.id}"><b>${esc(i.name)}</b><span>${num(i.price)}${i.happy_price != null ? `<small class="happy"> HH ${num(i.happy_price)}</small>` : ''}</span>${i.options?.length ? '<small class="muted">choose…</small>' : ''}${i.duration_min ? `<small class="muted">${i.duration_min} min</small>` : ''}</button>`).join('') || '<p class="muted">No items in this category.</p>'}</div>
+          <p class="small muted mt">Pick the course, then tap items. Tick “Hold” for mains you will fire later. Tap “note” on a line for the kitchen (e.g. no onions).</p>`
+          : `<div class="card">${c.settle_kind !== 'sale' ? `<p><b>${c.settle_kind === 'complimentary' ? 'Complimentary' : 'House use'}</b>: ${esc(c.settle_reason || '')} (approved by ${esc(c.settled_by_name || '')})</p>` : table(['Paid by', 'Reference', '#Amount'], d.payments.map((p) => `<tr><td>${PMETHOD[p.method]}${p.room_number ? ' · room ' + esc(p.room_number) : ''}</td><td>${esc(p.reference || '')}</td><td class="num">${num(p.amount)}</td></tr>`), 'No payments.')}</div>`}</div>
+        <div class="card cart"><h2 class="sec">Bill ${esc(c.code)}</h2>
+          ${d.lines.length ? d.lines.map(lineRow).join('') : '<p class="empty">Tap items to add them.</p>'}
+          ${d.discount ? `<div class="cart-sub"><span>Items</span><span>${ugx(d.gross)}</span></div><div class="cart-sub"><span>Discount${c.discount_reason ? ` (${esc(c.discount_reason)})` : ''}</span><span>−${ugx(d.discount)}</span></div>` : ''}
+          <div class="cart-total"><span>Total</span><span>${ugx(d.total)}</span></div><p class="small muted right">VAT included ${ugx(d.vat)}</p>
+          ${open ? `<div class="pay-btns"><button class="btn" data-action="send-check" data-id="${c.id}" ${pending ? '' : 'disabled'}>Send ${pending ? `(${pending})` : ''}</button>
+            ${held.length ? `<button class="btn" data-action="fire-check" data-id="${c.id}">Fire held (${held.length})</button>` : ''}
+            <button class="btn btn-gold" data-action="pay-check" data-id="${c.id}" data-total="${d.total}" data-res="${c.reservation_id || ''}" ${d.total ? '' : 'disabled'}>Pay</button></div>
+            ${CAN['pos.void'] ? `<p class="small right mt"><button class="link small" data-action="check-comp" data-id="${c.id}">Complimentary / house use…</button></p>` : ''}`
+          : `<div class="row"><button class="btn btn-gold" data-action="print-bill" data-id="${c.id}" data-kind="receipt">${c.receipt_prints ? `Reprint receipt (COPY)` : 'Print receipt'}</button></div>`}
+        </div></div>`;
+  };
+  OPS_A['pos-course'] = (d) => { ui.posCourse = Number(d.n); render(); };
+  OPS_A['pos-hold'] = (_d, e) => { ui.posHold = !!e.target.checked; };
+  OPS_A['add-item2'] = async (d, e) => {
+    const setup = await posSetup(); const item = setup.items.find((i) => i.id === Number(d.id)); if (!item) return;
+    const add = async (option, note) => { const r = await POST(`/pos/checks/${d.check}/lines`, { item_id: item.id, qty: 1, option, note, course: ui.posCourse || item.course || 1, hold: !!ui.posHold }); if (r.happy) toast(`${item.name} at the happy-hour price.`); render(); };
+    if (item.options?.length) {
+      modal(item.name, `<form class="form" data-form="ops-modal"><p class="small">Choose one:</p><div class="opt-grid">${item.options.map((o, i) => `<label class="opt"><input type="radio" name="option" value="${esc(o)}" ${i === 0 ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>
+        <label>Note for the kitchen / bar (optional)<input name="note" maxlength="200"></label><div class="actions"><button class="btn btn-gold">Add</button></div></form>`, async (v) => { await add(v.option, v.note); return null; });
+      return;
+    }
+    let note = null;
+    if (e.shiftKey) { note = prompt('Note for the kitchen/bar (e.g. no onions):'); if (note === null) return; }
+    await add(undefined, note);
+  };
+  OPS_A['line-hold'] = async (d) => { await POST(`/pos/lines/${d.id}/hold`, { hold: d.hold === '1' }); render(); };
+  OPS_A['fire-check'] = async (d) => { const r = await POST(`/pos/checks/${d.id}/fire`, {}); toast(`Fired to ${r.tickets.map((t) => t.station).join(' and ') || 'the stations'}.`); render(); };
+  OPS_A['check-discount'] = async (d) => {
+    const c = ui.checkData?.check;
+    modal('Discount the bill', `<form class="form" data-form="ops-modal"><p class="small">Items total ${ugx(ui.checkData?.gross || 0)}. Up to ${c?.discount_limit_pct ?? 10}% you can give yourself; more needs a manager.</p>
+      <div class="two"><label>Percent<input name="pct" type="number" min="0" max="99" step="0.5" placeholder="e.g. 10"></label><label>or amount (UGX)<input name="amount" type="number" min="0" step="1"></label></div>
+      <label>Reason *<input name="reason" maxlength="200" placeholder="e.g. Loyal guest, complaint about wait" value="${esc(c?.discount_reason || '')}"></label>
+      <div class="actions">${c?.discount_amount ? '<button type="button" class="btn btn-ghost" data-action="check-discount-remove">Remove discount</button>' : ''}<button class="btn btn-gold">Apply</button></div></form>`,
+    async (v) => { await POST(`/pos/checks/${d.id}/discount`, v.pct ? { pct: Number(v.pct), reason: v.reason } : { amount: Number(v.amount || 0), reason: v.reason }); return 'Discount applied.'; });
+  };
+  OPS_A['check-discount-remove'] = async () => { const c = ui.checkData.check; await POST(`/pos/checks/${c.id}/discount`, { amount: 0 }); closeModal(); render(); };
+  OPS_A['check-split'] = async (d) => {
+    const lines = (ui.checkData?.lines || []).filter((l) => l.status !== 'voided');
+    modal('Split the bill', `<form class="form" data-form="ops-modal"><p class="small">Tick the items that go on the new bill (e.g. what one guest had). The new bill stays on the same table.</p>
+      <div class="split-list">${lines.map((l) => `<label class="row"><input type="checkbox" name="l_${l.id}" value="1"> ${l.qty} × ${esc(l.name)}${l.option ? ` (${esc(l.option)})` : ''} <span class="muted">${num(l.unit_price * l.qty)}</span></label>`).join('')}</div>
+      <div class="actions"><button class="btn btn-gold">Move to a new bill</button></div></form>`,
+    async (v) => { const ids = Object.keys(v).filter((k) => k.startsWith('l_')).map((k) => Number(k.slice(2))); const n = await POST(`/pos/checks/${d.id}/split`, { line_ids: ids }); location.hash = `#check/${n.id}`; return `New bill ${n.code}.`; });
+  };
+  OPS_A['check-merge'] = async (d) => {
+    const c = ui.checkData.check; const floor = await GET(`/pos/floor?outlet_id=${c.outlet_id}`);
+    const others = [...floor.tables.filter((t) => t.check_id && t.check_id !== c.id).map((t) => [t.check_id, `Table ${t.name} · ${t.code} · ${num(t.total)}`]), ...floor.other.filter((o) => o.check_id !== c.id).map((o) => [o.check_id, `${o.code} · ${o.table_name ? 'table ' + o.table_name : o.room_number ? 'room ' + o.room_number : 'walk-in'} · ${num(o.total)}`])];
+    modal('Merge another bill into this one', `<form class="form" data-form="ops-modal"><label>Bill to bring here<select name="from_id">${opts(others)}</select></label>${others.length ? '' : '<p class="note">No other open bills in this outlet.</p>'}<div class="actions"><button class="btn btn-gold" ${others.length ? '' : 'disabled'}>Merge</button></div></form>`,
+      async (v) => { await POST(`/pos/checks/${d.id}/merge`, { from_id: Number(v.from_id) }); return 'Bills merged.'; });
+  };
+  OPS_A['check-waiter'] = async (d) => {
+    const staff = await GET('/pos/staff');
+    modal('Waiter for this bill', `<form class="form" data-form="ops-modal"><label>Waiter<select name="waiter_id">${opts(staff.map((u) => [u.id, u.full_name]), ui.checkData?.check?.waiter_id)}</select></label><div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+      async (v) => { await POST(`/pos/checks/${d.id}/waiter`, { waiter_id: Number(v.waiter_id) }); return null; });
+  };
+  OPS_A['check-comp'] = async (d) => {
+    modal('Close without payment', `<form class="form" data-form="ops-modal"><p class="small">No money is taken and no sale is recorded; the stock and its cost are still booked. Both appear in the complimentary and house use reports.</p>
+      <label>Type<select name="kind">${opts([['complimentary', 'Complimentary: on the house for a guest'], ['house_use', 'House use: staff meal, tasting, owner']])}</select></label>
+      <label>Reason *<input name="reason" required maxlength="300"></label><div class="actions"><button class="btn btn-gold">Close bill</button></div></form>`,
+    async (v) => { await POST(`/pos/checks/${d.id}/settle`, { kind: v.kind, reason: v.reason }); return 'Bill closed.'; });
+  };
+  // opening a bill: waiter and number of guests
+  OPS_A['new-check'] = async (d) => {
+    const staff = await GET('/pos/staff').catch(() => []);
+    modal(`Open ${d.name}`, `<form class="form" data-form="ops-modal"><div class="two"><label>Number of guests<input name="covers" type="number" min="1" value="2" required></label><label>Waiter<select name="waiter_id">${opts(staff.map((u) => [u.id, u.full_name]), ME.id)}</select></label></div><div class="actions"><button class="btn btn-gold">Open bill</button></div></form>`,
+      async (v) => { const c = await POST('/pos/checks', { outlet_id: ui.posOutlet || undefined, table_id: Number(d.table), covers: Number(v.covers), waiter_id: Number(v.waiter_id) }); location.hash = `#check/${c.id}`; return null; });
+  };
+  OPS_A['quick-check'] = async () => {
+    modal('Bill without a table', `<form class="form" data-form="ops-modal"><label>Name on the bill (optional)<input name="guest_name" maxlength="80" placeholder="e.g. takeaway for Sarah, spa client"></label><div class="actions"><button class="btn btn-gold">Open bill</button></div></form>`,
+      async (v) => { const c = await POST('/pos/checks', { outlet_id: ui.posOutlet || undefined, covers: 1, guest_name: v.guest_name }); location.hash = `#check/${c.id}`; return null; });
+  };
+
+  /* ================= Phase 20: kitchen & bar screen ================= */
+  const autoKey = (st) => `azeli-autoprint-${st}`;
+  const getAuto = (st) => { try { return localStorage.getItem(autoKey(st)) === '1'; } catch { return false; } };
+  VIEWS.kitchen = async () => {
+    const station = cur('station', 'kitchen');
+    const list = await GET(`/pos/tickets?station=${station}`);
+    ui.tickets = list;
+    const now = Date.now(), mins = (t) => Math.floor((now - new Date(t).getTime()) / 60000);
+    const allDay = {};
+    for (const t of list.filter((x) => x.status === 'new')) for (const i of t.items.filter((x) => !x.voided)) allDay[i.name + (i.option ? ` (${i.option})` : '')] = (allDay[i.name + (i.option ? ` (${i.option})` : '')] || 0) + i.qty;
+    const auto = getAuto(station);
+    // print new tickets automatically on this screen's printer, once each
+    if (auto) { const next = list.find((t) => t.status === 'new' && !t.prints && !(ui.kotPrinted || new Set()).has(t.id)); if (next) { (ui.kotPrinted = ui.kotPrinted || new Set()).add(next.id); setTimeout(() => printKot(next).catch(() => {}), 300); } }
+    return `<div class="page-head"><div><h1 class="page">${station === 'bar' ? 'Bar' : 'Kitchen'} orders</h1><p class="sub">Refreshes every 15 seconds. Oldest first. Amber after 15 minutes, red after 25.</p></div>
+        <label class="row small"><input type="checkbox" data-change="kot-auto" data-station="${station}" ${auto ? 'checked' : ''}> Print new orders automatically on this screen</label></div>
+      ${tabs('station', [['kitchen', 'Kitchen'], ['bar', 'Bar']], 'kitchen')}
+      ${Object.keys(allDay).length ? `<div class="card allday"><b>To make now:</b> ${Object.entries(allDay).sort((a, b) => b[1] - a[1]).map(([n, q]) => `<span class="pill">${q} × ${esc(n)}</span>`).join(' ')}</div>` : ''}
+      <div class="tickets">${list.map((t) => { const m = mins(t.created_at); const age = t.status === 'new' ? (m >= 25 ? 'late' : m >= 15 ? 'warn' : '') : ''; return `<div class="card ticket t-${t.status} ${age ? 'age-' + age : ''}">
+        <div class="row between"><b class="tk-who">${t.table_name ? 'Table ' + esc(t.table_name) : t.room_number ? 'Room ' + esc(t.room_number) : 'Walk-in'}</b><span class="tk-min">${t.status === 'new' ? `${m} min` : t.status}</span></div>
+        <p class="small muted mt0">${esc(t.code)} · ${esc(t.outlet_name)} · ${esc(t.waiter_name || '')}${t.covers ? ` · ${t.covers} pax` : ''}${t.course > 1 ? ` · <b>${COURSE[t.course]}</b>` : ''}</p>
+        <ul class="ticket-items">${t.items.map((i) => `<li class="${i.voided ? 'void-line' : ''}"><b>${i.qty}×</b> ${esc(i.name)}${i.option ? ` <span class="pill">${esc(i.option)}</span>` : ''}${i.note ? `<br><em>${esc(i.note)}</em>` : ''}${i.voided ? ' <span class="pill bad">VOID</span>' : ''}</li>`).join('')}</ul>
+        <div class="row">${t.status === 'new' ? `<button class="btn btn-gold" data-action="ticket" data-id="${t.id}" data-status="ready">Ready</button>` : t.status === 'ready' ? `<button class="btn" data-action="ticket" data-id="${t.id}" data-status="served">Served</button>` : '<span class="pill ok">Served</span>'}
+          <button class="btn btn-ghost btn-sm" data-action="print-kot" data-id="${t.id}">${t.prints ? 'Reprint' : 'Print'}</button></div></div>`; }).join('') || '<div class="card"><p class="empty">No orders right now.</p></div>'}</div>`;
+  };
+  OPS_A['kot-auto'] = (d, e) => { try { localStorage.setItem(autoKey(d.station), e.target.checked ? '1' : '0'); } catch { /* private window */ } toast(e.target.checked ? 'New orders will print on this screen. For printing without the print window, see the printing guide.' : 'Automatic printing off.'); };
+
+  /* ================= Phase 20: menu set-up ================= */
+  OPS_A['item-edit'] = async (d) => {
+    const setup = await posSetup(true); const i = d.id ? setup.items.find((x) => String(x.id) === d.id) : null;
+    modal(i ? `Edit ${i.name}` : 'New menu item', `<form class="form" data-form="ops-modal"><label>Name *<input name="name" value="${esc(i?.name || '')}" required maxlength="120"></label>
+      <div class="three"><label>Category<select name="category_id">${opts(setup.categories.map((c) => [c.id, c.name]), i?.category_id)}</select></label><label>Price (UGX, VAT incl.) *<input name="price" type="number" min="0" step="1" value="${i?.price ?? ''}" required></label><label>Happy-hour price<input name="happy_price" type="number" min="0" step="1" value="${i?.happy_price ?? ''}" placeholder="none"></label></div>
+      <div class="three"><label>Usually served as<select name="course">${opts(Object.entries(COURSE), String(i?.course || 1))}</select></label><label>Duration (spa, minutes)<input name="duration_min" type="number" min="1" max="600" value="${i?.duration_min ?? ''}"></label><label>&nbsp;${i ? `<span class="row"><input type="checkbox" name="active" value="1" ${i.active ? 'checked' : ''}> On sale</span>` : ''}</label></div>
+      <label>Choices the waiter must pick (comma-separated)<input name="options" value="${esc((i?.options || []).join(', '))}" maxlength="400" placeholder="e.g. Rare, Medium, Well done  ·  With ice, No ice"></label>
+      <div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const body = { name: v.name, category_id: Number(v.category_id), price: Number(v.price), happy_price: v.happy_price, options: v.options, duration_min: v.duration_min, course: Number(v.course), active: i ? !!v.active : true }; if (i) await PUT(`/pos/items/${i.id}`, body); else await POST('/pos/items', body); POS = null; return 'Menu saved.'; });
+  };
+  OPS_A['cat-edit'] = async (d) => {
+    const setup = await posSetup(true); const c = d.id ? setup.categories.find((x) => String(x.id) === d.id) : null;
+    modal(c ? `Edit ${c.name}` : 'New category', `<form class="form" data-form="ops-modal"><label>Name *<input name="name" value="${esc(c?.name || '')}" required></label>
+      <div class="two"><label>Orders go to<select name="station">${opts([['kitchen', 'Kitchen'], ['bar', 'Bar'], ['none', 'No ticket (spa treatments, retail, day passes)']], c?.station)}</select></label><label>Display order<input name="sort" type="number" value="${c?.sort ?? 0}"></label></div>
+      <div><b class="small">Sold in (none ticked = every outlet)</b><div class="chips-row">${setup.outlets.map((o) => `<label class="row small"><input type="checkbox" name="o_${o.id}" value="1" ${(c?.outlet_ids || []).includes(o.id) ? 'checked' : ''}> ${esc(o.name)}</label>`).join('')}</div></div>
+      ${c ? `<label class="row"><input type="checkbox" name="active" value="1" ${c.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const body = { name: v.name, station: v.station, sort: Number(v.sort), active: c ? !!v.active : true, outlet_ids: Object.keys(v).filter((k) => k.startsWith('o_')).map((k) => Number(k.slice(2))) }; if (c) await PUT(`/pos/categories/${c.id}`, body); else await POST('/pos/categories', body); POS = null; return 'Category saved.'; });
+  };
+  OPS_A['outlet-edit'] = async (d) => {
+    const setup = await posSetup(true); const o = d.id ? setup.outlets.find((x) => String(x.id) === d.id) : null;
+    modal(o ? `Edit ${o.name}` : 'New outlet', `<form class="form" data-form="ops-modal"><div class="two"><label>Name *<input name="name" value="${esc(o?.name || '')}" required></label><label>Type<select name="kind">${opts(Object.entries(KIND_L), o?.kind || 'restaurant')}</select></label></div>
+      <div class="three"><label>Happy hour from<input name="happy_from" type="time" value="${esc(String(o?.happy_from || '').slice(0, 5))}"></label><label>to<input name="happy_to" type="time" value="${esc(String(o?.happy_to || '').slice(0, 5))}"></label><label>Discount without a manager (%)<input name="discount_limit_pct" type="number" min="0" max="100" value="${o?.discount_limit_pct ?? 10}"></label></div>
+      <label>Receipt footer<input name="receipt_footer" value="${esc(o?.receipt_footer || '')}" maxlength="300" placeholder="Thank you! Wi-Fi: Amaya-Guest · Follow us @amayahotel"></label>
+      ${o ? `<label class="row"><input type="checkbox" name="active" value="1" ${o.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const body = { name: v.name, kind: v.kind, happy_from: v.happy_from, happy_to: v.happy_to, receipt_footer: v.receipt_footer, discount_limit_pct: Number(v.discount_limit_pct), active: o ? !!v.active : true }; if (o) await PUT(`/pos/outlets/${o.id}`, body); else await POST('/pos/outlets', body); POS = null; return 'Outlet saved.'; });
+  };
+
+  /* ================= Phase 20: spa ================= */
+  const SPA_ST = { booked: ['Booked', ''], arrived: ['Arrived', 'info'], in_progress: ['In treatment', 'warn'], completed: ['Done', 'ok'], cancelled: ['Cancelled', 'bad'], no_show: ['No-show', 'bad'] };
+  VIEWS.spa = async () => {
+    const date = ui.spaDate || SETTINGS.business_date;
+    const d = await GET(`/wellness/spa?date=${date}`); ui.spa = d;
+    const t = cur('spa', 'day');
+    const card = (b) => `<div class="spa-bk st-${b.status}"><div class="row between"><b>${esc(b.start || '')}${b.end ? '–' + esc(b.end) : ''}</b>${pill(...(SPA_ST[b.status] || [b.status]))}</div>
+      <div>${esc(b.treatment)}</div><div class="small">${esc(b.guest_name)}${b.room_number ? ` · room ${esc(b.room_number)}` : ''}</div><div class="small muted">${esc(d.rooms.find((r) => r.id === b.spa_room_id)?.name || '')}${b.notes ? ' · ' + esc(b.notes) : ''}</div>
+      ${['booked', 'arrived', 'in_progress'].includes(b.status) ? `<div class="row mt">${b.status === 'booked' ? `<button class="btn btn-sm" data-action="spa-st" data-id="${b.id}" data-st="arrived">Arrived</button>` : ''}${b.status !== 'in_progress' ? `<button class="btn btn-sm" data-action="spa-st" data-id="${b.id}" data-st="in_progress">Start</button>` : ''}
+        <button class="btn btn-sm btn-gold" data-action="spa-done" data-id="${b.id}" data-res="${b.reservation_id || ''}" data-amount="${b.amount}">Done &amp; pay</button>${b.status === 'booked' ? `<button class="btn btn-sm btn-ghost" data-action="spa-st" data-id="${b.id}" data-st="no_show">No-show</button><button class="btn btn-sm btn-ghost" data-action="spa-st" data-id="${b.id}" data-st="cancelled">Cancel</button>` : ''}</div>` : b.settled_by ? `<div class="small muted">Paid: ${esc(PMETHOD[b.settled_by] || b.settled_by)} · ${num(b.amount)}</div>` : ''}</div>`;
+    const ther = d.therapists.filter((x) => x.active);
+    const body = t === 'setup' ? `<div class="g2"><div class="card"><div class="row between"><h2 class="sec">Therapists</h2>${CAN['amenities.manage'] ? '<button class="btn btn-sm btn-gold" data-action="spa-setup" data-list="therapists">+ Therapist</button>' : ''}</div>
+        ${table(['Name', 'Skills', 'Active', ''], d.therapists.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="small">${esc(x.skills || '')}</td><td>${x.active ? 'Yes' : 'No'}</td><td class="right">${CAN['amenities.manage'] ? `<button class="btn btn-sm btn-ghost" data-action="spa-setup" data-list="therapists" data-id="${x.id}">Edit</button>` : ''}</td></tr>`))}</div>
+      <div class="card"><div class="row between"><h2 class="sec">Treatment rooms</h2>${CAN['amenities.manage'] ? '<button class="btn btn-sm btn-gold" data-action="spa-setup" data-list="spa-rooms">+ Room</button>' : ''}</div>
+        ${table(['Room', 'Beds', 'Active', ''], d.rooms.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${x.beds}</td><td>${x.active ? 'Yes' : 'No'}</td><td class="right">${CAN['amenities.manage'] ? `<button class="btn btn-sm btn-ghost" data-action="spa-setup" data-list="spa-rooms" data-id="${x.id}">Edit</button>` : ''}</td></tr>`))}
+        <p class="small muted mt">Treatments and prices are set under Amenities &amp; services (category Spa, with a duration).</p></div></div>`
+      : `<div class="spa-board">${[...ther, { id: null, name: 'No therapist' }].map((th) => { const list = d.bookings.filter((b) => (b.therapist_id || null) === th.id); return th.id || list.length ? `<div class="spa-col"><h3>${esc(th.name)}</h3>${list.map(card).join('') || '<p class="small muted">Free all day</p>'}</div>` : ''; }).join('')}</div>`;
+    return `<div class="page-head"><div><h1 class="page">Spa</h1><p class="sub">${fdateLong(d.date)} · ${d.bookings.filter((b) => !['cancelled', 'no_show'].includes(b.status)).length} treatments</p></div>
+      <div class="row"><input class="search" type="date" value="${d.date}" data-change="spa-date" aria-label="Date"><button class="btn btn-gold" data-action="spa-book">+ Book treatment</button></div></div>
+      ${tabs('spa', [['day', 'Day by therapist'], ['setup', 'Therapists & rooms']], 'day')}${body}`;
+  };
+  OPS_A['spa-date'] = (_d, e) => { ui.spaDate = e.target.value; render(); };
+  OPS_A['spa-setup'] = (d) => {
+    const list = d.list, row = d.id ? (list === 'therapists' ? ui.spa.therapists : ui.spa.rooms).find((x) => String(x.id) === d.id) : null;
+    modal(list === 'therapists' ? (row ? 'Edit therapist' : 'New therapist') : (row ? 'Edit treatment room' : 'New treatment room'), `<form class="form" data-form="ops-modal"><label>Name *<input name="name" value="${esc(row?.name || '')}" required maxlength="80"></label>
+      ${list === 'therapists' ? `<label>Skills<input name="skills" value="${esc(row?.skills || '')}" maxlength="200" placeholder="Massage, facials, nails"></label>` : `<label>Beds (treatments at the same time)<input name="beds" type="number" min="1" max="10" value="${row?.beds ?? 1}"></label>`}
+      ${row ? `<label class="row"><input type="checkbox" name="active" value="1" ${row.active ? 'checked' : ''}> Active</label>` : ''}<div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const body = { ...v, active: row ? !!v.active : true }; if (row) await PUT(`/wellness/setup/${list}/${row.id}`, body); else await POST(`/wellness/setup/${list}`, body); return 'Saved.'; });
+  };
+  OPS_A['spa-book'] = async () => {
+    const d = ui.spa, guests = await GET(`/ops/amenity-guests?date=${d.date}`);
+    modal('Book a treatment', `<form class="form" data-form="ops-modal"><div class="two"><label>Treatment *<select name="amenity_id" required>${opts(d.treatments.map((x) => [x.id, `${x.name} · ${x.duration_min || 60} min · ${num(x.price)}`]))}</select></label><label>Time *<input name="start_time" type="time" required step="900"></label></div>
+      <div class="two"><label>Therapist<select name="therapist_id">${opts([['', 'Any / later'], ...d.therapists.filter((x) => x.active).map((x) => [x.id, x.name])])}</select></label><label>Treatment room<select name="spa_room_id">${opts([['', '–'], ...d.rooms.filter((x) => x.active).map((x) => [x.id, x.name])])}</select></label></div>
+      <label>Hotel guest<select name="reservation_id">${opts([['', 'Not staying (walk-in)'], ...guests.map((g) => [g.id, `${g.room ? 'Room ' + g.room + ' · ' : ''}${g.guest}`])])}</select></label>
+      <div class="two"><label>Name (walk-in)<input name="guest_name" maxlength="120"></label><label>Phone<input name="phone" maxlength="40"></label></div>
+      <label>Notes (allergies, pressure, preferences)<input name="notes" maxlength="300"></label>${d.treatments.length ? '' : '<p class="note err">Add spa treatments under Amenities &amp; services first.</p>'}
+      <div class="actions"><button class="btn btn-gold">Book</button></div></form>`,
+    async (v) => { await POST('/ops/amenity-bookings', { ...v, service_date: d.date, reservation_id: v.reservation_id || undefined, therapist_id: v.therapist_id || undefined, spa_room_id: v.spa_room_id || undefined }); return 'Treatment booked.'; });
+  };
+  OPS_A['spa-st'] = async (d) => { if (['cancelled', 'no_show'].includes(d.st) && !confirm('Are you sure?')) return; await POST(`/ops/amenity-bookings/${d.id}/close`, { status: d.st }); render(); };
+  OPS_A['spa-done'] = (d) => modal(`Treatment done · ${ugx(d.amount)}`, `<form class="form" data-form="ops-modal"><label>Paid by<select name="settle_by">${opts([...(d.res ? [['room', 'Charge to the guest\'s room']] : []), ['cash', 'Cash'], ['card', 'Card'], ['mobile_money', 'Mobile money']])}</select></label><div class="actions"><button class="btn btn-gold">Complete</button></div></form>`,
+    async (v) => { await POST(`/ops/amenity-bookings/${d.id}/complete`, { settle_by: v.settle_by }); return 'Treatment completed.'; });
+
+  /* ================= Phase 20: health club ================= */
+  const CLUB_ST = { active: ['Active', 'ok'], expiring: ['Ends soon', 'warn'], expired: ['Expired', 'bad'], no_plan: ['Not paid', 'bad'], frozen: ['Frozen', 'info'], cancelled: ['Cancelled', ''] };
+  VIEWS.club = async () => {
+    const f = ui.clubFilter || 'current';
+    const [d, visits] = await Promise.all([GET(`/wellness/club/members?filter=${f}&q=${encodeURIComponent(ui.clubQ || '')}`), GET('/wellness/club/visits')]); ui.club = d;
+    const t = cur('club', 'members');
+    const body = t === 'visits' ? table(['Time', 'Who', 'Type', 'Checked in by'], visits.map((v) => `<tr><td>${ftime(v.visited_at)}</td><td>${esc(v.guest_name || '')}${v.code ? ` <span class="muted">${esc(v.code)}</span>` : ''}</td><td>${{ member: 'Member', hotel_guest: 'Hotel guest', day_pass: 'Day pass' }[v.kind]}</td><td>${esc(v.recorded_by_name || '')}</td></tr>`), 'No visits yet today.')
+      : t === 'plans' ? `<div class="row between mb"><span class="muted">Membership plans and prices (VAT included).</span>${CAN['amenities.manage'] ? '<button class="btn btn-sm btn-gold" data-action="club-plan">+ Plan</button>' : ''}</div>${table(['Plan', 'Months', '#Price', 'Includes', 'Active', ''], d.plans.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${p.months}</td><td class="num">${num(p.price)}</td><td class="small">${esc(p.includes || '')}</td><td>${p.active ? 'Yes' : 'No'}</td><td class="right">${CAN['amenities.manage'] ? `<button class="btn btn-sm btn-ghost" data-action="club-plan" data-id="${p.id}">Edit</button>` : ''}</td></tr>`))}`
+      : `<div class="row between mb"><div class="wa-filters">${[['current', 'Current'], ['expiring', `Ending soon (${d.counts.expiring})`], ['expired', `Expired (${d.counts.expired})`], ['all', 'All']].map(([k, l]) => `<button type="button" class="${k === f ? 'on' : ''}" data-action="club-filter" data-f="${k}">${l}</button>`).join('')}</div>
+          <form class="row" data-form="ops-club-search"><input class="search" name="q" value="${esc(ui.clubQ || '')}" placeholder="Name, number or phone"><button class="btn btn-ghost">Find</button></form></div>
+        ${table(['Member', 'Name', 'Phone', 'Plan', 'Ends', 'Status', '#Visits (30 d)', ''], d.members.map((m) => `<tr><td><code>${esc(m.code)}</code></td><td><b>${esc(m.first_name)} ${esc(m.last_name)}</b></td><td>${esc(m.phone || '')}</td><td>${esc(m.plan_name || '')}</td><td>${m.ends_on ? fdate(m.ends_on) : ''}</td><td>${pill(...(CLUB_ST[m.state] || [m.state]))}</td><td class="num">${m.visits_30d}</td>
+          <td class="right nowrap"><button class="btn btn-sm btn-gold" data-action="club-renew" data-id="${m.id}">${m.ends_on ? 'Renew' : 'Sell plan'}</button> <button class="btn btn-sm btn-ghost" data-action="club-member" data-id="${m.id}">Edit</button></td></tr>`), 'No members here.')}`;
+    return `<div class="page-head"><div><h1 class="page">Health club</h1><p class="sub">${d.counts.active} active members · ${d.visits_today} visits today</p></div><button class="btn btn-gold" data-action="club-member">+ New member</button></div>
+      <div class="card club-door"><form class="row" data-form="ops-club-in"><label class="grow">Check in at the door<input name="member" placeholder="Member number (M1001) or phone" autocomplete="off" required></label><button class="btn btn-gold">Check in</button>
+        <button type="button" class="btn btn-ghost" data-action="club-guest">Hotel guest</button><button type="button" class="btn btn-ghost" data-action="club-daypass">Day pass</button></form><div id="club-result"></div></div>
+      ${tabs('club', [['members', 'Members'], ['visits', 'Visits today'], ['plans', 'Plans']], 'members')}<div class="card">${body}</div>`;
+  };
+  const clubResult = (ok, html) => { const el = $('#club-result'); if (el) el.innerHTML = `<div class="club-res ${ok ? 'ok' : 'bad'}">${html}</div>`; };
+  OPS_FORMS['ops-club-in'] = async (v, form) => {
+    try { const r = await POST('/wellness/club/checkin', { member: v.member }); clubResult(true, `<b>Welcome, ${esc(r.name)}</b> (${esc(r.code)}) · membership until ${fdate(r.ends_on)}${r.days_left <= 7 ? ` <b>· ends in ${r.days_left} day(s): offer a renewal</b>` : ''}${r.health_notes ? `<br>Health note: ${esc(r.health_notes)}` : ''}${r.already ? '<br><span class="small">Already checked in within the last 2 hours.</span>' : ''}`); form.reset(); }
+    catch (e) { clubResult(false, esc(e.message)); }
+  };
+  OPS_FORMS['ops-club-search'] = async (v) => { ui.clubQ = v.q; render(); };
+  OPS_A['club-filter'] = (d) => { ui.clubFilter = d.f; render(); };
+  OPS_A['club-guest'] = async () => {
+    const guests = await GET(`/ops/amenity-guests?date=${SETTINGS.business_date}`);
+    modal('Hotel guest using the club', `<form class="form" data-form="ops-modal"><label>Guest<select name="reservation_id">${opts(guests.filter((g) => g.status === 'in_house').map((g) => [g.id, `Room ${g.room || '?'} · ${g.guest}`]))}</select></label><div class="actions"><button class="btn btn-gold">Check in</button></div></form>`,
+      async (v) => { const r = await POST('/wellness/club/checkin', { kind: 'hotel_guest', reservation_id: Number(v.reservation_id) }); return `${r.name} checked in.`; });
+  };
+  OPS_A['club-daypass'] = () => modal('Day pass', `<form class="form" data-form="ops-modal"><label>Name<input name="guest_name" required maxlength="80"></label><p class="small muted">Sell the day pass at the club's point of sale, then check the person in here.</p><div class="actions"><button class="btn btn-gold">Check in</button></div></form>`,
+    async (v) => { await POST('/wellness/club/checkin', { kind: 'day_pass', guest_name: v.guest_name }); return 'Checked in.'; });
+  OPS_A['club-member'] = (d) => {
+    const m = d.id ? ui.club.members.find((x) => String(x.id) === d.id) : null;
+    modal(m ? `Member ${m.code}` : 'New member', `<form class="form" data-form="ops-modal"><div class="two"><label>First name *<input name="first_name" value="${esc(m?.first_name || '')}" required></label><label>Last name *<input name="last_name" value="${esc(m?.last_name || '')}" required></label></div>
+      <div class="two"><label>Phone<input name="phone" value="${esc(m?.phone || '')}"></label><label>Email<input name="email" type="email" value="${esc(m?.email || '')}"></label></div>
+      <label>Emergency contact<input name="emergency_contact" value="${esc(m?.emergency_contact || '')}" maxlength="120"></label><label>Health notes (shown at check-in)<input name="health_notes" value="${esc(m?.health_notes || '')}" maxlength="500" placeholder="e.g. asthma, knee injury"></label>
+      <label>Notes<input name="notes" value="${esc(m?.notes || '')}" maxlength="500"></label>
+      ${m && CAN['amenities.manage'] ? `<div class="row"><button type="button" class="btn btn-sm btn-ghost" data-action="club-status" data-id="${m.id}" data-st="${m.status === 'frozen' ? 'active' : 'frozen'}">${m.status === 'frozen' ? 'Unfreeze' : 'Freeze'}</button><button type="button" class="btn btn-sm btn-ghost" data-action="club-status" data-id="${m.id}" data-st="${m.status === 'cancelled' ? 'active' : 'cancelled'}">${m.status === 'cancelled' ? 'Reactivate' : 'Cancel membership'}</button></div>` : ''}
+      <div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { if (m) await PUT(`/wellness/club/members/${m.id}`, v); else { const n = await POST('/wellness/club/members', v); return `Member ${n.code} added. Now sell them a plan.`; } return 'Saved.'; });
+  };
+  OPS_A['club-status'] = async (d) => { await POST(`/wellness/club/members/${d.id}/status`, { status: d.st }); closeModal(); render(); };
+  OPS_A['club-renew'] = async (d) => {
+    const m = ui.club.members.find((x) => String(x.id) === d.id), guests = await GET(`/ops/amenity-guests?date=${SETTINGS.business_date}`);
+    modal(`${m.ends_on ? 'Renew' : 'Sell a plan'} · ${m.first_name} ${m.last_name}`, `<form class="form" data-form="ops-modal"><label>Plan<select name="plan_id">${opts(ui.club.plans.filter((p) => p.active).map((p) => [p.id, `${p.name} · ${p.months} month(s) · ${num(p.price)}`]), m.plan_id)}</select></label>
+      <div class="two"><label>Paid by<select name="method">${opts([['cash', 'Cash'], ['card', 'Card'], ['mobile_money', 'Mobile money'], ['bank_transfer', 'Bank transfer'], ['room', 'Charge to a hotel room']])}</select></label><label>Reference<input name="reference" maxlength="80"></label></div>
+      <label>Room (if charged to a room)<select name="reservation_id">${opts([['', '–'], ...guests.filter((g) => g.status === 'in_house').map((g) => [g.id, `Room ${g.room || '?'} · ${g.guest}`])])}</select></label>
+      <p class="small muted">${m.ends_on && m.ends_on >= SETTINGS.business_date ? `The new period starts the day after the current one ends (${fdate(m.ends_on)}).` : 'The new period starts today.'}</p>
+      <div class="actions"><button class="btn btn-gold">Take payment</button></div></form>`,
+    async (v) => { const r = await POST(`/wellness/club/members/${m.id}/renew`, { ...v, reservation_id: v.reservation_id || undefined }); return `Paid ${ugx(r.amount)}. Membership ${fdate(r.from)} to ${fdate(r.to)}.`; });
+  };
+  OPS_A['club-plan'] = (d) => {
+    const p = d.id ? ui.club.plans.find((x) => String(x.id) === d.id) : null;
+    modal(p ? `Edit ${p.name}` : 'New plan', `<form class="form" data-form="ops-modal"><label>Name *<input name="name" value="${esc(p?.name || '')}" required placeholder="Monthly, Quarterly, Annual couple"></label>
+      <div class="two"><label>Months *<input name="months" type="number" min="1" max="36" value="${p?.months ?? 1}" required></label><label>Price (UGX) *<input name="price" type="number" min="0" step="1" value="${p?.price ?? ''}" required></label></div>
+      <label>Includes<input name="includes" value="${esc(p?.includes || '')}" maxlength="300" placeholder="Gym, pool, sauna, 1 massage a month"></label>${p ? `<label class="row"><input type="checkbox" name="active" value="1" ${p.active ? 'checked' : ''}> On sale</label>` : ''}
+      <div class="actions"><button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const body = { name: v.name, months: Number(v.months), price: Number(v.price), includes: v.includes, active: p ? !!v.active : true }; if (p) await PUT(`/wellness/setup/plans/${p.id}`, body); else await POST('/wellness/setup/plans', body); return 'Plan saved.'; });
+  };
+
+  /* ================= Phase 20: reports library ================= */
+  const fmtCell = (v, type) => {
+    if (v == null || v === '') return '';
+    if (type === 'money') return num(v);
+    if (type === 'int') return Number(v).toLocaleString('en-US');
+    if (type === 'num') return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    if (type === 'pct') return `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+    if (type === 'date') return fdate(String(v).slice(0, 10));
+    if (type === 'ts') return ftime(v);
+    if (type === 'time') return esc(String(v).slice(0, 5));
+    return esc(v);
+  };
+  VIEWS.library = async (key) => {
+    const lib = ui.lib || (ui.lib = await GET('/library'));
+    const q = (ui.libQ || '').toLowerCase();
+    const tree = lib.departments.map((dpt) => { const reps = dpt.reports.filter((r) => !q || (r.name + ' ' + r.desc).toLowerCase().includes(q)); return reps.length ? `<details class="lib-dept" ${q || reps.some((r) => r.key === key) || (!key && dpt === lib.departments[0]) ? 'open' : ''}><summary>${esc(dpt.name)} <span class="muted">${reps.length}</span></summary>${reps.map((r) => `<a href="#library/${r.key}" class="${r.key === key ? 'on' : ''}">${esc(r.name)}</a>`).join('')}</details>` : ''; }).join('');
+    let main = `<div class="card"><h2 class="sec">Choose a report</h2><p class="muted">${lib.departments.reduce((a, d) => a + d.reports.length, 0)} reports in ${lib.departments.length} departments. Search on the left, or open a department.</p></div>`;
+    if (key) {
+      const info = lib.departments.flatMap((x) => x.reports).find((r) => r.key === key);
+      if (info) {
+        const f = ui.libF || {}; const qs = new URLSearchParams(); if (f.from) qs.set('from', f.from); if (f.to) qs.set('to', f.to); if (info.outlet && f.outlet) qs.set('outlet', f.outlet);
+        const r = await GET(`/library/${key}?${qs}`);
+        ui.libLast = { key, qs: qs.toString() };
+        main = `<div class="card lib-head"><div class="row between"><div><p class="eyebrow-s">${esc(r.dept)}</p><h2 class="sec">${esc(r.name)}</h2><p class="small muted">${esc(r.desc)}</p></div>
+            <div class="row no-print"><button class="btn btn-ghost btn-sm" data-action="lib-csv">Excel (CSV)</button><button class="btn btn-ghost btn-sm" data-action="print">Print</button></div></div>
+          ${info.range || info.outlet ? `<form class="row no-print mt" data-form="ops-lib">${info.range ? `<label class="small">From <input class="search" type="date" name="from" value="${r.from}"></label><label class="small">To <input class="search" type="date" name="to" value="${r.to}"></label>` : ''}
+            ${info.outlet ? `<label class="small">Outlet <select name="outlet">${opts([['', 'All outlets'], ...lib.outlets.map((o) => [o.id, o.name])], f.outlet || '')}</select></label>` : ''}<button class="btn btn-gold btn-sm">Show</button>
+            ${info.range ? `<span class="lib-quick">${[['today', 'Today'], ['yesterday', 'Yesterday'], ['month', 'This month'], ['last', 'Last month']].map(([k, l]) => `<button type="button" class="link small" data-action="lib-range" data-r="${k}">${l}</button>`).join(' ')}</span>` : ''}</form>` : ''}
+          <div class="only-print small">${esc(r.property)} · ${r.from ? `${fdate(r.from)} to ${fdate(r.to)}` : 'as at ' + fdate(SETTINGS.business_date)}${r.outlet ? ' · ' + esc(r.outlet) : ''}</div></div>
+          <div class="card mt">${r.rows.length ? `<div class="tbl-wrap"><table class="list lib-table"><thead><tr>${r.cols.map(([, l, t]) => `<th class="${['money', 'int', 'num', 'pct'].includes(t) ? 'num' : ''}">${esc(l)}</th>`).join('')}</tr></thead>
+            <tbody>${r.rows.map((row) => `<tr>${r.cols.map(([k, , t]) => `<td class="${['money', 'int', 'num', 'pct'].includes(t) ? 'num' : ''}">${fmtCell(row[k], t)}</td>`).join('')}</tr>`).join('')}</tbody>
+            ${r.totals ? `<tfoot><tr>${r.cols.map(([k, , t], i) => `<td class="${['money', 'int', 'num', 'pct'].includes(t) ? 'num' : ''}">${i === 0 ? '<b>Total</b>' : k in r.totals ? `<b>${fmtCell(r.totals[k], t)}</b>` : ''}</td>`).join('')}</tr></tfoot>` : ''}</table></div>
+            <p class="small muted mt">${r.rows.length} row(s)${r.truncated ? ' · showing the first 5,000: narrow the dates or export' : ''}</p>` : '<p class="empty">Nothing for these dates.</p>'}</div>`;
+      }
+    }
+    return `<div class="page-head no-print"><div><h1 class="page">Reports library</h1><p class="sub">Every department's reports. Print them or open them in Excel.</p></div></div>
+      <div class="lib"><aside class="card lib-tree no-print"><form data-form="ops-lib-search"><input class="search" name="q" value="${esc(ui.libQ || '')}" placeholder="Search reports…" aria-label="Search reports"></form>${tree || '<p class="small muted">No report matches.</p>'}</aside><div class="lib-main">${main}</div></div>`;
+  };
+  OPS_FORMS['ops-lib'] = async (v) => { ui.libF = { from: v.from, to: v.to, outlet: v.outlet }; render(); };
+  OPS_FORMS['ops-lib-search'] = async (v) => { ui.libQ = v.q; render(); };
+  OPS_A['lib-range'] = (d) => {
+    const bd = SETTINGS.business_date, first = bd.slice(0, 8) + '01';
+    const prevEnd = addDays(first, -1);
+    ui.libF = { ...(ui.libF || {}), ...{ today: { from: bd, to: bd }, yesterday: { from: addDays(bd, -1), to: addDays(bd, -1) }, month: { from: first, to: bd }, last: { from: prevEnd.slice(0, 8) + '01', to: prevEnd } }[d.r] };
+    render();
+  };
+  OPS_A['lib-csv'] = () => { if (ui.libLast) location.href = `/api/library/${ui.libLast.key}?${ui.libLast.qs}${ui.libLast.qs ? '&' : ''}format=csv`; };
+
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
   function showSecret(code, secret) {
@@ -3354,6 +3726,7 @@
       else if (modalSubmit) { const msg = await modalSubmit(v); closeModal(); if (msg) toast(msg); await refresh(); }
     } catch (err) { if (err.message !== 'Signed out') formErr(form, err.message); } finally { if (btn && document.contains(btn)) btn.disabled = false; }
   });
+  document.addEventListener('change', (e) => { const k = e.target.dataset?.change; if (k && A[k]) Promise.resolve(A[k](e.target.dataset, e)).catch((err) => toast(esc(err.message), true)); });
   document.addEventListener('change', async (e) => {
     if (e.target.dataset.action !== 'outlet-store') return;
     try { await PUT(`/inventory/outlets/${e.target.dataset.id}/store`, { store_id: e.target.value ? Number(e.target.value) : null }); toast('Outlet updated.'); INVS = null; } catch (err) { toast(esc(err.message), true); }
@@ -3376,6 +3749,7 @@
     try {
       const me = await GET('/auth/me'); ME = me.user; SETTINGS = me.settings; MFA = me.mfa || {};
       const meta = await GET('/meta'); CAN = meta.can; for (const r of meta.role_list || []) ROLE[r.key] = r.name;
+      CAN['reports.library'] = ['reservations.view', 'finance.view', 'accounts.view', 'inventory.view', 'events.view', 'reports.view', 'pos.manage', 'amenities.sell', 'amenities.manage', 'hr.view', 'marketing.manage', 'maintenance.report', 'assets.manage'].some((p) => CAN[p]);
       if (MFA.setup_needed) { await renderForcedSetup(); return; }
       if (ME.role === 'housekeeping' && !location.hash) history.replaceState(null, '', '#housekeeping');
       if (!DEMO) DEMO = await GET('/demo-info').catch(() => ({}));

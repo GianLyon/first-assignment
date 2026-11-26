@@ -151,6 +151,8 @@ export function loadUser(pool) {
       const { rows } = await pool.query(
         `SELECT u.id, u.username, u.full_name, u.role, (u.totp_secret IS NOT NULL) AS mfa_enabled,
                 COALESCE(u.role = ANY(st.mfa_required_roles), FALSE) AS mfa_required,
+                COALESCE(st.network_lock, FALSE) AS network_lock, COALESCE(st.allowed_networks, '{}') AS allowed_networks,
+                (u.network_exempt OR COALESCE(u.role = ANY(st.network_exempt_roles), FALSE)) AS network_exempt,
                 ARRAY(SELECT DISTINCT unnest(COALESCE(ro.perms, '{}') || ARRAY(SELECT perm FROM user_permissions up WHERE up.user_id=u.id AND up.allow))) AS perms,
                 ARRAY(SELECT perm FROM user_permissions up WHERE up.user_id=u.id AND NOT up.allow) AS denied
          FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN settings st ON st.id = 1 LEFT JOIN roles ro ON ro.key = u.role

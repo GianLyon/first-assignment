@@ -36,7 +36,7 @@ export async function seedPos(pool) {
     const { rows } = await db.query('SELECT 1 FROM outlets LIMIT 1');
     if (rows[0]) return { skipped: true };
     const outlets = {};
-    for (const [name, kind] of [['Restaurant', 'restaurant'], ['Bar', 'bar'], ['Room Service', 'room_service']]) {
+    for (const [name, kind] of [['Restaurant', 'restaurant'], ['Bar', 'bar'], ['Room Service', 'room_service'], ['Spa', 'spa'], ['Health Club', 'health_club']]) {
       outlets[name] = (await db.query('INSERT INTO outlets (name, kind) VALUES ($1,$2) RETURNING id', [name, kind])).rows[0].id;
     }
     const menu = [
@@ -51,6 +51,19 @@ export async function seedPos(pool) {
     for (const [cat, station, items] of menu) {
       const { rows: [c] } = await db.query('INSERT INTO menu_categories (name, station, sort) VALUES ($1,$2,$3) RETURNING id', [cat, station, sort += 10]);
       for (const [name, price] of items) await db.query('INSERT INTO menu_items (category_id, name, price) VALUES ($1,$2,$3)', [c.id, name, price]);
+    }
+    // the kitchen gets mains and desserts as later courses; a steak needs a cooking choice
+    await db.query("UPDATE menu_items SET course=2 WHERE category_id=(SELECT id FROM menu_categories WHERE name='Mains')");
+    await db.query("UPDATE menu_items SET course=3 WHERE category_id=(SELECT id FROM menu_categories WHERE name='Desserts')");
+    await db.query("UPDATE menu_items SET options='{Rare,Medium,Well done}' WHERE name='Beef fillet steak'");
+    await db.query("UPDATE menu_items SET options='{With ice,No ice}' WHERE name='Waragi & tonic'");
+    await db.query("UPDATE menu_items SET happy_price=6000 WHERE name='Local lager (500ml)'");
+    await db.query("UPDATE menu_items SET happy_price=22000 WHERE name='Cocktail of the day'");
+    // restaurant and bar menus stay out of the spa and health club tills, and theirs out of the restaurant's
+    await db.query('UPDATE menu_categories SET outlet_ids=$1', [[outlets.Restaurant, outlets.Bar, outlets['Room Service']]]);
+    const { rows: [w] } = await db.query("INSERT INTO menu_categories (name, station, sort, outlet_ids) VALUES ('Spa & club shop','none',$1,$2) RETURNING id", [sort += 10, [outlets.Spa, outlets['Health Club']]]);
+    for (const [name, price, dur] of [['Gym day pass', 30000, null], ['Pool day pass', 40000, null], ['Massage oil (retail)', 45000, null], ['Express back massage (30 min)', 80000, 30]]) {
+      await db.query('INSERT INTO menu_items (category_id, name, price, duration_min) VALUES ($1,$2,$3,$4)', [w.id, name, price, dur]);
     }
     for (let i = 1; i <= 10; i++) await db.query('INSERT INTO dining_tables (outlet_id, name, seats) VALUES ($1,$2,$3)', [outlets.Restaurant, `T${i}`, i <= 6 ? 4 : 2]);
     for (let i = 1; i <= 6; i++) await db.query('INSERT INTO dining_tables (outlet_id, name, seats) VALUES ($1,$2,2)', [outlets.Bar, `B${i}`]);
@@ -146,6 +159,12 @@ export async function seedOperations(pool) {
       ['City tour (half day)', 'tour', 150000, 240, 'Per guest'], ['Laundry: wash & fold (per kg)', 'laundry', 15000, null, null],
       ['Pool day pass (non-resident)', 'leisure', 40000, null, null], ['Gym day pass (non-resident)', 'leisure', 30000, null, null]]) {
       await db.query('INSERT INTO amenities (name, category, price, duration_min, description) VALUES ($1,$2,$3,$4,$5)', [n, c, p, d, desc]);
+    }
+    // spa therapists and treatment rooms, health club plans
+    for (const [n, sk] of [['Grace', 'Massage, body scrubs'], ['Esther', 'Facials, nails, massage'], ['Brian', 'Sports & deep tissue massage']]) await db.query('INSERT INTO spa_therapists (name, skills) VALUES ($1,$2)', [n, sk]);
+    for (const [n, beds] of [['Treatment room 1', 1], ['Treatment room 2', 1], ['Couples suite', 2]]) await db.query('INSERT INTO spa_rooms (name, beds) VALUES ($1,$2)', [n, beds]);
+    for (const [n, m, p, inc] of [['Monthly', 1, 250000, 'Gym, pool and sauna'], ['Quarterly', 3, 650000, 'Gym, pool, sauna, 1 massage'], ['Annual', 12, 2200000, 'Gym, pool, sauna, 1 massage a quarter']]) {
+      await db.query('INSERT INTO club_plans (name, months, price, includes) VALUES ($1,$2,$3,$4)', [n, m, p, inc]);
     }
     return { skipped: false };
   });

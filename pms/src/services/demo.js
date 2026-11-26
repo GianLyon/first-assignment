@@ -59,11 +59,11 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
     const types = await q('SELECT * FROM room_types WHERE active ORDER BY id');
     const rooms = await q('SELECT r.*, t.code AS type_code FROM rooms r JOIN room_types t ON t.id=r.room_type_id WHERE r.active ORDER BY r.number');
     const outlets = await q('SELECT * FROM outlets WHERE active ORDER BY id');
-    const items = await q('SELECT m.id, m.name, m.price, c.station FROM menu_items m JOIN menu_categories c ON c.id=m.category_id WHERE m.active AND c.active');
+    const items = await q('SELECT m.id, m.name, m.price, m.options, c.station, c.outlet_ids FROM menu_items m JOIN menu_categories c ON c.id=m.category_id WHERE m.active AND c.active');
     const amenities = await q('SELECT * FROM amenities WHERE active');
     const restaurant = outlets.find((o) => o.kind === 'restaurant') || outlets[0], bar = outlets.find((o) => o.kind === 'bar'), roomService = outlets.find((o) => o.kind === 'room_service');
     // one menu for every outlet: the bar sells what the bar makes; restaurant and room service sell everything
-    const menu = (o) => (!o ? [] : o.kind === 'bar' ? items.filter((i) => i.station === 'bar') : items);
+    const menu = (o) => (!o ? [] : items.filter((i) => (!i.outlet_ids?.length || i.outlet_ids.includes(o.id)) && (o.kind !== 'bar' || i.station === 'bar')));
 
     // move to the first day, add companies and some opening stock (all or nothing)
     let companies = [];
@@ -162,10 +162,11 @@ export async function generateDemoData(pool, user, { days = 45, seed = 2026 } = 
           for (let k = 0; k < n; k++) {
             const resv = toRoom && guestsIn.length ? R.pick(guestsIn) : null;
             const c = await pos.openCheck(db, user, { outlet_id: outlet.id, covers: R.int(1, 4), reservation_id: resv?.id });
-            let total = 0;
-            for (let j = R.int(1, 4); j > 0; j--) { const it = R.pick(m), qty = R.weighted([[1, 7], [2, 3]]); await pos.addLine(db, user, c.id, { item_id: it.id, qty }); total += it.price * qty; }
+            for (let j = R.int(1, 4); j > 0; j--) { const it = R.pick(m), qty = R.weighted([[1, 7], [2, 3]]); await pos.addLine(db, user, c.id, { item_id: it.id, qty, option: it.options?.length ? R.pick(it.options) : undefined }); }
+            const total = (await pos.getCheck(db, c.id)).total;
             const method = resv ? 'room' : R.weighted([['cash', 40], ['mobile_money', 35], ['card', 25]]);
             await pos.settleCheck(db, user, c.id, { payments: [{ method, amount: total, reservation_id: resv?.id }] });
+            await db.query("UPDATE kitchen_tickets SET status='served', ready_at=COALESCE(ready_at, now()), served_at=now() WHERE check_id=$1", [c.id]);
           }
         };
         const busy = [5, 6, 0].includes(dow(d)) ? 1.4 : 1;
@@ -305,7 +306,7 @@ async function sampleWhatsApp(db) {
 const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox', 'amenity_bookings', 'assets', 'attendance', 'bank_reconciliations', 'bill_grns', 'bill_lines',
   'campaigns', 'channel_log', 'companies', 'depreciation_runs', 'email_outbox', 'employees', 'event_extras', 'event_payments', 'events', 'expenses', 'folio_charges', 'goods_received',
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
-  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents', 'ota_cards',
+  'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents', 'ota_cards', 'pos_prints', 'club_visits', 'club_payments', 'club_members',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
   'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
 

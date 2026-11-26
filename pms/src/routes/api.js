@@ -17,6 +17,7 @@ import * as L from '../lists.js';
 import * as blocks from '../services/blocks.js';
 import * as hk from '../services/housekeeping.js';
 import { PAYMENT_METHODS, DEPARTMENTS } from '../ledger.js';
+import { checkNetwork, cleanNetworks, ipAllowed } from '../netlock.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -37,6 +38,9 @@ export function apiRouter(pool) {
       throw new HttpError(401, 'Wrong username or password.');
     }
     clearFailures(key);
+    // hotel network only: refuse before anything else is created
+    const { rows: [net] } = await pool.query(`SELECT network_lock AS lock, allowed_networks AS allowed, ($1 = ANY(network_exempt_roles) OR $2 OR $1 = 'admin') AS exempt FROM settings WHERE id=1`, [u.role, u.network_exempt]);
+    try { checkNetwork(net, req.ip); } catch (e) { await audit(pool, u, 'auth.login_off_network', 'user', u.id, { ip: String(req.ip) }); throw e; }
     if (u.totp_secret) {
       // password correct: now the code from the authenticator app (within 5 minutes)
       const challenge = crypto.randomBytes(24).toString('base64url');
@@ -440,7 +444,7 @@ export function apiRouter(pool) {
   });
 
   /* ---------- users & audit log ---------- */
-  r.get('/users', requirePerm('users.manage'), async (_req, res) => res.json((await pool.query('SELECT id, username, full_name, role, active, created_at, email, phone, department, job_title, (totp_secret IS NOT NULL) AS mfa_enabled FROM users ORDER BY id')).rows));
+  r.get('/users', requirePerm('users.manage'), async (_req, res) => res.json((await pool.query('SELECT id, username, full_name, role, active, created_at, email, phone, department, job_title, network_exempt, (totp_secret IS NOT NULL) AS mfa_enabled FROM users ORDER BY id')).rows));
   r.post('/users/:id/mfa-reset', requirePerm('users.manage'), inTx(async (db, req) => {
     const { rows: [u] } = await db.query("UPDATE users SET totp_secret=NULL, totp_pending=NULL, totp_enabled_at=NULL, totp_last_step=NULL, recovery_codes='{}' WHERE id=$1 RETURNING username", [id(req)]);
     if (!u) throw new HttpError(404, 'User not found.');
@@ -453,6 +457,24 @@ export function apiRouter(pool) {
     await db.query('UPDATE settings SET mfa_required_roles=$1 WHERE id=1', [roles]);
     await audit(db, req.user, 'settings.mfa_required_roles', 'settings', 1, { roles });
     return { mfa_required_roles: roles };
+  }));
+  // hotel network only
+  r.get('/settings/network', requirePerm('users.manage'), async (req, res) => {
+    const { rows: [s] } = await pool.query('SELECT network_lock, allowed_networks, network_exempt_roles FROM settings WHERE id=1');
+    const { rows: ex } = await pool.query('SELECT id, full_name, role FROM users WHERE network_exempt AND active ORDER BY full_name');
+    res.json({ ...s, your_address: String(req.ip || '').replace(/^::ffff:/, ''), on_allowed: ipAllowed(req.ip, s.allowed_networks), exempt_people: ex, trust_proxy: !!process.env.TRUST_PROXY });
+  });
+  r.put('/settings/network', requirePerm('users.manage'), inTx(async (db, req) => {
+    const b = req.body || {};
+    const networks = cleanNetworks(b.allowed_networks);
+    const roles = [...new Set((Array.isArray(b.network_exempt_roles) ? b.network_exempt_roles : []).map(String))];
+    const known = (await db.query('SELECT key FROM roles')).rows.map((r) => r.key);
+    if (roles.some((r) => !known.includes(r))) throw new HttpError(400, 'Unknown role.');
+    const lock = !!b.network_lock;
+    if (lock && !networks.length) throw new HttpError(400, 'Add the hotel\'s network address first (press "Add this network" while connected to the hotel Wi-Fi).');
+    await db.query('UPDATE settings SET network_lock=$1, allowed_networks=$2, network_exempt_roles=$3 WHERE id=1', [lock, networks, roles]);
+    await audit(db, req.user, 'settings.network', 'settings', 1, { network_lock: lock, allowed_networks: networks, network_exempt_roles: roles });
+    return { network_lock: lock, allowed_networks: networks, network_exempt_roles: roles };
   }));
   const userExtras = (b) => {
     const email = String(b.email || '').trim().toLowerCase() || null;
@@ -471,6 +493,7 @@ export function apiRouter(pool) {
     const { rows: [u] } = await db.query('INSERT INTO users (username, full_name, password_hash, role, email, phone, department, job_title) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, username, full_name, role, active',
       [username, String(b.full_name).trim(), await hashPassword(b.password), b.role, ...userExtras(b)]);
     await audit(db, req.user, 'user.create', 'user', u.id, { username, role: b.role });
+    if (b.network_exempt) await db.query('UPDATE users SET network_exempt=true WHERE id=$1', [u.id]);
     return u;
   }));
   r.put('/users/:id', requirePerm('users.manage'), inTx(async (db, req) => {
@@ -482,6 +505,10 @@ export function apiRouter(pool) {
       [uid, b.full_name ? String(b.full_name).trim() : null, b.role || null, typeof b.active === 'boolean' ? b.active : null]);
     if (!u) throw new HttpError(404, 'User not found.');
     if (['email', 'phone', 'department', 'job_title'].some((k) => b[k] !== undefined)) await db.query('UPDATE users SET email=$2, phone=$3, department=$4, job_title=$5 WHERE id=$1', [uid, ...userExtras(b)]);
+    if (b.network_exempt !== undefined) {
+      await db.query('UPDATE users SET network_exempt=$2 WHERE id=$1', [uid, !!b.network_exempt]);
+      await audit(db, req.user, 'user.network_exempt', 'user', uid, { network_exempt: !!b.network_exempt });
+    }
     if (b.password) { await db.query('UPDATE users SET password_hash=$2 WHERE id=$1', [uid, await hashPassword(b.password)]); await db.query('DELETE FROM sessions WHERE user_id=$1', [uid]); }
     if (b.active === false) await db.query('DELETE FROM sessions WHERE user_id=$1', [uid]);
     await audit(db, req.user, 'user.update', 'user', uid, { role: b.role, active: b.active, password_reset: !!b.password });

@@ -33,7 +33,7 @@ export async function demoSignIn(pool, res) {
 
 // what a visitor may not do in the demo
 const BLOCKED = [
-  /^\/auth\/change-password/, /^\/auth\/mfa\/(setup|enable|disable|recovery-codes)/, /^\/users/, /^\/roles/, /^\/backups/, /^\/demo\/remove/, /^\/settings\/security/,
+  /^\/auth\/change-password/, /^\/auth\/mfa\/(setup|enable|disable|recovery-codes)/, /^\/users/, /^\/roles/, /^\/backups/, /^\/demo\/remove/, /^\/settings\/security/, /^\/settings\/network/,
   /^\/system\/errors\/clear/, /^\/feedback\/\d+/, /^\/reporting\/outbox\/send/, /^\/crm\/campaigns\/\d+\/(send|test)/, /^\/distribution\/channels/, /^\/messages\/(settings|templates|automations)/,
 ];
 export const demoGuard = (req, _res, next) => {

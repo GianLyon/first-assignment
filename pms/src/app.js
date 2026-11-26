@@ -7,6 +7,9 @@ import { posRouter } from './routes/pos.js';
 import { inventoryRouter } from './routes/inventory.js';
 import { publicRouter, inboundRouter, distributionRouter, paymentsRouter } from './routes/distribution.js';
 import { betaRouter } from './routes/beta.js';
+import { wellnessRouter } from './routes/wellness.js';
+import { reportsLibraryRouter } from './routes/library.js';
+import { networkGuard } from './netlock.js';
 import { version, recordError } from './services/beta.js';
 import { readFileSync } from 'node:fs';
 import { financeRouter } from './routes/finance.js';
@@ -50,6 +53,8 @@ export function createApp(pool) {
   // keep the raw bytes so signed channel messages can be verified exactly as sent
   app.use('/api', express.json({ limit: '1mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
   app.use('/api', loadUser(pool));
+  // hotel network only (Settings → Security): staff off the hotel network are refused on every request
+  app.use('/api', networkGuard);
   // a role that requires two-step sign-in: until it is set up, only the set-up and sign-out work
   const SETUP_OPEN = new Set(['/auth/me', '/auth/logout', '/auth/mfa/setup', '/auth/mfa/enable', '/auth/change-password', '/meta']);
   app.use('/api', (req, _res, next) => {
@@ -78,6 +83,8 @@ export function createApp(pool) {
   app.use('/api/reporting', requireUser, reportingRouter(pool));
   app.use('/api/crm', requireUser, crmRouter(pool));
   app.use('/api/pos', requireUser, posRouter(pool));
+  app.use('/api/wellness', requireUser, wellnessRouter(pool));
+  app.use('/api/library', requireUser, reportsLibraryRouter(pool));
   app.use('/api/inventory', requireUser, inventoryRouter(pool));
   app.use('/api', apiRouter(pool));
   app.use('/api', (_req, _res) => { throw new HttpError(404, 'Not found.'); });
