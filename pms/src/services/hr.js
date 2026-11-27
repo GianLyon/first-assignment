@@ -15,7 +15,7 @@ const text = (v, field, { required = false, max = 200 } = {}) => {
   return s || null;
 };
 const money0 = (v, field) => { const n = Number(v || 0); if (!Number.isInteger(n) || n < 0) throw new HttpError(400, `${field} must be a whole number of shillings.`); return n; };
-const A = { advances: '1250', paye: '2400', nssf: '2410', netPay: '2420', otherDed: '2430', wages: '6000', employerNssf: '6010' };
+const A = { advances: '1250', paye: '2400', nssf: '2410', netPay: '2420', otherDed: '2430', lst: '2440', wages: '6000', employerNssf: '6010' };
 
 /* ---------------- Uganda statutory deductions ----------------
  * PAYE, resident individual, monthly chargeable income (Income Tax Act, 2nd Schedule):
@@ -34,6 +34,12 @@ export function paye(gross) {
   return Math.round(t);
 }
 export const NSSF_EMPLOYEE = 0.05, NSSF_EMPLOYER = 0.10;
+/* Local Service Tax (Local Governments Act / LST Act 2008): a yearly amount by monthly income, paid to the local
+ * government in the first four months of the financial year (July to October), so a quarter is deducted in each.
+ * Confirm current bands with your local authority (KCCA in Kampala). */
+const LST_BANDS = [[100000, 0], [200000, 5000], [300000, 10000], [400000, 20000], [500000, 30000], [600000, 40000], [700000, 60000], [800000, 70000], [900000, 80000], [1000000, 90000]];
+export function lstAnnual(monthly) { for (const [upTo, tax] of LST_BANDS) if (monthly <= upTo) return tax; return 100000; }
+export const LST_MONTHS = ['07', '08', '09', '10'];
 export const OVERTIME_HOURS_PER_MONTH = 208, OVERTIME_MULTIPLIER = 1.5;
 
 /* ---------------- employees ---------------- */
@@ -58,10 +64,17 @@ export async function saveEmployee(db, user, id, b) {
     b.start_date, basic, money0(b.housing_allowance, 'Housing allowance'), money0(b.transport_allowance, 'Transport allowance'), money0(b.other_allowance, 'Other allowance'),
     payMethod, text(b.bank_name, 'Bank', { max: 60 }), text(b.bank_account, 'Account number', { max: 40 }), text(b.momo_number, 'Mobile money number', { max: 20 }),
     Math.min(60, Math.max(0, Number(b.annual_leave_days ?? 21) || 0)), userId, text(b.notes, 'Notes', { max: 1000 }),
+    text(b.address, 'Address', { max: 300 }), ['single', 'married', 'divorced', 'widowed'].includes(b.marital_status) ? b.marital_status : null,
+    text(b.next_of_kin_name, 'Next of kin', { max: 120 }), text(b.next_of_kin_relation, 'Relationship', { max: 40 }), text(b.next_of_kin_phone, 'Next of kin phone', { max: 40 }),
+    text(b.emergency_name, 'Emergency contact', { max: 120 }), text(b.emergency_phone, 'Emergency phone', { max: 40 }),
+    isDate(b.probation_end) ? b.probation_end : null, isDate(b.contract_end) ? b.contract_end : null, isDate(b.id_expiry) ? b.id_expiry : null,
+    Math.min(60, Math.max(0, Number(b.leave_carry_forward ?? 0) || 0)), b.service_charge_share !== false && b.service_charge_share !== 'false', b.lst_exempt === true || b.lst_exempt === 'true',
   ];
+  if (vals[32] && vals[32] < b.start_date) throw new HttpError(400, 'The contract end cannot be before the start date.');
+  if (vals[31] && vals[31] < b.start_date) throw new HttpError(400, 'The end of probation cannot be before the start date.');
   if (payMethod === 'bank' && !vals[19]) throw new HttpError(400, 'Enter the bank account number (or choose another payment method).');
   if (payMethod === 'mobile_money' && !vals[20]) throw new HttpError(400, 'Enter the mobile money number.');
-  const cols = 'first_name, last_name, gender, date_of_birth, phone, email, nin, tin, nssf_no, department, job_title, employment_type, start_date, basic_salary, housing_allowance, transport_allowance, other_allowance, pay_method, bank_name, bank_account, momo_number, annual_leave_days, user_id, notes';
+  const cols = 'first_name, last_name, gender, date_of_birth, phone, email, nin, tin, nssf_no, department, job_title, employment_type, start_date, basic_salary, housing_allowance, transport_allowance, other_allowance, pay_method, bank_name, bank_account, momo_number, annual_leave_days, user_id, notes, address, marital_status, next_of_kin_name, next_of_kin_relation, next_of_kin_phone, emergency_name, emergency_phone, probation_end, contract_end, id_expiry, leave_carry_forward, service_charge_share, lst_exempt';
   let e;
   if (id) {
     const { rows: [old] } = await db.query('SELECT * FROM employees WHERE id=$1', [id]);
@@ -93,7 +106,7 @@ export async function myEmployee(db, user) {
 
 /* ---------------- leave ---------------- */
 export async function leaveBalance(db, employeeId, year) {
-  const { rows: [e] } = await db.query('SELECT annual_leave_days, start_date FROM employees WHERE id=$1', [employeeId]);
+  const { rows: [e] } = await db.query('SELECT annual_leave_days + leave_carry_forward AS annual_leave_days, start_date FROM employees WHERE id=$1', [employeeId]);
   if (!e) throw new HttpError(404, 'Employee not found.');
   const { rows } = await db.query(
     `SELECT l.status, SUM(l.days)::int AS days FROM leave_requests l JOIN leave_types t ON t.code=l.type
@@ -113,7 +126,14 @@ export async function requestLeave(db, user, b, { self = false } = {}) {
   const { rows: [t] } = await db.query('SELECT * FROM leave_types WHERE code=$1', [String(b.type || '')]);
   if (!t) throw new HttpError(400, 'Choose a type of leave.');
   if (!isDate(b.from_date) || !isDate(b.to_date) || b.to_date < b.from_date) throw new HttpError(400, 'Choose valid leave dates.');
-  const days = daysIncl(b.from_date, b.to_date);
+  if (t.active === false) throw new HttpError(400, 'That type of leave is no longer used.');
+  const { rows: [hol] } = await db.query('SELECT count(*)::int AS n FROM public_holidays WHERE date BETWEEN $1 AND $2', [b.from_date, b.to_date]);
+  const days = daysIncl(b.from_date, b.to_date) - hol.n; // public holidays inside the leave are not counted
+  if (days < 1) throw new HttpError(400, 'Those dates are all public holidays.');
+  if (t.max_days_year && !t.uses_balance) {
+    const { rows: [u] } = await db.query("SELECT COALESCE(SUM(days),0)::int AS d FROM leave_requests WHERE employee_id=$1 AND type=$2 AND status IN ('pending','approved') AND extract(year FROM from_date)=$3", [e.id, t.code, Number(b.from_date.slice(0, 4))]);
+    if (u.d + days > t.max_days_year) throw new HttpError(409, `${t.name} is limited to ${t.max_days_year} day(s) a year; ${Math.max(0, t.max_days_year - u.d)} left.`);
+  }
   if (days > 120) throw new HttpError(400, 'Leave requests are limited to 120 days at a time.');
   const { rows: [clash] } = await db.query("SELECT id FROM leave_requests WHERE employee_id=$1 AND status IN ('pending','approved') AND from_date <= $3 AND to_date >= $2", [e.id, b.from_date, b.to_date]);
   if (clash) throw new HttpError(409, 'This overlaps leave that is already requested or approved.');
@@ -251,11 +271,12 @@ export async function giveAdvance(db, user, b) {
   const { rows: [acct] } = await db.query('SELECT * FROM accounts WHERE code=$1 AND is_cash AND active', [String(b.paid_from || '')]);
   if (!acct) throw new HttpError(400, 'Choose the cash, bank or mobile money account it is paid from.');
   const s = await getSettings(db);
-  const { rows: [adv] } = await db.query('INSERT INTO staff_advances (employee_id, advance_date, amount, monthly_recovery, paid_from, reason, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-    [e.id, s.business_date, amount, rec, acct.code, text(b.reason, 'Reason', { max: 200 }), user.id]);
-  const entry = await postJournal(db, { date: s.business_date, description: `Staff advance: ${e.first_name} ${e.last_name}`, refType: 'staff_advance', refId: adv.id, userId: user.id, lines: [{ account: A.advances, debit: amount }, { account: acct.code, credit: amount }] });
+  const kind = b.kind === 'loan' ? 'loan' : 'advance';
+  const { rows: [adv] } = await db.query('INSERT INTO staff_advances (employee_id, advance_date, amount, monthly_recovery, paid_from, reason, created_by, kind) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+    [e.id, s.business_date, amount, rec, acct.code, text(b.reason, 'Reason', { max: 200 }), user.id, kind]);
+  const entry = await postJournal(db, { date: s.business_date, description: `Staff ${kind}: ${e.first_name} ${e.last_name}`, refType: 'staff_advance', refId: adv.id, userId: user.id, lines: [{ account: A.advances, debit: amount }, { account: acct.code, credit: amount }] });
   await db.query('UPDATE staff_advances SET journal_entry_id=$2 WHERE id=$1', [adv.id, entry]);
-  await audit(db, user, 'hr.advance', 'employee', e.id, { amount, monthly_recovery: rec });
+  await audit(db, user, 'hr.advance', 'employee', e.id, { kind, amount, monthly_recovery: rec });
   return adv;
 }
 
@@ -283,9 +304,12 @@ async function computeLine(db, e, period, inputs = {}) {
   if (otHours > 200) throw new HttpError(400, 'Overtime hours look too high (more than 200).');
   const overtime = Math.round((e.basic_salary / OVERTIME_HOURS_PER_MONTH) * OVERTIME_MULTIPLIER * otHours);
   const additions = money0(inputs.other_additions, 'Other additions'), otherDed = money0(inputs.other_deductions, 'Other deductions');
-  const gross = basic + allowances + overtime + additions;
+  const service = money0(inputs.service_charge, 'Service charge');
+  const gross = basic + allowances + overtime + additions + service;
   const nssfEe = Math.round(gross * NSSF_EMPLOYEE), nssfEr = Math.round(gross * NSSF_EMPLOYER), tax = paye(gross);
-  const available = gross - nssfEe - tax - otherDed;
+  const s = await getSettings(db);
+  const lst = s.lst_enabled !== false && !e.lst_exempt && LST_MONTHS.includes(period.slice(5)) ? Math.round(lstAnnual(gross) / 4) : 0;
+  const available = gross - nssfEe - tax - lst - otherDed;
   if (available < 0) throw new HttpError(400, `Deductions for ${e.first_name} ${e.last_name} are more than their pay.`);
   // advance recovery: oldest advances first, never more than what is left to pay
   const { rows: adv } = await db.query('SELECT amount - recovered AS left, monthly_recovery FROM staff_advances WHERE employee_id=$1 AND recovered < amount ORDER BY advance_date, id', [e.id]);
@@ -294,7 +318,7 @@ async function computeLine(db, e, period, inputs = {}) {
   recovery = Math.min(recovery, available);
   return {
     employee_id: e.id, department: e.department, days_worked: worked, days_in_month: days, unpaid_days: unpaid, basic, allowances,
-    overtime_hours: otHours, overtime, other_additions: additions, gross, nssf_employee: nssfEe, nssf_employer: nssfEr, paye: tax,
+    overtime_hours: otHours, overtime, other_additions: additions, service_charge: service, gross, nssf_employee: nssfEe, nssf_employer: nssfEr, paye: tax, lst,
     advance_recovery: recovery, other_deductions: otherDed, net: available - recovery, note: text(inputs.note, 'Note', { max: 200 }),
   };
 }
@@ -308,7 +332,7 @@ async function runForUpdate(db, id) {
   if (!r) throw new HttpError(404, 'Payroll not found.');
   return r;
 }
-export async function createRun(db, user, period) {
+export async function createRun(db, user, period, serviceCharge = 0) {
   const { first, last } = periodBounds(period);
   const s = await getSettings(db);
   if (first > s.business_date) throw new HttpError(400, 'You cannot run payroll for a future month.');
@@ -319,6 +343,7 @@ export async function createRun(db, user, period) {
   let n = 0;
   for (const e of emps) { const l = await computeLine(db, e, period); if (l) { await writeLine(db, run.id, l); n++; } }
   if (!n) throw new HttpError(400, 'Nobody was employed in that month.');
+  if (Number(serviceCharge) > 0) await setServiceCharge(db, user, run.id, serviceCharge);
   await audit(db, user, 'hr.payroll_create', 'payroll_run', run.id, { period, employees: n });
   return run;
 }
@@ -331,6 +356,7 @@ export async function refreshRun(db, user, id) {
   await db.query('DELETE FROM payroll_lines WHERE run_id=$1', [id]);
   const { rows: emps } = await db.query('SELECT * FROM employees WHERE start_date <= $2 AND (end_date IS NULL OR end_date >= $1)', [first, last]);
   for (const e of emps) { const o = old.find((x) => x.employee_id === e.id) || {}; const l = await computeLine(db, e, run.period, o); if (l) await writeLine(db, id, l); }
+  await shareServiceCharge(db, id);
   await audit(db, user, 'hr.payroll_refresh', 'payroll_run', id, { period: run.period });
 }
 export async function updateLine(db, user, id, employeeId, b) {
@@ -339,7 +365,8 @@ export async function updateLine(db, user, id, employeeId, b) {
   const { rows: [e] } = await db.query('SELECT * FROM employees WHERE id=$1', [employeeId]);
   const { rows: [cur] } = await db.query('SELECT * FROM payroll_lines WHERE run_id=$1 AND employee_id=$2', [id, employeeId]);
   if (!e || !cur) throw new HttpError(404, 'Employee is not on this payroll.');
-  const l = await computeLine(db, e, run.period, { ...cur, ...b });
+  const { service_charge: _ignored, ...edits } = b; // the service charge share comes from the pool
+  const l = await computeLine(db, e, run.period, { ...cur, ...edits });
   await writeLine(db, id, l);
   await audit(db, user, 'hr.payroll_line', 'payroll_run', id, { employee: e.emp_no, overtime_hours: l.overtime_hours, other_additions: l.other_additions, other_deductions: l.other_deductions });
   return l;
@@ -366,7 +393,7 @@ export async function voidRun(db, user, id) {
 export async function totals(db, id) {
   const { rows: [t] } = await db.query(
     `SELECT count(*)::int AS employees, COALESCE(SUM(gross),0) AS gross, COALESCE(SUM(nssf_employee),0) AS nssf_employee, COALESCE(SUM(nssf_employer),0) AS nssf_employer,
-            COALESCE(SUM(paye),0) AS paye, COALESCE(SUM(advance_recovery),0) AS advance_recovery, COALESCE(SUM(other_deductions),0) AS other_deductions, COALESCE(SUM(net),0) AS net
+            COALESCE(SUM(paye),0) AS paye, COALESCE(SUM(lst),0) AS lst, COALESCE(SUM(service_charge),0) AS service_charge, COALESCE(SUM(advance_recovery),0) AS advance_recovery, COALESCE(SUM(other_deductions),0) AS other_deductions, COALESCE(SUM(net),0) AS net
      FROM payroll_lines WHERE run_id=$1`, [id]);
   return Object.fromEntries(Object.entries(t).map(([k, v]) => [k, Number(v)]));
 }
@@ -380,7 +407,7 @@ export async function postRun(db, user, id) {
   const t = await totals(db, id);
   const entry = await postJournal(db, { date, description: `Payroll ${run.period}`, refType: 'payroll', refId: id, userId: user.id, lines: [
     { account: A.wages, debit: t.gross }, { account: A.employerNssf, debit: t.nssf_employer },
-    { account: A.paye, credit: t.paye }, { account: A.nssf, credit: t.nssf_employee + t.nssf_employer },
+    { account: A.paye, credit: t.paye }, { account: A.nssf, credit: t.nssf_employee + t.nssf_employer }, { account: A.lst, credit: t.lst },
     { account: A.advances, credit: t.advance_recovery }, { account: A.otherDed, credit: t.other_deductions }, { account: A.netPay, credit: t.net },
   ] });
   // reduce outstanding advances, oldest first
@@ -416,4 +443,45 @@ export async function getRun(db, id) {
   const byDept = {};
   for (const l of lines) { byDept[l.department] = byDept[l.department] || { department: l.department, employees: 0, gross: 0, employer_cost: 0 }; byDept[l.department].employees++; byDept[l.department].gross += Number(l.gross); byDept[l.department].employer_cost += Number(l.gross) + Number(l.nssf_employer); }
   return { ...run, lines: lines.map((l) => ({ ...l, overtime_hours: Number(l.overtime_hours) })), totals: await totals(db, id), departments: Object.values(byDept) };
+}
+
+/* ---------------- service charge ---------------- */
+/** Share the month's service charge among staff who take part, in proportion to the days they were paid for. */
+export async function shareServiceCharge(db, runId) {
+  const { rows: [run] } = await db.query('SELECT * FROM payroll_runs WHERE id=$1', [runId]);
+  const { rows: lines } = await db.query('SELECT l.*, e.service_charge_share FROM payroll_lines l JOIN employees e ON e.id=l.employee_id WHERE l.run_id=$1 ORDER BY l.employee_id', [runId]);
+  const pool = Number(run.service_charge_pool);
+  const eligible = lines.filter((l) => l.service_charge_share && l.days_worked - l.unpaid_days > 0);
+  const weight = eligible.reduce((a, l) => a + (l.days_worked - l.unpaid_days), 0);
+  let given = 0;
+  for (const l of lines) {
+    const i = eligible.indexOf(l);
+    let share = 0;
+    if (pool && i >= 0) share = i === eligible.length - 1 ? pool - given : Math.floor((pool * (l.days_worked - l.unpaid_days)) / weight);
+    given += share;
+    if (share === Number(l.service_charge)) continue;
+    const { rows: [e] } = await db.query('SELECT * FROM employees WHERE id=$1', [l.employee_id]);
+    await writeLine(db, runId, await computeLine(db, e, run.period, { ...l, service_charge: share }));
+  }
+}
+export async function setServiceCharge(db, user, id, amount) {
+  const run = await runForUpdate(db, id);
+  if (run.status !== 'draft') throw new HttpError(409, 'Only a draft payroll can be changed.');
+  const pool = money0(amount, 'Service charge');
+  await db.query('UPDATE payroll_runs SET service_charge_pool=$2 WHERE id=$1', [id, pool]);
+  await shareServiceCharge(db, id);
+  await audit(db, user, 'hr.payroll_service_charge', 'payroll_run', id, { period: run.period, pool });
+  return { pool };
+}
+
+/** A payment file for the bank or the mobile money provider: one line per person, amounts in UGX. */
+export async function paymentFile(db, id, method) {
+  const { rows } = await db.query(
+    `SELECT e.emp_no, e.first_name, e.last_name, e.bank_name, e.bank_account, e.momo_number, l.net FROM payroll_lines l JOIN employees e ON e.id=l.employee_id
+     WHERE l.run_id=$1 AND e.pay_method=$2 AND l.net > 0 ORDER BY e.first_name`, [id, method]);
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const head = method === 'bank' ? ['Employee no', 'Name', 'Bank', 'Account number', 'Amount (UGX)', 'Reference'] : ['Employee no', 'Name', 'Mobile number', 'Amount (UGX)', 'Reference'];
+  const { rows: [run] } = await db.query('SELECT period FROM payroll_runs WHERE id=$1', [id]);
+  const lines = rows.map((r) => (method === 'bank' ? [r.emp_no, `${r.first_name} ${r.last_name}`, r.bank_name, r.bank_account, r.net, `Salary ${run.period}`] : [r.emp_no, `${r.first_name} ${r.last_name}`, r.momo_number, r.net, `Salary ${run.period}`]).map(q).join(','));
+  return { csv: [head.map(q).join(','), ...lines].join('\r\n') + '\r\n', count: rows.length, total: rows.reduce((a, r) => a + Number(r.net), 0) };
 }

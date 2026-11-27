@@ -51,7 +51,10 @@ export function createApp(pool) {
     next();
   });
   // keep the raw bytes so signed channel messages can be verified exactly as sent
-  app.use('/api', express.json({ limit: '1mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
+  const keepRaw = (req, _res, buf) => { req.rawBody = buf; };
+  const json1 = express.json({ limit: '1mb', verify: keepRaw }), json5 = express.json({ limit: '5mb', verify: keepRaw });
+  // staff documents (scans of IDs, contracts) are the only larger uploads
+  app.use('/api', (req, res, next) => (/^\/hr\/employees\/\d+\/documents$/.test(req.path) ? json5 : json1)(req, res, next));
   app.use('/api', loadUser(pool));
   // hotel network only (Settings → Security): staff off the hotel network are refused on every request
   app.use('/api', networkGuard);
