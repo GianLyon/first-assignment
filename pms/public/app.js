@@ -2432,7 +2432,8 @@
     return `<div class="page-head"><div><h1 class="page">WhatsApp set-up</h1><p class="sub">Connection, message templates and the automations that follow guests through their stay.</p></div></div>
       <div class="grid g2"><div class="card"><div class="row between"><h2 class="sec">Connection</h2>${pill(...WA_MODE[d.mode])}</div>
         <dl class="kv"><dt>Number</dt><dd>${esc(d.display_number || (d.connected ? 'Connected' : '–'))}</dd><dt>Webhook address</dt><dd><code class="mono">${esc(d.webhook_url)}</code></dd>
-        <dt>Verify token</dt><dd>${d.has_verify_token ? pill('Set', 'ok') : pill('Missing', 'bad')}</dd><dt>App secret</dt><dd>${d.has_app_secret ? pill('Set', 'ok') : pill('Missing', 'bad')} <span class="small muted">needed to accept incoming messages</span></dd><dt>API version</dt><dd>${esc(d.api_version)}</dd></dl>${modeNote(d.mode)}${steps}</div>
+        <dt>Verify token</dt><dd>${d.has_verify_token ? pill('Set', 'ok') : pill('Missing', 'bad')}</dd><dt>App secret</dt><dd>${d.has_app_secret ? pill('Set', 'ok') : pill('Missing', 'bad')} <span class="small muted">needed to accept incoming messages</span></dd><dt>API version</dt><dd>${esc(d.api_version)}</dd></dl>${modeNote(d.mode)}
+        <div class="row mt"><button class="btn btn-sm" data-action="wa-check">Check the connection</button>${d.connected ? '<button class="btn btn-sm btn-ghost" data-action="wa-test-msg">Send a test message</button>' : ''}</div><div id="wa-check-out"></div>${steps}</div>
       <div class="card"><h2 class="sec">Numbers and quiet hours</h2><form class="form" data-form="wa-settings"><label>Country code for local numbers<input name="phone_country_code" value="${esc(d.settings.phone_country_code)}" inputmode="numeric" maxlength="4" required></label>
         <p class="small muted">A number written as 0772 123456 becomes +${esc(d.settings.phone_country_code)} 772 123456. Foreign guests' numbers need their own code (+44 …).</p>
         <div class="two"><label>Automations wait from (hour)<input type="number" name="wa_quiet_from" min="0" max="23" value="${d.settings.wa_quiet_from}" required></label><label>until (hour)<input type="number" name="wa_quiet_to" min="0" max="23" value="${d.settings.wa_quiet_to}" required></label></div>
@@ -2563,9 +2564,10 @@
           <div class="row between"><span class="small muted">It reads the system but never changes anything: drafts wait for you to send.</span><span class="row">${ui.aiChat.length ? '<button type="button" class="btn btn-sm btn-ghost" data-action="ai-clear">New chat</button>' : ''}<button class="btn btn-gold">Ask</button></span></div></form>
         <div class="ai-chips">${['What should I do first?', 'What is not balancing in the accounts?', 'What is running out in the stores?', 'Which WhatsApp leads are ready to book?', 'Whose staff details are missing?', 'How busy is the next week? Plan staffing.'].map((q) => `<button type="button" class="btn btn-sm btn-ghost" data-action="ai-quick" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
       : `<p class="note">The AI part of the assistant is not connected yet. The to-do list works without it.${CAN['settings.manage'] ? ' To switch it on, add an Anthropic API key (ANTHROPIC_API_KEY) in Render → azeli-pms → Environment; see the go-live guide, Part E.' : ' Ask an administrator to connect it.'}</p>`;
+    const aiTest = CAN['settings.manage'] ? `<div class="ai-test"><button type="button" class="btn btn-sm btn-ghost" data-action="ai-test">Test the AI connection</button><span class="small muted">${st.ai_enabled ? `Model ${esc(st.model)}` : ''}</span><div id="ai-test-out"></div></div>` : '';
     return `<div class="page-head"><div><h1 class="page">Assistant</h1><p class="sub">What each department needs to do, worked out from the system: what is due, what does not balance, what is running out, what is missing. Plus an AI helper that answers questions and drafts WhatsApp replies.</p></div><button class="btn btn-ghost" data-action="refresh-view">Refresh</button></div>
       ${deptTabs}<div class="grid ai-grid"><div class="card"><h2 class="sec">${esc(dept?.name || 'To do')} · ${esc(fdate(d.business_date))}, ${esc(d.local_time)}</h2>${todoList((dept?.items || []).map((i) => ({ ...i, kind: i.dept })))}</div>
-        <div class="card"><h2 class="sec">Ask the assistant</h2>${chat}</div></div>
+        <div class="card"><h2 class="sec">Ask the assistant</h2>${chat}${aiTest}</div></div>
       <div class="card mt"><h2 class="sec">Next 14 days</h2>${fcChart(d.forecast)}<p class="small muted">Bars above the dashed line (85%) are busy days. Hover a bar for arrivals, departures and events.</p>
         ${table(['Date', '#Rooms sold', '#Occupancy', '#Arrivals', '#Departures', 'Events'], d.forecast.map((x) => `<tr><td>${fdate(x.date)}</td><td class="num">${x.sold}/${x.rooms}</td><td class="num">${x.occupancy}%</td><td class="num">${x.arrivals}</td><td class="num">${x.departures}</td><td class="small">${esc(x.events || '')}</td></tr>`))}</div>
       ${st.usage ? `<div class="card mt"><h2 class="sec">Assistant use, last 30 days</h2>${table(['Staff', '#Questions', '#Tokens in', '#Tokens out', '#From cache'], st.usage.map((u) => `<tr><td>${esc(u.full_name || '')}</td><td class="num">${u.requests}</td><td class="num">${num(u.input_tokens)}</td><td class="num">${num(u.output_tokens)}</td><td class="num">${num(u.cached_tokens)}</td></tr>`), 'Not used yet.')}<p class="small muted">Model: ${esc(st.model)} · limit ${st.hourly_limit} questions per person per hour.</p></div>` : ''}`;
@@ -3701,6 +3703,25 @@
     render();
   };
   OPS_A['lib-csv'] = () => { if (ui.libLast) location.href = `/api/library/${ui.libLast.key}?${ui.libLast.qs}${ui.libLast.qs ? '&' : ''}format=csv`; };
+
+  /* ================= Phase 21: checking the WhatsApp and AI connections ================= */
+  OPS_A['wa-check'] = async () => {
+    const out = $('#wa-check-out'); if (out) out.innerHTML = '<p class="small muted">Checking with Meta…</p>';
+    const r = await POST('/messages/setup/check', {});
+    if (!out) return;
+    out.innerHTML = `<ul class="conn-steps">${r.steps.map((x) => `<li class="${x.ok ? 'ok' : 'bad'}"><span aria-hidden="true">${x.ok ? '✓' : '✗'}</span>${esc(x.label)}</li>`).join('')}</ul>
+      ${r.number ? `<p class="small"><b>${esc(r.number.name || '')}</b> ${esc(r.number.display || '')} · quality ${esc(r.number.quality || '–')}${r.number.limit ? ` · limit ${esc(String(r.number.limit).replace('TIER_', '').toLowerCase())} people a day` : ''}${r.number.name_status && r.number.name_status !== 'APPROVED' ? ` · display name ${esc(r.number.name_status.toLowerCase().replace(/_/g, ' '))}` : ''}</p>` : ''}
+      ${r.last_webhook_at ? `<p class="small">Last message from Meta: ${ftime(r.last_webhook_at)}</p>` : '<p class="small muted">No message from Meta has arrived yet. Once the webhook is connected, send the hotel number a WhatsApp from your phone and check again.</p>'}
+      ${r.error ? `<p class="err small">${esc(r.error)}</p>` : ''}`;
+  };
+  OPS_A['wa-test-msg'] = () => modal('Send a test message', `<form class="form" data-form="ops-modal"><p class="small">Sends WhatsApp's sample message "Hello World" to the number below. Use your own phone. While the Meta app is in development mode, the number must be on its test list.</p>
+      <label>Phone number<input name="to" required placeholder="0772 123456 or +256 772 123456"></label><div class="actions"><button class="btn btn-gold">Send</button></div></form>`,
+    async (v) => { const r = await POST('/messages/setup/test-message', { to: v.to }); return `Sent to ${r.to}. It should arrive on that phone within a minute.`; });
+  OPS_A['ai-test'] = async () => {
+    const out = $('#ai-test-out'); if (out) out.innerHTML = '<p class="small muted">Asking Claude…</p>';
+    const r = await POST('/assistant/test', {});
+    if (out) out.innerHTML = r.ok ? `<p class="ok-note small">✓ Connected: ${esc(r.model)} answered “${esc(r.reply)}” in ${(r.ms / 1000).toFixed(1)} s (${r.input_tokens + r.output_tokens} tokens, a fraction of a US cent).</p>` : `<p class="err small">✗ ${esc(r.error)}</p>`;
+  };
 
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 

@@ -278,6 +278,65 @@ async function callApi(cfg, payload) {
   }
   return data.messages[0].id;
 }
+/** Meta's error codes in plain words, for the set-up page. */
+function explain(e = {}, status) {
+  const code = Number(e.code), sub = Number(e.error_subcode);
+  if (code === 190) return 'The access token is not valid or has expired. Create a permanent token for a system user (go-live guide, Part D step 3) and update WHATSAPP_TOKEN.';
+  if (code === 10 || code === 200 || code === 3) return 'The token does not have WhatsApp permission. Give the system user the WhatsApp account and the whatsapp_business_messaging and whatsapp_business_management permissions.';
+  if (code === 100 && (sub === 33 || /does not exist|Unsupported get request/i.test(e.message || ''))) return 'Meta does not know that phone number ID. Copy it again from WhatsApp → API Setup (it is a long number, not the phone number) into WHATSAPP_PHONE_NUMBER_ID.';
+  if (code === 131030) return 'That number is not on the test list. While the app is in development, add it under WhatsApp → API Setup → "To", or finish going live.';
+  if (code === 132001) return 'The template "hello_world" is not in your WhatsApp account (it is usually there by default). Send from the inbox to someone who has written to you instead.';
+  if (code === 131047) return 'More than 24 hours since this person wrote: only an approved template can be sent.';
+  if (code === 133010) return 'The phone number is not registered on WhatsApp Cloud yet. Finish registering it under WhatsApp → API Setup.';
+  return e.error_data?.details || e.message || `WhatsApp answered ${status}`;
+}
+
+/**
+ * Check the connection with Meta: token valid, phone number ID right, and what Meta knows about the number
+ * (name, quality, messaging limit). Nothing is sent to anyone.
+ */
+export async function checkConnection(pool) {
+  const cfg = waConfig();
+  const steps = [
+    { key: 'token', label: 'Access token (WHATSAPP_TOKEN)', ok: !!cfg.token },
+    { key: 'phone', label: 'Phone number ID (WHATSAPP_PHONE_NUMBER_ID)', ok: !!cfg.phoneNumberId },
+    { key: 'secret', label: 'App secret (WHATSAPP_APP_SECRET), to accept incoming messages', ok: !!cfg.appSecret },
+    { key: 'verify', label: 'Verify token (WHATSAPP_VERIFY_TOKEN), to connect the webhook', ok: !!cfg.verifyToken },
+  ];
+  const { rows: [s] } = await pool.query('SELECT wa_last_webhook_at FROM settings WHERE id=1');
+  const out = { steps, number: null, error: null, last_webhook_at: s.wa_last_webhook_at };
+  if (!cfg.token || !cfg.phoneNumberId) { out.error = 'Add the access token and phone number ID in the hosting settings first.'; return out; }
+  try {
+    const url = `${cfg.apiBase}/${cfg.apiVersion}/${encodeURIComponent(cfg.phoneNumberId)}?fields=display_phone_number,verified_name,quality_rating,code_verification_status,name_status,messaging_limit_tier,platform_type,throughput`;
+    const res = await fetch(url, { headers: { authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(15000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { out.error = explain(data.error, res.status); steps.push({ key: 'meta', label: 'Meta accepts the token and phone number ID', ok: false }); return out; }
+    out.number = { display: data.display_phone_number, name: data.verified_name, quality: data.quality_rating, verification: data.code_verification_status, name_status: data.name_status,
+      limit: data.messaging_limit_tier, platform: data.platform_type };
+    steps.push({ key: 'meta', label: 'Meta accepts the token and phone number ID', ok: true });
+    steps.push({ key: 'cloud', label: 'Number registered on the WhatsApp Cloud API', ok: !data.platform_type || data.platform_type === 'CLOUD_API' });
+  } catch (e) { out.error = `Could not reach Meta: ${e.message}`; }
+  steps.push({ key: 'webhook', label: 'Incoming messages are arriving (webhook)', ok: !!s.wa_last_webhook_at });
+  return out;
+}
+
+/** Send Meta's sample template "hello_world" to a number, to prove sending works end to end. */
+export async function sendTestMessage(pool, user, to) {
+  const cfg = waConfig();
+  if (!cfg.token || !cfg.phoneNumberId) throw new HttpError(409, 'WhatsApp is not connected yet: add the keys in the hosting settings first.');
+  const { rows: [s] } = await pool.query('SELECT phone_country_code FROM settings WHERE id=1');
+  const wa = normalizePhone(to, s.phone_country_code || '256');
+  if (!wa) throw new HttpError(400, 'Enter a phone number, e.g. 0772 123456 or +256 772 123456.');
+  const res = await fetch(`${cfg.apiBase}/${cfg.apiVersion}/${encodeURIComponent(cfg.phoneNumberId)}/messages`, {
+    method: 'POST', headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: wa, type: 'template', template: { name: 'hello_world', language: { code: 'en_US' } } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.messages?.[0]?.id) throw new HttpError(502, explain(data.error, res.status));
+  await audit(pool, user, 'whatsapp.test_message', 'settings', 1, { to: '+' + wa });
+  return { ok: true, to: '+' + wa, message_id: data.messages[0].id };
+}
+
 let sending = Promise.resolve();
 /** Send queued messages (one at a time, in order). Safe to call from requests and the timer at once. */
 export function deliverQueued(pool, { limit = 50 } = {}) {

@@ -137,7 +137,7 @@ const getClient = () => (client ??= new Anthropic({ maxRetries: 2, timeout: 90_0
 export const resetClient = () => { client = null; };
 
 // Stable text first so it is cached; today's facts go in the conversation, not here.
-const SYSTEM = `You are the front-desk assistant inside Azeli PMS, the property management system of a hotel. You help receptionists and duty managers run the day: who to check out, which payments to collect, which bills to settle, which WhatsApp messages need a reply, and how to prepare for busy days.
+const SYSTEM = `You are the assistant inside Azeli PMS, the property management system of a hotel. You help every department run the day: the front desk (who to check out, which payments to collect, which WhatsApp messages need a reply, busy days ahead), management, finance (what does not balance, money owed and due), procurement (what is running out, orders waiting), marketing (quiet weeks, leads ready to book), housekeeping, food and beverage, and HR. The tools only show what the person asking is allowed to see.
 
 How you work:
 - Use the tools to look things up. Never invent guests, rooms, amounts or dates; if a tool does not give you something, say you do not know.
@@ -239,6 +239,38 @@ const apiError = (e) => {
   if (e instanceof Anthropic.APIError) return new HttpError(502, `The AI assistant could not answer (${e.status ?? 'network'}). Try again.`);
   return e;
 };
+
+/**
+ * Check the AI connection from the set-up page: one tiny request. Returns the model that answered, how long it took
+ * and what it cost in tokens, or the reason it failed in plain words.
+ */
+export async function testConnection(pool, user) {
+  const cfg = aiConfig();
+  if (!cfg.enabled) return { ok: false, error: 'No Anthropic API key yet. Add ANTHROPIC_API_KEY in the hosting settings (go-live guide, Part E), then test again.' };
+  const t0 = Date.now();
+  try {
+    const res = await getClient().beta.messages.create({
+      model: cfg.model, max_tokens: 2048, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', output_config: { effort: 'low' },
+      messages: [{ role: 'user', content: 'This is a connection test from a hotel system. Reply with the single word OK.' }],
+    });
+    await logUsage(pool, user, 'test', res.model || cfg.model, res.usage || {}, res.stop_reason !== 'refusal');
+    return { ok: res.stop_reason !== 'refusal', model: res.model, configured_model: cfg.model, effort: cfg.effort, ms: Date.now() - t0, reply: textOf(res.content).slice(0, 80),
+      input_tokens: res.usage?.input_tokens || 0, output_tokens: res.usage?.output_tokens || 0 };
+  } catch (e) {
+    await logUsage(pool, user, 'test', cfg.model, {}, false).catch(() => {});
+    const msg = String(e?.error?.error?.message || e?.message || '');
+    let error;
+    if (e instanceof Anthropic.AuthenticationError) error = 'The API key was refused. Copy it again from console.anthropic.com → API keys (it starts with sk-ant-) into ANTHROPIC_API_KEY.';
+    else if (e instanceof Anthropic.PermissionDeniedError) error = 'This key is not allowed to use that model or workspace. Check the key\'s workspace in the Anthropic console.';
+    else if (e instanceof Anthropic.NotFoundError) error = `The model "${cfg.model}" is not available to this key. Remove AI_MODEL to use the default, or choose another model.`;
+    else if (e instanceof Anthropic.RateLimitError) error = 'The key is working but busy (rate limit). Try again in a minute.';
+    else if (e instanceof Anthropic.BadRequestError && /credit|billing|balance/i.test(msg)) error = 'The key works, but the Anthropic account has no credit. Add credit under Billing in console.anthropic.com.';
+    else if (e instanceof Anthropic.APIConnectionError) error = 'Could not reach Anthropic from the server. Try again; if it keeps failing, check the hosting network.';
+    else if (e instanceof Anthropic.APIError) error = `Anthropic answered ${e.status}: ${msg.slice(0, 200)}`;
+    else throw e;
+    return { ok: false, error, ms: Date.now() - t0 };
+  }
+}
 
 /** One request to Claude with server-side refusal fallback; the system prompt and tools are cached. */
 function ask(cfg, system, messages, tools) {

@@ -71,6 +71,9 @@ export function messagingRouter(pool) {
     });
   });
   r.put('/settings', manage, inTx(async (db, req) => { await wa.saveSettings(db, req.user, req.body || {}); return { ok: true }; }));
+  // connection check and a test message (Meta's sample template) from the set-up page
+  r.post('/setup/check', manage, async (_req, res) => res.json(await wa.checkConnection(pool)));
+  r.post('/setup/test-message', manage, async (req, res) => res.json(await wa.sendTestMessage(pool, req.user, req.body?.to)));
   r.post('/templates', manage, inTx((db, req) => wa.saveTemplate(db, req.user, null, req.body || {})));
   r.put('/templates/:id', manage, inTx((db, req) => wa.saveTemplate(db, req.user, id(req), req.body || {})));
   r.post('/automations', manage, inTx((db, req) => wa.saveAutomation(db, req.user, null, req.body || {})));
@@ -93,6 +96,7 @@ export function whatsappWebhookRouter(pool) {
   });
   r.post('/webhook', async (req, res) => {
     if (!wa.verifySignature(req.rawBody, req.get('x-hub-signature-256'), wa.waConfig().appSecret)) throw new HttpError(401, 'Bad signature.');
+    await pool.query('UPDATE settings SET wa_last_webhook_at=now() WHERE id=1');
     const out = await tx(pool, (db) => wa.handleWebhook(db, req.body));
     res.json({ ok: true, ...out });
     wa.deliverQueued(pool).catch((e) => console.error('WhatsApp send failed:', e.message));

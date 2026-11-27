@@ -18,6 +18,7 @@ export function assistantRouter(pool) {
     res.json({ ai_enabled: c.enabled, model: c.model, hourly_limit: c.hourlyLimit, usage: can(req.user, 'settings.manage') ? await ai.usageSummary(pool) : undefined });
   });
   r.post('/chat', use, async (req, res) => res.json(await ai.chat(pool, req.user, req.body?.messages)));
+  r.post('/test', requirePerm('settings.manage'), async (req, res) => res.json(await ai.testConnection(pool, req.user)));
   r.post('/whatsapp-draft/:id', requirePerm('messages.use'), async (req, res) => {
     const n = Number(req.params.id);
     if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Invalid id.');

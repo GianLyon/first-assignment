@@ -11,7 +11,7 @@ You do the account sign-ups and payments; everything else is already set up in t
 | `admin.azelitech.com` | **Azeli Console**: your admin panel (enquiries, website editing, client hotels, team) | **Render** Starter + Postgres Basic-256MB, Frankfurt | $7 + $6 = $13 / month |
 | `amaya.azelitech.com` | Amaya's **Azeli PMS** (each hotel gets its own, e.g. `hotel2.azelitech.com`) | **Render** Starter + Postgres Basic-1GB, Frankfurt, continuous backups | $7 + $19 = $26 / month per hotel |
 | (domain and DNS) | azelitech.com | **Cloudflare** | ≈ $11 / year |
-| later: team mailboxes | `you@`, `hello@`, `sales@`… | Google Workspace Business Starter | ≈ $7 / user / month |
+| team mailboxes | `support@`, `sales@`, your own | Zoho Mail (bought Nov 2026) | per Zoho plan |
 | later: system email | reports, guest emails, enquiry alerts | Brevo Starter | ≈ $9 / month |
 
 **Website, console and Amaya's PMS: about $60 a month. With 5 mailboxes and Brevo: about $105.** Each extra hotel adds about $26.
@@ -95,14 +95,14 @@ Set **every one to "DNS only" (grey cloud)**: Vercel and Render issue the HTTPS 
 
 # Part B: email (when you are ready)
 
-1. **Google Workspace** (workspace.google.com) → *Business Starter* with `azelitech.com`; when it asks to verify, choose **Cloudflare** and let it add the records. Create mailboxes and a `hello@` group. In the Admin console → *Apps → Gmail → Authenticate email*, generate **DKIM** and add it in Cloudflare.
+1. **Google Workspace** (workspace.google.com) → *Business Starter* with `azelitech.com`; when it asks to verify, choose **Cloudflare** and let it add the records. Create mailboxes and a `support@` mailbox. In the Admin console → *Apps → Gmail → Authenticate email*, generate **DKIM** and add it in Cloudflare.
 2. **Brevo** (brevo.com) → *Starter*. **Senders, Domains & Dedicated IPs → Domains**: add `azelitech.com` and the records it shows (DNS only). **SMTP & API → SMTP**: generate a key.
 3. Cloudflare DNS, once:
    - TXT `@`: `v=spf1 include:_spf.google.com include:spf.brevo.com ~all` (only one `v=spf1` record may exist)
-   - TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:hello@azelitech.com`
+   - TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:support@azelitech.com`
 4. Render:
    - `azeli-pms`: `SMTP_URL` = `smtp://LOGIN:SMTP_KEY@smtp-relay.brevo.com:587` and `EMAIL_FROM` = `Amaya Hotel & Luxury Suites <reports@azelitech.com>`
-   - `azeli-console`: the same `SMTP_URL`, `EMAIL_FROM` = `Azeli Console <console@azelitech.com>` and `LEAD_NOTIFY` = `hello@azelitech.com` (new enquiries are emailed to the team)
+   - `azeli-console`: the same `SMTP_URL`, `EMAIL_FROM` = `Azeli Console <console@azelitech.com>` and `LEAD_NOTIFY` = `support@azelitech.com` (new enquiries are emailed to the team)
    Render restarts the services with the new settings.
 5. In Amaya's PMS: **Automatic emails** → add the review link and switch on the pre-arrival and thank-you emails; **Department reports** → schedules.
 
@@ -178,7 +178,8 @@ Until this is done, the PMS keeps WhatsApp in **practice mode** while it holds s
 6. **Webhook** (so guests' messages reach the inbox): developers.facebook.com → the app → **WhatsApp → Configuration → Webhook → Edit**. Callback URL: the *Webhook address* shown on the PMS WhatsApp set-up page (`https://amaya.azelitech.com/api/whatsapp/webhook`); Verify token: the phrase from step 5. **Verify and save**, then **Manage → messages → Subscribe**.
 7. **Templates**: WhatsApp Manager → **Message templates → Create template**. For each template on the PMS WhatsApp set-up page, use the same name, category (*Utility* or *Marketing*), language *English* and the exact wording with `{{1}}`, `{{2}}`. When Meta shows it as **Active** (minutes to a day), tick **Approved** on that template in the PMS.
 8. **Automations**: on the same page, switch on the ones you want. They only write to guests who agreed to WhatsApp messages (the tick box on the registration card), never during quiet hours, and once per stay. Guests who reply **STOP** are never written to again unless they send **START**.
-9. **Try it**: message the hotel number from your own phone. It appears in **WhatsApp inbox** within seconds; reply from there.
+9. **Check it**: in the PMS → **WhatsApp set-up** press **Check the connection**. Each line should show ✓; if one shows ✗, the message under it says exactly what to fix (wrong token, wrong phone number ID, number not registered …). Then press **Send a test message** and enter your own phone number: WhatsApp's sample "Hello World" should arrive within a minute. (While the Meta app is in development mode, add your number to the test list under WhatsApp → API Setup → "To".)
+10. **Try it**: message the hotel number from your own phone. It appears in **WhatsApp inbox** within seconds; reply from there. **Check the connection** now also shows when the last message from Meta arrived, proving the webhook works.
 
 # Part E: the front-desk AI assistant
 
@@ -187,6 +188,7 @@ The **Assistant** page and the to-do list on the dashboard work without this. Th
 1. Go to console.anthropic.com → sign up with the company email → **Billing**: add a card and buy credit (start with $20; set a monthly limit under *Limits*).
 2. **API keys → Create key**, name it `amaya-pms`, copy it once.
 3. Render → `azeli-pms` → **Environment** → add `ANTHROPIC_API_KEY` with that key → **Save**.
+4. In the PMS → **Assistant**, press **Test the AI connection** (administrators only). It shows the model that answered and the time it took, or the exact reason it failed (key refused, no credit on the account, model not available).
 
 It uses Claude Opus 5.5 ($4 per million tokens in, $20 out; repeated instructions are cached at a tenth of the price). A typical front-desk question costs roughly **3–8 US cents** (it looks several things up); a WhatsApp draft about **1–2 cents**. Check the real figures under *Usage* in the Anthropic console after the first week. Each person can ask 40 questions an hour (`AI_HOURLY_LIMIT`). The Assistant page shows who used it and how much. Optional settings: `AI_MODEL` (e.g. `claude-sonnet-5-5` for about half the price), `AI_EFFORT` (`low` by default).
 
