@@ -1,6 +1,7 @@
 import { HttpError, audit } from '../auth.js';
 import { postJournal, chargeLines, paymentLines, DEPARTMENTS, PAYMENT_METHODS } from '../ledger.js';
 import { enqueueAri, enqueueAriFromToday } from './ari.js';
+import { roomClash, releaseIfInvalid } from './roomassign.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (d) => typeof d === 'string' && DATE_RE.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
@@ -174,7 +175,9 @@ export async function updateReservation(db, user, id, body) {
   // per-night prices: drop nights outside the new stay; an explicit new rate replaces them all
   await db.query('DELETE FROM reservation_nights WHERE reservation_id=$1 AND (night < $2 OR night >= $3 OR $4)', [r.id, u.arrival, u.departure, u.rate !== r.rate]);
   await audit(db, user, 'reservation.update', 'reservation', r.id, { from: { arrival: r.arrival, departure: r.departure, rate: r.rate, room_type_id: r.room_type_id }, to: { arrival: u.arrival, departure: u.departure, rate: u.rate, room_type_id: u.room_type_id } });
-  return u;
+  // a room held for the old dates or type is let go if it no longer fits (staff choose another)
+  const released = datesChanged ? await releaseIfInvalid(db, user, r.id) : null;
+  return released ? { ...u, room_id: null, released_room: released } : u;
 }
 
 export async function cancelReservation(db, user, id, reason) {
@@ -191,12 +194,14 @@ export async function checkIn(db, user, id, { room_id, allow_dirty = false, gues
   const s = await getSettings(db);
   if (r.status !== 'reserved') throw new HttpError(409, 'This reservation is not waiting to check in.');
   if (r.arrival > s.business_date) throw new HttpError(409, `This guest is due on ${r.arrival}. Change the arrival date to check in early.`);
-  const { rows: [room] } = await db.query('SELECT * FROM rooms WHERE id = $1 AND active FOR UPDATE', [Number(room_id)]);
+  const { rows: [room] } = await db.query('SELECT * FROM rooms WHERE id = $1 AND active FOR UPDATE', [Number(room_id ?? r.room_id)]);
   if (!room) throw new HttpError(400, 'Choose a room.');
   if (room.hk_status === 'out_of_order') throw new HttpError(409, `Room ${room.number} is out of order.`);
   if (room.hk_status === 'dirty' && !allow_dirty) throw new HttpError(409, `Room ${room.number} has not been cleaned yet.`);
   const { rows: occ } = await db.query("SELECT code FROM reservations WHERE room_id = $1 AND status = 'in_house'", [room.id]);
   if (occ[0]) throw new HttpError(409, `Room ${room.number} is occupied.`);
+  const held = await roomClash(db, room.id, r.arrival < s.business_date ? s.business_date : r.arrival, r.departure, r.id);
+  if (held) throw new HttpError(409, `Room ${room.number} is not free for this stay: ${held.text}.`);
   await saveRegistration(db, r, guest, stay, { partial: true });
   // Early arrival on a later-dated booking is not allowed above; late arrival keeps the original departure.
   const arrival = r.arrival < s.business_date ? s.business_date : r.arrival;
@@ -267,6 +272,8 @@ export async function moveRoom(db, user, id, { room_id, reason, rate, allow_dirt
   if (to.hk_status === 'dirty' && !allow_dirty) throw new HttpError(409, `Room ${to.number} has not been cleaned yet.`);
   const { rows: [occ] } = await db.query("SELECT code FROM reservations WHERE room_id=$1 AND status='in_house'", [to.id]);
   if (occ) throw new HttpError(409, `Room ${to.number} is occupied.`);
+  const held = await roomClash(db, to.id, s.business_date, r.departure, r.id);
+  if (held) throw new HttpError(409, `Room ${to.number} is not free for the rest of this stay: ${held.text}.`);
   const { rows: [from] } = await db.query('SELECT * FROM rooms WHERE id=$1 FOR UPDATE', [r.room_id]);
   let newRate = r.rate;
   if (to.room_type_id !== r.room_type_id) {

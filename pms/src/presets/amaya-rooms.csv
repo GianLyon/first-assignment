@@ -1,0 +1,38 @@
+# Amaya Hotel & Luxury Suites: 36 rooms, 7 room types
+# room, type code, type name, group, building, floor, view
+102,SSP,Studio Suite (Pool view),Serviced apartments,Apartments,1,pool
+101,SPV,Studio (Pool view),Serviced apartments,Apartments,1,pool
+103,SCV,Studio (City view),Serviced apartments,Apartments,1,city
+104,SCV,Studio (City view),Serviced apartments,Apartments,1,city
+105,SCV,Studio (City view),Serviced apartments,Apartments,1,city
+202,SSP,Studio Suite (Pool view),Serviced apartments,Apartments,2,pool
+201,SPV,Studio (Pool view),Serviced apartments,Apartments,2,pool
+203,SCV,Studio (City view),Serviced apartments,Apartments,2,city
+204,SCV,Studio (City view),Serviced apartments,Apartments,2,city
+205,SCV,Studio (City view),Serviced apartments,Apartments,2,city
+302,SSP,Studio Suite (Pool view),Serviced apartments,Apartments,3,pool
+301,SPV,Studio (Pool view),Serviced apartments,Apartments,3,pool
+303,SCV,Studio (City view),Serviced apartments,Apartments,3,city
+304,SCV,Studio (City view),Serviced apartments,Apartments,3,city
+305,SCV,Studio (City view),Serviced apartments,Apartments,3,city
+501,DLX,Deluxe,Hotel rooms,Hotel,4,
+502,DLX,Deluxe,Hotel rooms,Hotel,4,
+601,DLX,Deluxe,Hotel rooms,Hotel,5,
+602,DLX,Deluxe,Hotel rooms,Hotel,5,
+701,DLX,Deluxe,Hotel rooms,Hotel,6,
+503,EXE,Executive,Hotel rooms,Hotel,4,
+504,EXE,Executive,Hotel rooms,Hotel,4,
+505,EXE,Executive,Hotel rooms,Hotel,4,
+506,EXE,Executive,Hotel rooms,Hotel,4,
+603,EXE,Executive,Hotel rooms,Hotel,5,
+604,EXE,Executive,Hotel rooms,Hotel,5,
+605,EXE,Executive,Hotel rooms,Hotel,5,
+606,EXE,Executive,Hotel rooms,Hotel,5,
+608,EXE,Executive,Hotel rooms,Hotel,5,
+703,EXE,Executive,Hotel rooms,Hotel,6,
+704,EXE,Executive,Hotel rooms,Hotel,6,
+705,EXE,Executive,Hotel rooms,Hotel,6,
+507,TWN,Twin,Hotel rooms,Hotel,4,
+607,TWN,Twin,Hotel rooms,Hotel,5,
+702,PH,Penthouse,Hotel rooms,Hotel,6,
+706,PH,Penthouse,Hotel rooms,Hotel,6,

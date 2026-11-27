@@ -857,3 +857,5 @@ tr.row-hot td { background: #fff8e6; }
 .conn-steps li.ok span { color: #1e7a46; } .conn-steps li.bad span { color: #b3261e; }
 .ai-test { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ai-test #ai-test-out { flex-basis: 100%; } .ok-note { color: #1e7a46; margin: 0; }
+.room small.held { color: var(--accent, #1f5fd1); font-weight: 600; }
+#biz-date.err { color: var(--bad, #b42318); font-weight: 600; cursor: help; }
