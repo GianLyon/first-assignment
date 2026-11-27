@@ -28,7 +28,7 @@
     if (!res.ok) { const e = new Error(data.error || 'Request failed'); e.details = data.details; e.status = res.status; throw e; }
     return data;
   }
-  const GET = (p) => api('GET', p), POST = (p, b) => api('POST', p, b), PUT = (p, b) => api('PUT', p, b), PATCH = (p, b) => api('PATCH', p, b);
+  const GET = (p) => api('GET', p), POST = (p, b) => api('POST', p, b), PUT = (p, b) => api('PUT', p, b), PATCH = (p, b) => api('PATCH', p, b), DEL = (p) => api('DELETE', p);
 
   /* ---------- UI helpers ---------- */
   function toast(html, bad = false) { const t = document.createElement('div'); t.className = 'toast'; if (bad) t.classList.add('toast-bad'); t.innerHTML = html; $('#toasts').appendChild(t); while ($('#toasts').children.length > 4) $('#toasts').firstChild.remove(); setTimeout(() => t.remove(), 5000); }
@@ -843,7 +843,9 @@
       </div>
       <div class="card mt"><h2 class="sec">My shifts this week</h2>${table(me.week.map((d) => fdate(d.date)), [`<tr>${me.week.map((d) => `<td>${d.leave ? pill('Leave', 'info') : d.shift_id === null ? 'Off' : d.shift_id ? `<b>${esc(sh(d.shift_id)?.name || '')}</b><br><span class="small muted">${sh(d.shift_id)?.start_time}–${sh(d.shift_id)?.end_time}</span>` : '<span class="muted">–</span>'}</td>`).join('')}</tr>`])}</div>
       <div class="grid g2 mt"><div class="card"><h2 class="sec">My leave</h2>${table(['Type', 'Dates', '#Days', 'Status', ''], me.leave.map((l) => `<tr><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${pill(...LEAVE_ST[l.status])}</td><td class="right">${l.status === 'pending' ? `<button class="btn btn-sm btn-ghost" data-action="leave-cancel" data-id="${l.id}">Cancel</button>` : ''}</td></tr>`), 'No leave yet.')}</div>
-        <div class="card"><h2 class="sec">My payslips</h2>${table(['Month', '#Net pay', ''], me.payslips.map((p) => `<tr><td>${fmonth(p.period)}</td><td class="num">${num(p.net)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#payslip/${p.id}">View</a></td></tr>`), 'No payslips yet.')}</div></div>`;
+        <div class="card"><h2 class="sec">My payslips</h2>${table(['Month', '#Net pay', ''], me.payslips.map((p) => `<tr><td>${fmonth(p.period)}</td><td class="num">${num(p.net)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#payslip/${p.id}">View</a></td></tr>`), 'No payslips yet.')}</div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">My appraisals</h2>${table(['Date', 'Period', '#Score', ''], (me.appraisals || []).map((a) => `<tr><td>${fdate(a.d)}</td><td>${esc(a.period)}</td><td class="num">${a.overall ?? '–'}/5</td><td class="right">${a.status === 'shared' ? `<button class="btn btn-sm btn-gold" data-action="my-appraisal" data-id="${a.id}">Read & sign</button>` : `<button class="btn btn-sm btn-ghost" data-action="my-appraisal" data-id="${a.id}">View</button>`}</td></tr>`), 'None yet.')}</div>
+        <div class="card"><h2 class="sec">My loans & advances</h2>${table(['Date', '#Amount', '#Still owed', '#Per month'], (me.loans || []).map((l) => `<tr><td>${fdate(l.d)} ${l.kind === 'loan' ? pill('Loan', 'info') : ''}</td><td class="num">${num(l.amount)}</td><td class="num">${num(l.amount - l.recovered)}</td><td class="num">${num(l.monthly_recovery)}</td></tr>`), 'Nothing owed.')}</div></div>`;
   };
 
   VIEWS.payslip = async (id) => {
@@ -853,19 +855,20 @@
     return `<div class="page-head no-print"><div><p class="sub"><a href="${emp ? '#payrun/' + run : '#myhr'}">← Back</a></p><h1 class="page">Payslip</h1></div><button class="btn btn-ghost" data-action="print">Print / PDF</button></div>
       <div class="card payslip"><div class="inv-head"><div><h2>${esc(SETTINGS.property_name)}</h2><p class="muted">Payslip · ${fmonth(p.period)}${p.status === 'draft' || p.status === 'approved' ? ' · <b class="err">DRAFT</b>' : ''}</p></div>
         <dl class="kv"><dt>Employee</dt><dd>${esc(empName(p))} (${esc(p.emp_no)})</dd><dt>Job</dt><dd>${esc(p.job_title)}, ${esc(p.department)}</dd><dt>TIN</dt><dd>${esc(p.tin || '–')}</dd><dt>NSSF no.</dt><dd>${esc(p.nssf_no || '–')}</dd><dt>Paid by</dt><dd>${p.pay_method === 'bank' ? `${esc(p.bank_name || 'Bank')} ${esc(p.bank_account || '')}` : p.pay_method === 'mobile_money' ? `Mobile money ${esc(p.momo_number || '')}` : 'Cash'}</dd></dl></div>
-        <div class="grid g2"><div>${table(['Earnings', '#UGX'], [row(`Basic salary (${p.days_worked - p.unpaid_days} of ${p.days_in_month} days)`, p.basic), row('Allowances', p.allowances), row(`Overtime (${p.overtime_hours} h)`, p.overtime), row('Other additions', p.other_additions), `<tr class="total"><td>Gross pay</td><td class="num">${num(p.gross)}</td></tr>`])}</div>
-          <div>${table(['Deductions', '#UGX'], [row('PAYE', p.paye), row('NSSF (5%)', p.nssf_employee), row('Advance recovery', p.advance_recovery), row('Other deductions', p.other_deductions), `<tr class="total"><td>Total deductions</td><td class="num">${num(p.paye + p.nssf_employee + p.advance_recovery + p.other_deductions)}</td></tr>`])}</div></div>
+        <div class="grid g2"><div>${table(['Earnings', '#UGX'], [row(`Basic salary (${p.days_worked - p.unpaid_days} of ${p.days_in_month} days)`, p.basic), row('Allowances', p.allowances), row(`Overtime (${p.overtime_hours} h)`, p.overtime), row('Service charge', p.service_charge), row('Other additions', p.other_additions), `<tr class="total"><td>Gross pay</td><td class="num">${num(p.gross)}</td></tr>`])}</div>
+          <div>${table(['Deductions', '#UGX'], [row('PAYE', p.paye), row('NSSF (5%)', p.nssf_employee), row('Local Service Tax', p.lst), row('Loan / advance recovery', p.advance_recovery), row('Other deductions', p.other_deductions), `<tr class="total"><td>Total deductions</td><td class="num">${num(p.paye + p.nssf_employee + (p.lst || 0) + p.advance_recovery + p.other_deductions)}</td></tr>`])}</div></div>
         <div class="net-pay"><span>Net pay</span><b>${ugx(p.net)}</b></div><p class="small muted">Employer NSSF contribution (10%): ${ugx(p.nssf_employer)}. ${p.note ? esc(p.note) : ''}</p></div>`;
   };
 
   VIEWS.employees = async () => {
     const st = cur('emp', 'active');
+    if (st === 'cases' || st === 'appraisals' || st === 'alerts') return hrExtraTab(st);
     const [list, setup] = await Promise.all([GET(`/hr/employees?status=${st === 'all' ? 'all' : st}`), hrSetup()]);
     const d = ui.q.empDept || '';
     const shown = list.filter((e) => !d || e.department === d);
     return `<div class="page-head"><div><h1 class="page">Employees</h1><p class="sub">${shown.length} shown · monthly basic pay ${ugx(shown.filter((e) => e.status === 'active').reduce((a, e) => a + Number(e.basic_salary || 0), 0))}</p></div>
       <div class="row">${deptFilter('empDept', setup.departments)}${CAN['hr.manage'] ? '<button class="btn btn-gold" data-action="emp-edit">+ Employee</button>' : ''}</div></div>
-      ${tabs('emp', [['active', 'Current staff'], ['left', 'Former staff'], ['all', 'All']], 'active')}
+      ${empTabs()}
       <div class="card">${table(['Employee', 'Department', 'Job', 'Type', 'Started', '#Basic pay', 'Sign-in', ''], shown.map((e) => `<tr><td><a href="#employee/${e.id}"><b>${esc(empName(e))}</b></a><br><span class="small muted">${esc(e.emp_no)}${e.status === 'left' ? ' · left ' + fdate(String(e.end_date).slice(0, 10)) : ''}</span></td><td>${esc(e.department)}</td><td>${esc(e.job_title)}</td><td>${esc(e.employment_type)}</td><td>${fdate(String(e.start_date).slice(0, 10))}</td><td class="num">${num(e.basic_salary)}</td><td>${e.username ? esc(e.username) : '<span class="muted">–</span>'}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#employee/${e.id}">Open</a></td></tr>`), 'No employees.')}</div>`;
   };
 
@@ -874,13 +877,17 @@
     const e = d.employee, m = CAN['hr.manage'];
     const kv = (pairs) => `<dl class="kv">${pairs.filter(([, v]) => v !== undefined).map(([k, v]) => `<dt>${k}</dt><dd>${v === null || v === '' ? '–' : v}</dd>`).join('')}</dl>`;
     return `<div class="page-head"><div><p class="sub"><a href="#employees">← Employees</a></p><h1 class="page">${esc(empName(e))}</h1><p class="sub">${esc(e.emp_no)} · ${esc(e.job_title)}, ${esc(e.department)} · ${e.status === 'left' ? pill('Left ' + fdate(String(e.end_date).slice(0, 10))) : pill('Current', 'ok')}</p></div>
-      ${m && e.status === 'active' ? `<div class="row"><button class="btn btn-ghost" data-action="emp-edit" data-id="${e.id}">Edit</button><button class="btn btn-ghost" data-action="hr-leave" data-id="${e.id}">Record leave</button><button class="btn btn-bad" data-action="emp-leave" data-id="${e.id}">Leaving the company</button></div>` : ''}</div>
+      ${m && e.status === 'active' ? `<div class="row"><button class="btn btn-ghost" data-action="emp-edit" data-id="${e.id}">Edit</button><button class="btn btn-ghost" data-action="hr-leave" data-id="${e.id}">Record leave</button><button class="btn btn-ghost" data-action="hr-case" data-emp="${e.id}">Disciplinary record</button><button class="btn btn-ghost" data-action="hr-appraisal" data-emp="${e.id}">Appraisal</button><button class="btn btn-bad" data-action="emp-leave" data-id="${e.id}">Leaving the company</button></div>` : ''}</div>
       <div class="grid g3"><div class="card"><h2 class="sec">Personal</h2>${kv([['Gender', esc(e.gender || '')], ['Date of birth', e.date_of_birth ? fdate(String(e.date_of_birth).slice(0, 10)) : ''], ['Phone', esc(e.phone || '')], ['Email', esc(e.email || '')], ['NIN', esc(e.nin || '')], ['TIN', esc(e.tin || '')], ['NSSF no.', esc(e.nssf_no || '')], ['Sign-in', esc(e.username || '')]])}</div>
         <div class="card"><h2 class="sec">Employment & pay</h2>${kv([['Type', esc(e.employment_type)], ['Started', fdate(String(e.start_date).slice(0, 10))], ['Basic (month)', ugx(e.basic_salary)], ['Housing', num(e.housing_allowance)], ['Transport', num(e.transport_allowance)], ['Other allowance', num(e.other_allowance)], ['Paid by', e.pay_method === 'bank' ? `${esc(e.bank_name || 'Bank')} ${esc(e.bank_account || '')}` : e.pay_method === 'mobile_money' ? `Mobile money ${esc(e.momo_number || '')}` : 'Cash'], ['Leaving reason', e.leaving_reason ? esc(e.leaving_reason) : undefined]])}</div>
         <div class="card kpi"><span>Annual leave ${d.leave_balance.year}</span><b>${d.leave_balance.remaining}</b><small>left of ${d.leave_balance.entitlement} · ${d.leave_balance.taken} taken · ${d.leave_balance.pending} pending</small></div></div>
       <div class="grid g2 mt"><div class="card"><h2 class="sec">Leave</h2>${table(['Type', 'Dates', '#Days', 'Status'], d.leave.map((l) => `<tr><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${pill(...LEAVE_ST[l.status])}</td></tr>`), 'None.')}</div>
         <div class="card"><h2 class="sec">Payslips</h2>${table(['Month', '#Gross', '#Net', ''], d.payslips.map((p) => `<tr><td>${fmonth(p.period)}</td><td class="num">${num(p.gross)}</td><td class="num">${num(p.net)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#payslip/${p.id}-${e.id}">View</a></td></tr>`), 'None yet.')}
-        <h2 class="sec mt">Advances</h2>${table(['Date', '#Amount', '#Recovered', '#Per month'], d.advances.map((a) => `<tr><td>${fdate(a.d)}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.recovered)}</td><td class="num">${num(a.monthly_recovery)}</td></tr>`), 'None.')}</div></div>
+        <h2 class="sec mt">Loans & advances</h2>${table(['Date', '#Amount', '#Recovered', '#Per month'], d.advances.map((a) => `<tr><td>${fdate(a.d)} ${a.kind === 'loan' ? pill('Loan', 'info') : ''}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.recovered)}</td><td class="num">${num(a.monthly_recovery)}</td></tr>`), 'None.')}</div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Contract & contacts</h2>${kv([['Probation ends', e.probation_end ? fdate(String(e.probation_end).slice(0, 10)) : ''], ['Contract ends', e.contract_end ? fdate(String(e.contract_end).slice(0, 10)) : ''], ['ID / passport expires', e.id_expiry ? fdate(String(e.id_expiry).slice(0, 10)) : ''], ['Address', esc(e.address || '')], ['Marital status', esc(e.marital_status || '')], ['Next of kin', esc([e.next_of_kin_name, e.next_of_kin_relation && `(${e.next_of_kin_relation})`, e.next_of_kin_phone].filter(Boolean).join(' '))], ['Emergency contact', esc([e.emergency_name, e.emergency_phone].filter(Boolean).join(' '))], ['Leave carried forward', `${e.leave_carry_forward || 0} day(s)`], ['Service charge', e.service_charge_share ? 'Shares' : 'Does not share'], ['Local Service Tax', e.lst_exempt ? 'Exempt' : 'Deducted Jul–Oct']])}</div>
+        <div class="card"><div class="row between"><h2 class="sec">Documents</h2>${m ? `<button class="btn btn-sm btn-ghost" data-action="hr-doc" data-emp="${e.id}">+ Upload</button>` : ''}</div>${table(['Document', 'Kind', 'Expires', ''], (d.documents || []).map((x) => `<tr><td><a href="/api/hr/documents/${x.id}" target="_blank" rel="noopener">${esc(x.title)}</a><br><span class="small muted">${esc(x.filename)} · ${Math.ceil(x.size / 1024)} KB</span></td><td>${esc(DOCK_L[x.kind] || x.kind)}</td><td>${x.expires_on ? fdate(x.expires_on) : ''}</td><td class="right">${m ? `<button class="btn btn-sm btn-ghost" data-action="hr-doc-del" data-id="${x.id}">Remove</button>` : ''}</td></tr>`), 'No documents yet: ID, CV, contract…')}</div></div>
+      <div class="grid g2 mt"><div class="card"><h2 class="sec">Disciplinary record</h2>${table(['Date', 'Type', 'Subject', 'Status', ''], (d.cases || []).map((c) => `<tr><td>${fdate(c.d)}</td><td>${esc(CASE_L[c.kind] || c.kind)}</td><td>${esc(c.subject)}${c.action_taken ? `<br><span class="small muted">${esc(c.action_taken)}</span>` : ''}${c.exp ? `<br><span class="small muted">counts until ${fdate(c.exp)}</span>` : ''}</td><td>${c.status === 'open' ? pill('Open', 'warn') : pill('Closed')}</td><td class="right">${m ? `<button class="btn btn-sm btn-ghost" data-action="hr-case" data-id="${c.id}" data-emp="${e.id}">Edit</button>` : ''}</td></tr>`), 'Clean record.')}</div>
+        <div class="card"><h2 class="sec">Appraisals</h2>${table(['Date', 'Period', '#Score', 'Status', ''], (d.appraisals || []).map((a) => `<tr><td>${fdate(a.d)}</td><td>${esc(a.period)}<br><span class="small muted">${esc(a.reviewer_name || '')}</span></td><td class="num">${a.overall ?? '–'}/5</td><td>${pill(...APR_ST[a.status])}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="hr-appraisal" data-id="${a.id}" data-emp="${e.id}">${a.status === 'acknowledged' ? 'View' : 'Open'}</button></td></tr>`), 'No appraisals yet.')}</div></div>
       ${e.notes ? `<p class="note mt">${esc(e.notes)}</p>` : ''}`;
   };
 
@@ -898,6 +905,7 @@
   };
 
   VIEWS.attendance = async () => {
+    if (cur('att', 'day') === 'month') return attendanceMonthView();
     const date = ui.q.attDate || SETTINGS.business_date;
     const setup = await hrSetup();
     const d = ui.q.attDept || '';
@@ -905,6 +913,7 @@
     const count = (k) => rows.filter((r) => r.status === k).length;
     return `<div class="page-head"><div><h1 class="page">Attendance</h1><p class="sub">${fdateLong(date)} · late = more than 10 minutes after the shift starts</p></div>
       <div class="row"><form class="row" data-form="att-date"><input class="search" type="date" name="date" value="${date}" aria-label="Date"><button class="btn btn-ghost">Show</button></form>${deptFilter('attDept', setup.departments)}</div></div>
+      ${tabs('att', [['day', 'Day'], ['month', 'Month summary']], 'day')}
       <div class="grid g4 mb">${[['Present', count('present')], ['Late', count('late')], ['Absent', count('absent')], ['On leave', count('leave')]].map(([l, v]) => `<div class="card kpi"><span>${l}</span><b>${v}</b></div>`).join('')}</div>
       <div class="card">${table(['Employee', 'Shift', 'In', 'Out', '#Hours', 'Status', ''], rows.map((r) => `<tr><td><b>${esc(empName(r))}</b><br><span class="small muted">${esc(r.department)}</span></td><td>${r.shift_name ? `${esc(r.shift_name)} ${r.shift_start}` : r.status === 'off' ? 'Day off' : '–'}</td><td>${r.clock_in || ''}</td><td>${r.clock_out || ''}</td><td class="num">${r.hours ?? ''}</td><td>${pill(...ATT_ST[r.status])}${r.source === 'self' ? ' <span class="small muted">self</span>' : ''}</td>
         <td class="right">${CAN['attendance.record'] ? `<button class="btn btn-sm btn-ghost" data-action="att-edit" data-id="${r.id}" data-name="${esc(empName(r))}" data-date="${date}" data-in="${r.clock_in || ''}" data-out="${r.clock_out || ''}">Record</button>` : ''}</td></tr>`), 'Nobody employed on this date.')}</div>`;
@@ -912,9 +921,10 @@
 
   VIEWS.leave = async () => {
     const v = cur('lv', 'pending');
+    if (v === 'setup') return leaveSetupView();
     const list = await GET(`/hr/leave?view=${v}`);
     return `<div class="page-head"><div><h1 class="page">Leave</h1><p class="sub">Managers approve; nobody approves their own leave. Unpaid leave is deducted in payroll automatically.</p></div></div>
-      ${tabs('lv', [['pending', 'Waiting approval'], ['upcoming', 'Approved & upcoming'], ['all', 'All']], 'pending')}
+      ${tabs('lv', [['pending', 'Waiting approval'], ['upcoming', 'Approved & upcoming'], ['all', 'All'], ...(CAN['hr.manage'] ? [['setup', 'Leave types & public holidays']] : [])], 'pending')}
       <div class="card">${table(['Employee', 'Type', 'Dates', '#Days', 'Reason', 'Status', ''], list.map((l) => `<tr><td><a href="#employee/${l.employee_id}">${esc(empName(l))}</a><br><span class="small muted">${esc(l.department)}</span></td><td>${esc(l.type_name)}</td><td>${fdate(l.f)} → ${fdate(l.t)}</td><td class="num">${l.days}</td><td>${esc(l.reason || '')}${l.decision_note ? `<br><span class="small muted">${esc(l.decision_note)}</span>` : ''}</td><td>${pill(...LEAVE_ST[l.status])}${l.decided_by_name ? `<br><span class="small muted">${esc(l.decided_by_name)}</span>` : ''}</td>
         <td class="right nowrap">${l.status === 'pending' && CAN['hr.approve'] && (l.user_id !== ME.id || ME.role === 'admin') ? `<button class="btn btn-sm btn-ok" data-action="leave-decide" data-id="${l.id}" data-d="approved">Approve</button> <button class="btn btn-sm btn-bad" data-action="leave-decide" data-id="${l.id}" data-d="rejected">Reject</button>` : ''}${CAN['hr.manage'] && ['pending', 'approved'].includes(l.status) && l.f > SETTINGS.business_date ? ` <button class="btn btn-sm btn-ghost" data-action="leave-cancel" data-id="${l.id}">Cancel</button>` : ''}</td></tr>`), 'Nothing here.')}</div>`;
   };
@@ -924,15 +934,15 @@
     let body;
     if (t === 'runs') {
       const runs = await GET('/hr/payroll');
-      body = `${CAN['payroll.manage'] ? `<form class="row mb" data-form="new-run"><input class="search" type="month" name="period" value="${SETTINGS.business_date.slice(0, 7)}" max="${SETTINGS.business_date.slice(0, 7)}" aria-label="Month"><button class="btn btn-gold">Prepare payroll</button></form>` : ''}
+      body = `${CAN['payroll.manage'] ? `<form class="row mb" data-form="new-run"><input class="search" type="month" name="period" value="${SETTINGS.business_date.slice(0, 7)}" max="${SETTINGS.business_date.slice(0, 7)}" aria-label="Month"><input class="search" type="number" min="0" step="1000" name="service_charge" placeholder="Service charge to share (UGX)" aria-label="Service charge to share"><button class="btn btn-gold">Prepare payroll</button></form>` : ''}
         ${table(['Month', 'Status', '#Staff', '#Gross', '#Net pay', 'Prepared by', ''], runs.map((r) => `<tr><td><b>${fmonth(r.period)}</b></td><td>${pill(...PAY_ST[r.status])}</td><td class="num">${r.employees}</td><td class="num">${num(r.gross)}</td><td class="num">${num(r.net)}</td><td>${esc(r.created_by_name || '')}</td><td class="right"><a class="btn btn-sm" href="#payrun/${r.id}">Open</a></td></tr>`), 'No payrolls yet.')}`;
     } else {
       const [adv, emps] = await Promise.all([GET('/hr/advances'), GET('/hr/employees')]);
-      body = `${CAN['payroll.manage'] ? `<div class="row between mb"><span class="muted">Advances are recovered automatically from each payroll until repaid.</span><button class="btn btn-gold" data-action="advance" data-emps='${esc(JSON.stringify(emps.map((e) => [e.id, empName(e)])))}'>+ Advance</button></div>` : ''}
-        ${table(['Date', 'Employee', 'Reason', '#Amount', '#Per month', '#Recovered', '#Still owed'], adv.map((a) => `<tr><td>${fdate(a.d)}</td><td>${esc(empName(a))}</td><td>${esc(a.reason || '')}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.monthly_recovery)}</td><td class="num">${num(a.recovered)}</td><td class="num">${a.amount - a.recovered ? num(a.amount - a.recovered) : pill('Repaid', 'ok')}</td></tr>`), 'No advances.')}`;
+      body = `${CAN['payroll.manage'] ? `<div class="row between mb"><span class="muted">Loans and advances are recovered automatically from each payroll until repaid.</span><button class="btn btn-gold" data-action="advance" data-emps='${esc(JSON.stringify(emps.map((e) => [e.id, empName(e)])))}'>+ Loan or advance</button></div>` : ''}
+        ${table(['Date', 'Employee', 'Reason', '#Amount', '#Per month', '#Recovered', '#Still owed'], adv.map((a) => `<tr><td>${fdate(a.d)} ${a.kind === 'loan' ? pill('Loan', 'info') : pill('Advance')}</td><td>${esc(empName(a))}</td><td>${esc(a.reason || '')}</td><td class="num">${num(a.amount)}</td><td class="num">${num(a.monthly_recovery)}</td><td class="num">${num(a.recovered)}</td><td class="num">${a.amount - a.recovered ? num(a.amount - a.recovered) : pill('Repaid', 'ok')}</td></tr>`), 'No advances.')}`;
     }
     return `<div class="page-head"><div><h1 class="page">Payroll</h1><p class="sub">Prepare → approve (someone else) → post to the accounts → pay. PAYE and NSSF are calculated automatically.</p></div></div>
-      ${tabs('pr', [['runs', 'Monthly payroll'], ['advances', 'Staff advances']], 'runs')}<div class="card">${body}</div>`;
+      ${tabs('pr', [['runs', 'Monthly payroll'], ['advances', 'Loans & advances']], 'runs')}<div class="card">${body}</div>`;
   };
 
   VIEWS.payrun = async (id) => {
@@ -949,16 +959,17 @@
     acts.push('<button class="btn btn-ghost" data-action="print">Print</button>');
     const T = r.totals;
     let body;
-    if (t === 'lines') body = table(['Employee', '#Days', '#Basic', '#Allow.', '#Overtime', '#Gross', '#NSSF 5%', '#PAYE', '#Advance', '#Other ded.', '#Net', ''], r.lines.map((l) => `<tr><td><b>${esc(empName(l))}</b><br><span class="small muted">${esc(l.department)}${l.unpaid_days ? ` · ${l.unpaid_days} unpaid day(s)` : ''}</span></td><td class="num">${l.days_worked}/${l.days_in_month}</td><td class="num">${num(l.basic)}</td><td class="num">${num(l.allowances)}</td><td class="num">${l.overtime ? num(l.overtime) + `<br><span class="small muted">${l.overtime_hours} h</span>` : ''}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.nssf_employee)}</td><td class="num">${num(l.paye)}</td><td class="num">${l.advance_recovery ? num(l.advance_recovery) : ''}</td><td class="num">${l.other_deductions ? num(l.other_deductions) : ''}${l.other_additions ? `<br><span class="small muted">+${num(l.other_additions)} added</span>` : ''}</td><td class="num"><b>${num(l.net)}</b></td>
-        <td class="right nowrap">${draft ? `<button class="btn btn-sm btn-ghost" data-action="line-edit" data-run="${r.id}" data-emp="${l.employee_id}" data-name="${esc(empName(l))}" data-ot="${l.overtime_hours}" data-add="${l.other_additions}" data-ded="${l.other_deductions}" data-note="${esc(l.note || '')}">Adjust</button>` : ''} <a class="btn btn-sm btn-ghost" href="#payslip/${r.id}-${l.employee_id}">Slip</a></td></tr>`).concat([`<tr class="total"><td>Totals (${T.employees})</td><td></td><td></td><td></td><td></td><td class="num">${num(T.gross)}</td><td class="num">${num(T.nssf_employee)}</td><td class="num">${num(T.paye)}</td><td class="num">${num(T.advance_recovery)}</td><td class="num">${num(T.other_deductions)}</td><td class="num">${num(T.net)}</td><td></td></tr>`]));
+    if (t === 'lines') body = `${draft ? `<form class="row mb" data-form="svc-charge" data-run="${r.id}"><label class="row small">Service charge to share this month (UGX)<input class="search" type="number" min="0" step="1000" name="amount" value="${r.service_charge_pool || 0}"></label><button class="btn btn-sm btn-ghost">Share among staff</button><span class="small muted">Split by days paid among staff who share in it. Taxed like pay.</span></form>` : r.service_charge_pool ? `<p class="small muted">Service charge shared: ${ugx(r.service_charge_pool)}.</p>` : ''}` + table(['Employee', '#Days', '#Basic', '#Allow.', '#Overtime', '#Svc charge', '#Gross', '#NSSF 5%', '#PAYE', '#LST', '#Loans', '#Other ded.', '#Net', ''], r.lines.map((l) => `<tr><td><b>${esc(empName(l))}</b><br><span class="small muted">${esc(l.department)}${l.unpaid_days ? ` · ${l.unpaid_days} unpaid day(s)` : ''}</span></td><td class="num">${l.days_worked}/${l.days_in_month}</td><td class="num">${num(l.basic)}</td><td class="num">${num(l.allowances)}</td><td class="num">${l.overtime ? num(l.overtime) + `<br><span class="small muted">${l.overtime_hours} h</span>` : ''}${draft && l.ot_from_clock && l.ot_from_clock !== l.overtime_hours ? `<br><button class="link small" data-action="ot-use" data-run="${r.id}" data-emp="${l.employee_id}" data-h="${l.ot_from_clock}" title="Hours beyond rostered shifts, from clock-ins">use ${l.ot_from_clock} h clocked</button>` : ''}</td><td class="num">${l.service_charge ? num(l.service_charge) : ''}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.nssf_employee)}</td><td class="num">${num(l.paye)}</td><td class="num">${l.lst ? num(l.lst) : ''}</td><td class="num">${l.advance_recovery ? num(l.advance_recovery) : ''}</td><td class="num">${l.other_deductions ? num(l.other_deductions) : ''}${l.other_additions ? `<br><span class="small muted">+${num(l.other_additions)} added</span>` : ''}</td><td class="num"><b>${num(l.net)}</b></td>
+        <td class="right nowrap">${draft ? `<button class="btn btn-sm btn-ghost" data-action="line-edit" data-run="${r.id}" data-emp="${l.employee_id}" data-name="${esc(empName(l))}" data-ot="${l.overtime_hours}" data-add="${l.other_additions}" data-ded="${l.other_deductions}" data-note="${esc(l.note || '')}">Adjust</button>` : ''} <a class="btn btn-sm btn-ghost" href="#payslip/${r.id}-${l.employee_id}">Slip</a></td></tr>`).concat([`<tr class="total"><td>Totals (${T.employees})</td><td></td><td></td><td></td><td></td><td class="num">${num(T.service_charge)}</td><td class="num">${num(T.gross)}</td><td class="num">${num(T.nssf_employee)}</td><td class="num">${num(T.paye)}</td><td class="num">${num(T.lst)}</td><td class="num">${num(T.advance_recovery)}</td><td class="num">${num(T.other_deductions)}</td><td class="num">${num(T.net)}</td><td></td></tr>`]));
     else if (t === 'paye') body = `<p class="small muted">PAYE schedule for the URA return.</p>${table(['Employee', 'TIN', '#Gross pay', '#PAYE'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${esc(l.tin || '–')}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.paye)}</td></tr>`).concat([`<tr class="total"><td colspan="2">Total</td><td class="num">${num(T.gross)}</td><td class="num">${num(T.paye)}</td></tr>`]))}`;
     else if (t === 'nssf') body = `<p class="small muted">NSSF schedule: 5% employee + 10% employer.</p>${table(['Employee', 'NSSF no.', '#Gross pay', '#Employee 5%', '#Employer 10%', '#Total'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${esc(l.nssf_no || '–')}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.nssf_employee)}</td><td class="num">${num(l.nssf_employer)}</td><td class="num">${num(l.nssf_employee + l.nssf_employer)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.nssf_employee)}</td><td class="num">${num(T.nssf_employer)}</td><td class="num">${num(T.nssf_employee + T.nssf_employer)}</td></tr>`]))}`;
-    else if (t === 'bank') body = `<p class="small muted">Payment list for the bank and mobile money.</p>${table(['Employee', 'Method', 'Bank / number', '#Net pay'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${{ bank: 'Bank', mobile_money: 'Mobile money', cash: 'Cash' }[l.pay_method]}</td><td>${l.pay_method === 'bank' ? `${esc(l.bank_name || '')} ${esc(l.bank_account || '')}` : esc(l.momo_number || '')}</td><td class="num">${num(l.net)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.net)}</td></tr>`]))}`;
+    else if (t === 'lst') body = `<p class="small muted">Local Service Tax for the local authority (KCCA in Kampala): a quarter of each person's yearly LST in July, August, September and October.</p>${table(['Employee', 'NIN', '#Gross pay', '#LST this month'], r.lines.filter((l) => l.lst).map((l) => `<tr><td>${esc(empName(l))}</td><td>${esc(l.nin || '–')}</td><td class="num">${num(l.gross)}</td><td class="num">${num(l.lst)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.lst)}</td></tr>`]), 'No LST this month (only July to October).')}`;
+    else if (t === 'bank') body = `<p class="small muted">Payment list for the bank and mobile money. <a class="btn btn-sm btn-ghost" href="/api/hr/payroll/${r.id}/file?method=bank" download>Bank file (CSV)</a> <a class="btn btn-sm btn-ghost" href="/api/hr/payroll/${r.id}/file?method=mobile_money" download>Mobile money file (CSV)</a></p>${table(['Employee', 'Method', 'Bank / number', '#Net pay'], r.lines.map((l) => `<tr><td>${esc(empName(l))}</td><td>${{ bank: 'Bank', mobile_money: 'Mobile money', cash: 'Cash' }[l.pay_method]}</td><td>${l.pay_method === 'bank' ? `${esc(l.bank_name || '')} ${esc(l.bank_account || '')}` : esc(l.momo_number || '')}</td><td class="num">${num(l.net)}</td></tr>`).concat([`<tr class="total"><td colspan="3">Total</td><td class="num">${num(T.net)}</td></tr>`]))}`;
     else body = table(['Department', '#Staff', '#Gross pay', '#Cost incl. employer NSSF'], r.departments.map((x) => `<tr><td>${esc(x.department)}</td><td class="num">${x.employees}</td><td class="num">${num(x.gross)}</td><td class="num">${num(x.employer_cost)}</td></tr>`));
     return `<div class="page-head"><div><p class="sub"><a href="#payroll">← Payroll</a></p><h1 class="page">Payroll ${fmonth(r.period)}</h1><p class="sub">${pill(...PAY_ST[r.status])} · prepared by ${esc(r.created_by_name || '')}${r.approved_by_name ? ' · approved by ' + esc(r.approved_by_name) : ''}${r.posted_by_name ? ' · posted by ' + esc(r.posted_by_name) : ''}</p></div><div class="row no-print">${acts.join('')}</div></div>
       <div class="grid g4 mb">${[['Gross pay', T.gross], ['PAYE to URA', T.paye], ['NSSF (15%)', T.nssf_employee + T.nssf_employer], ['Net pay to staff', T.net]].map(([l, v]) => `<div class="card kpi"><span>${l}</span><b>${num(v)}</b><small>UGX</small></div>`).join('')}</div>
-      ${tabs('payrun', [['lines', 'Payroll'], ['paye', 'PAYE schedule'], ['nssf', 'NSSF schedule'], ['bank', 'Payment list'], ['dept', 'By department']], 'lines')}<div class="card">${body}</div>
-      <p class="small muted">PAYE uses the Uganda monthly resident bands and NSSF 5% + 10% of gross. Confirm current rates with URA and NSSF.</p>`;
+      ${tabs('payrun', [['lines', 'Payroll'], ['paye', 'PAYE schedule'], ['nssf', 'NSSF schedule'], ['lst', 'LST schedule'], ['bank', 'Payment list'], ['dept', 'By department']], 'lines')}<div class="card">${body}</div>
+      <p class="small muted">PAYE uses the Uganda monthly resident bands, NSSF 5% + 10% of gross, and Local Service Tax by monthly pay (a quarter a month, July to October). Confirm current rates with URA, NSSF and your local authority.</p>`;
   };
 
   /* ---------- forms & actions ---------- */
@@ -1795,9 +1806,14 @@
         <div class="three"><label>Start date<input type="date" name="start_date" value="${sd(e?.start_date)}" required></label><label>Basic salary / month (UGX)<input name="basic_salary" type="number" min="0" value="${e?.basic_salary ?? ''}" required></label><label>Annual leave days<input name="annual_leave_days" type="number" min="0" max="60" value="${e?.annual_leave_days ?? 21}"></label></div>
         <div class="three"><label>Housing allowance<input name="housing_allowance" type="number" min="0" value="${e?.housing_allowance ?? 0}"></label><label>Transport allowance<input name="transport_allowance" type="number" min="0" value="${e?.transport_allowance ?? 0}"></label><label>Other allowance<input name="other_allowance" type="number" min="0" value="${e?.other_allowance ?? 0}"></label></div>
         <div class="three"><label>Paid by<select name="pay_method">${opts([['bank', 'Bank'], ['mobile_money', 'Mobile money'], ['cash', 'Cash']], e?.pay_method)}</select></label><label>Bank / account no.<span class="row"><input name="bank_name" value="${esc(e?.bank_name || '')}" placeholder="Bank"><input name="bank_account" value="${esc(e?.bank_account || '')}" placeholder="Account"></span></label><label>Mobile money number<input name="momo_number" value="${esc(e?.momo_number || '')}"></label></div>
+        <div class="three"><label>End of probation<input type="date" name="probation_end" value="${sd(e?.probation_end)}"></label><label>Contract ends<input type="date" name="contract_end" value="${sd(e?.contract_end)}"></label><label>ID / passport expires<input type="date" name="id_expiry" value="${sd(e?.id_expiry)}"></label></div>
+        <div class="two"><label>Home address<input name="address" value="${esc(e?.address || '')}" maxlength="300"></label><label>Marital status<select name="marital_status">${opts([['', '–'], ['single', 'Single'], ['married', 'Married'], ['divorced', 'Divorced'], ['widowed', 'Widowed']], e?.marital_status || '')}</select></label></div>
+        <div class="three"><label>Next of kin<input name="next_of_kin_name" value="${esc(e?.next_of_kin_name || '')}" maxlength="120"></label><label>Relationship<input name="next_of_kin_relation" value="${esc(e?.next_of_kin_relation || '')}" maxlength="40" placeholder="Spouse, parent…"></label><label>Next of kin phone<input name="next_of_kin_phone" value="${esc(e?.next_of_kin_phone || '')}" maxlength="40"></label></div>
+        <div class="two"><label>Emergency contact<input name="emergency_name" value="${esc(e?.emergency_name || '')}" maxlength="120"></label><label>Emergency phone<input name="emergency_phone" value="${esc(e?.emergency_phone || '')}" maxlength="40"></label></div>
+        <div class="three"><label>Leave carried forward (days)<input name="leave_carry_forward" type="number" min="0" max="60" value="${e?.leave_carry_forward ?? 0}"></label><label class="row"><input type="checkbox" name="service_charge_share" value="1" ${e?.service_charge_share === false ? '' : 'checked'}> Shares in the service charge</label><label class="row"><input type="checkbox" name="lst_exempt" value="1" ${e?.lst_exempt ? 'checked' : ''}> No Local Service Tax (paid elsewhere)</label></div>
         <label>Sign-in for self-service<select name="user_id">${opts([['', 'None'], ...users], e?.user_id || '')}</select></label><label>Notes<textarea name="notes" rows="2">${esc(e?.notes || '')}</textarea></label>
         <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
-        async (v) => { const b = { ...v, user_id: v.user_id ? Number(v.user_id) : null, basic_salary: Number(v.basic_salary), housing_allowance: Number(v.housing_allowance || 0), transport_allowance: Number(v.transport_allowance || 0), other_allowance: Number(v.other_allowance || 0), annual_leave_days: Number(v.annual_leave_days) };
+        async (v) => { const b = { ...v, service_charge_share: !!v.service_charge_share, lst_exempt: !!v.lst_exempt, leave_carry_forward: Number(v.leave_carry_forward || 0), user_id: v.user_id ? Number(v.user_id) : null, basic_salary: Number(v.basic_salary), housing_allowance: Number(v.housing_allowance || 0), transport_allowance: Number(v.transport_allowance || 0), other_allowance: Number(v.other_allowance || 0), annual_leave_days: Number(v.annual_leave_days) };
           if (e) await PUT(`/hr/employees/${e.id}`, b); else { const n = await POST('/hr/employees', b); location.hash = `#employee/${n.id}`; } return 'Employee saved.'; });
     },
     'emp-leave': (d) => modal('Leaving the company', `<form class="form" data-form="emp-leave"><p class="note">Their roster after the leaving date is cleared and their sign-in is switched off. Payroll pays them up to the leaving date.</p><div class="two"><label>Last working day<input type="date" name="end_date" required value="${SETTINGS.business_date}"></label><label>Reason<input name="reason" required maxlength="300"></label></div><div class="actions">${cancelBtn}<button class="btn btn-bad">Confirm</button></div></form>`,
@@ -1821,8 +1837,8 @@
     },
     advance: async (d) => {
       const all = await accts(true); const emps = JSON.parse(d.emps);
-      modal('Staff advance', `<form class="form" data-form="advance"><label>Employee<select name="employee_id">${opts(emps)}</select></label><div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required></label><label>Recover per month<input name="monthly_recovery" type="number" min="1" required></label><label>Paid from<select name="paid_from">${cashOpts(all, '1000')}</select></label></div><label>Reason<input name="reason" maxlength="200"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Give advance</button></div></form>`,
-        async (v) => { await POST('/hr/advances', { ...v, employee_id: Number(v.employee_id), amount: Number(v.amount), monthly_recovery: Number(v.monthly_recovery) }); return 'Advance recorded.'; });
+      modal('Staff loan or advance', `<form class="form" data-form="advance"><div class="two"><label>Employee<select name="employee_id">${opts(emps)}</select></label><label>Type<select name="kind"><option value="advance">Salary advance</option><option value="loan">Staff loan</option></select></label></div><div class="three"><label>Amount (UGX)<input name="amount" type="number" min="1" required></label><label>Recover per month<input name="monthly_recovery" type="number" min="1" required></label><label>Paid from<select name="paid_from">${cashOpts(all, '1000')}</select></label></div><label>Reason<input name="reason" maxlength="200"></label><div class="actions">${cancelBtn}<button class="btn btn-gold">Record</button></div></form>`,
+        async (v) => { await POST('/hr/advances', { ...v, kind: v.kind, employee_id: Number(v.employee_id), amount: Number(v.amount), monthly_recovery: Number(v.monthly_recovery) }); return 'Advance recorded.'; });
     },
 
     'company-edit': async (d) => {
@@ -2202,7 +2218,7 @@
 
   const FORMS = {
     'att-date': (v) => { ui.q.attDate = v.date; render(); },
-    'new-run': async (v) => { const r = await POST('/hr/payroll', { period: v.period }); location.hash = `#payrun/${r.id}`; },
+    'new-run': async (v) => { const r = await POST('/hr/payroll', { period: v.period, service_charge: Number(v.service_charge || 0) }); location.hash = `#payrun/${r.id}`; },
     roster: async (v) => {
       const entries = Object.entries(v).filter(([k]) => k.startsWith('r_')).map(([k, val]) => { const [, emp, date] = k.split('_'); return { employee_id: Number(emp), date, shift_id: val === '' ? undefined : val === 'off' ? null : Number(val) }; });
       await PUT('/hr/roster', { entries: entries.map((x) => (x.shift_id === undefined ? { ...x, shift_id: '' } : x)) }); toast('Roster saved.'); render();
@@ -3765,6 +3781,113 @@
     $('#modal .modal').classList.add('wide');
   };
   OPS_A['rooms-preset'] = async (d) => { const t = await (await fetch(`/api/rooms/presets/${encodeURIComponent(d.name)}`, { credentials: 'same-origin' })).text(); const ta = $('#modal-body textarea[name=text]'); if (ta) ta.value = t; };
+
+  /* ================= Phase 23: fuller HR ================= */
+  const DOCK_L = { national_id: 'National ID', passport: 'Passport', cv: 'CV', contract: 'Contract', certificate: 'Certificate', medical: 'Medical', letter: 'Letter', other: 'Other' };
+  const CASE_L = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final warning', suspension: 'Suspension', dismissal: 'Dismissal', other: 'Other' };
+  const APR_ST = { draft: ['Draft', 'warn'], shared: ['Waiting for employee', 'info'], acknowledged: ['Signed off', 'ok'] };
+  const REC_L = { confirm: 'Confirm in post', extend_probation: 'Extend probation', increment: 'Salary increment', promotion: 'Promotion', training: 'Training', pip: 'Improvement plan', none: 'No change' };
+  const empTabs = () => tabs('emp', [['active', 'Current staff'], ['left', 'Former staff'], ['all', 'All'], ...(CAN['hr.view'] ? [['alerts', 'Alerts'], ['cases', 'Discipline'], ['appraisals', 'Appraisals']] : [])], 'active');
+  async function hrExtraTab(st) {
+    const head = `<div class="page-head"><div><h1 class="page">Employees</h1><p class="sub">${st === 'alerts' ? 'Contracts, probation, IDs and documents to act on, and this week\'s birthdays.' : st === 'cases' ? 'Open cases and warnings that still count.' : 'Performance reviews.'}</p></div></div>${empTabs()}`;
+    if (st === 'alerts') {
+      const a = await GET('/hr/alerts');
+      return head + `<div class="card">${a.leave_waiting ? `<p class="note"><a href="#leave">${a.leave_waiting} leave request(s) waiting for approval</a></p>` : ''}${table(['Employee', 'What', ''], a.alerts.map((x) => `<tr><td><a href="#employee/${x.id}"><b>${esc(x.name)}</b></a></td><td>${pill(x.kind, x.level)} ${esc(x.text)}</td><td class="right"><a class="btn btn-sm btn-ghost" href="#employee/${x.id}">Open</a></td></tr>`), 'Nothing needs attention.')}</div>`;
+    }
+    if (st === 'cases') {
+      const list = await GET(`/hr/cases?view=${ui.q.caseAll ? 'all' : 'current'}`);
+      return head + `<div class="card"><div class="row between"><label class="row small"><input type="checkbox" data-change="case-all" ${ui.q.caseAll ? 'checked' : ''}> Show closed and expired too</label></div>${table(['Date', 'Employee', 'Type', 'Subject', 'Counts until', 'Status'], list.map((c) => `<tr><td>${fdate(c.d)}</td><td><a href="#employee/${c.employee_id}">${esc(empName(c))}</a><br><span class="small muted">${esc(c.department)}</span></td><td>${esc(CASE_L[c.kind])}</td><td>${esc(c.subject)}</td><td>${c.exp ? fdate(c.exp) : ''}</td><td>${c.status === 'open' ? pill('Open', 'warn') : pill('Closed')}</td></tr>`), 'No current cases.')}</div>`;
+    }
+    const list = await GET('/hr/appraisals');
+    return head + `<div class="card">${table(['Date', 'Employee', 'Period', '#Score', 'Recommendation', 'Reviewer', 'Status'], list.map((a) => `<tr><td>${fdate(a.d)}</td><td><a href="#employee/${a.employee_id}">${esc(empName(a))}</a><br><span class="small muted">${esc(a.department)}</span></td><td>${esc(a.period)}</td><td class="num">${a.overall ?? '–'}</td><td>${esc(REC_L[a.recommendation] || '')}</td><td>${esc(a.reviewer_name || '')}</td><td>${pill(...APR_ST[a.status])}</td></tr>`), 'No appraisals yet. Open an employee and press Appraisal.')}</div>`;
+  }
+  OPS_A['case-all'] = (_d, e) => { ui.q.caseAll = e.target.checked; render(); };
+  async function attendanceMonthView() {
+    const setup = await hrSetup();
+    const period = ui.q.attMonth || SETTINGS.business_date.slice(0, 7), d = ui.q.attDept || '';
+    const m = await GET(`/hr/attendance-month?period=${period}${d ? '&department=' + encodeURIComponent(d) : ''}`);
+    return `<div class="page-head"><div><h1 class="page">Attendance</h1><p class="sub">${fmonth(period)} · overtime = hours beyond each rostered shift, from clock-ins</p></div>
+      <div class="row"><form class="row" data-form="att-month"><input class="search" type="month" name="period" value="${period}" aria-label="Month"><button class="btn btn-ghost">Show</button></form>${deptFilter('attDept', setup.departments)}</div></div>
+      ${tabs('att', [['day', 'Day'], ['month', 'Month summary']], 'day')}
+      <div class="card">${table(['Employee', '#Rostered', '#Present', '#Late', '#Absent', '#Leave', '#Holidays worked', '#Hours', '#Overtime h'], m.employees.map((x) => `<tr><td><a href="#employee/${x.id}"><b>${esc(empName(x))}</b></a><br><span class="small muted">${esc(x.department)}</span></td><td class="num">${x.rostered}</td><td class="num">${x.present}</td><td class="num">${x.late ? `<b class="err">${x.late}</b>` : 0}</td><td class="num">${x.absent ? `<b class="err">${x.absent}</b>` : 0}</td><td class="num">${x.leave_days}</td><td class="num">${x.holidays_worked}</td><td class="num">${x.hours}</td><td class="num">${x.overtime}</td></tr>`), 'Nobody employed in this month.')}</div>`;
+  }
+  OPS_FORMS['att-month'] = (v) => { ui.q.attMonth = v.period; render(); };
+  async function leaveSetupView() {
+    const setup = await (HRS = null, hrSetup());
+    return `<div class="page-head"><div><h1 class="page">Leave</h1><p class="sub">Public holidays inside a leave request are not counted as leave days.</p></div></div>
+      ${tabs('lv', [['pending', 'Waiting approval'], ['upcoming', 'Approved & upcoming'], ['all', 'All'], ['setup', 'Leave types & public holidays']], 'pending')}
+      <div class="grid g2"><div class="card"><div class="row between"><h2 class="sec">Leave types</h2><button class="btn btn-sm btn-gold" data-action="lt-edit">+ Leave type</button></div>
+        ${table(['Leave', 'Paid', 'From annual balance', '#Max days / year', 'In use', ''], setup.leave_types.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${t.paid ? 'Yes' : 'No'}</td><td>${t.uses_balance ? 'Yes' : 'No'}</td><td class="num">${t.max_days_year ?? ''}</td><td>${t.active === false ? pill('No') : pill('Yes', 'ok')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="lt-edit" data-code="${esc(t.code)}">Edit</button></td></tr>`))}</div>
+      <div class="card"><div class="row between"><h2 class="sec">Public holidays</h2><button class="btn btn-sm btn-gold" data-action="hol-edit">+ Holiday</button></div><p class="small muted">Eid al-Fitr and Eid al-Adha move each year: add them when the dates are announced.</p>
+        ${table(['Date', 'Holiday', ''], setup.holidays.map((h) => `<tr><td class="nowrap">${fdate(h.date)}</td><td>${esc(h.name)}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="hol-del" data-date="${h.date}">Remove</button></td></tr>`), 'None.')}</div></div>`;
+  }
+  OPS_A['lt-edit'] = async (d) => {
+    const t = d.code ? (await hrSetup()).leave_types.find((x) => x.code === d.code) : null;
+    modal(t ? `Leave type · ${t.name}` : 'New leave type', `<form class="form" data-form="ops-modal"><div class="two"><label>Name<input name="name" value="${esc(t?.name || '')}" required maxlength="60"></label><label>Most days a year (empty = no limit)<input name="max_days_year" type="number" min="1" max="365" value="${t?.max_days_year ?? ''}"></label></div>
+      <label class="row"><input type="checkbox" name="paid" value="1" ${!t || t.paid ? 'checked' : ''}> Paid (unpaid leave is deducted in payroll)</label>
+      <label class="row"><input type="checkbox" name="uses_balance" value="1" ${t?.uses_balance ? 'checked' : ''}> Taken from the annual leave balance</label>
+      ${t ? `<label class="row"><input type="checkbox" name="active" value="1" ${t.active !== false ? 'checked' : ''}> In use</label>` : ''}<div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const b = { name: v.name, max_days_year: v.max_days_year, paid: !!v.paid, uses_balance: !!v.uses_balance, active: t ? !!v.active : true, sort: t?.sort ?? 100 }; if (t) await PUT(`/hr/leave-types/${t.code}`, b); else await POST('/hr/leave-types', b); HRS = null; return 'Leave type saved.'; });
+  };
+  OPS_A['hol-edit'] = () => modal('Public holiday', `<form class="form" data-form="ops-modal"><div class="two"><label>Date<input type="date" name="date" required></label><label>Name<input name="name" required maxlength="80" placeholder="e.g. Eid al-Fitr"></label></div><div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { await PUT('/hr/holidays', v); HRS = null; return 'Holiday saved.'; });
+  OPS_A['hol-del'] = async (d) => { if (!confirm('Remove this public holiday?')) return; await DEL(`/hr/holidays/${d.date}`); HRS = null; toast('Removed.'); render(); };
+  OPS_A['hr-doc'] = async (d) => {
+    const setup = await hrSetup();
+    modal('Upload a document', `<form class="form" data-form="ops-modal"><div class="two"><label>Kind<select name="kind">${opts(setup.doc_kinds.map((k) => [k, DOCK_L[k] || k]))}</select></label><label>Title<input name="title" maxlength="120" placeholder="e.g. Employment contract 2026"></label></div>
+      <div class="two"><label>File (PDF or photo, up to 3 MB)<input type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp" required></label><label>Expires (if it does)<input type="date" name="expires_on"></label></div>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Upload</button></div></form>`,
+    async () => {
+      const f = $('#modal-body input[name=file]').files[0]; if (!f) throw new Error('Choose a file.');
+      if (f.size > 3 * 1024 * 1024) throw new Error('Files can be up to 3 MB.');
+      const data = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(new Error('Could not read the file.')); r.readAsDataURL(f); });
+      const form = $('#modal-body form');
+      await POST(`/hr/employees/${d.emp}/documents`, { kind: form.kind.value, title: form.title.value, expires_on: form.expires_on.value, filename: f.name, file: data });
+      return 'Document uploaded.';
+    });
+  };
+  OPS_A['hr-doc-del'] = async (d) => { if (!confirm('Remove this document? It cannot be recovered.')) return; await DEL(`/hr/documents/${d.id}`); toast('Removed.'); render(); };
+  OPS_A['hr-case'] = async (d) => {
+    const setup = await hrSetup();
+    const c = d.id ? (await GET(`/hr/employees/${d.emp}`)).cases.find((x) => String(x.id) === d.id) : null;
+    modal(c ? 'Disciplinary record' : 'New disciplinary record', `<form class="form" data-form="ops-modal"><div class="three"><label>Date<input type="date" name="case_date" value="${c?.d || SETTINGS.business_date}" required></label><label>Type<select name="kind">${opts(setup.case_kinds.map((k) => [k, CASE_L[k]]), c?.kind || 'verbal_warning')}</select></label><label>Counts until<input type="date" name="expires_on" value="${c?.exp || ''}" placeholder="auto"></label></div>
+      <label>Subject<input name="subject" value="${esc(c?.subject || '')}" required maxlength="150" placeholder="e.g. Late for shift three times in a week"></label>
+      <label>What happened<textarea name="details" rows="3" maxlength="3000">${esc(c?.details || '')}</textarea></label>
+      <label>Action taken / employee's response<textarea name="action_taken" rows="2" maxlength="1000">${esc(c?.action_taken || '')}</textarea></label>
+      <label class="row"><input type="checkbox" name="closed" value="1" ${c?.status === 'closed' ? 'checked' : ''}> Closed</label>
+      <p class="small muted">Warnings count for 6 months (verbal) or 12 months (written and final) unless you set a date. Follow your disciplinary procedure and the Employment Act: hear the employee before deciding.</p>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
+    async (v) => { const b = { ...v, employee_id: Number(d.emp), status: v.closed ? 'closed' : 'open' }; if (c) await PUT(`/hr/cases/${c.id}`, b); else await POST('/hr/cases', b); return 'Saved.'; });
+  };
+  OPS_A['hr-appraisal'] = async (d) => {
+    const setup = await hrSetup();
+    const a = d.id ? (await GET(`/hr/employees/${d.emp}`)).appraisals.find((x) => String(x.id) === d.id) : null;
+    const ro = a?.status === 'acknowledged';
+    const scoreSel = (k) => `<select name="s_${k}" ${ro ? 'disabled' : ''}>${opts([['', '–'], [5, '5 Excellent'], [4, '4 Good'], [3, '3 Meets'], [2, '2 Below'], [1, '1 Poor']], a?.scores?.[k] ?? '')}</select>`;
+    modal(a ? `Appraisal · ${a.period}` : 'New appraisal', `<form class="form" data-form="ops-modal"><div class="two"><label>Period<input name="period" value="${esc(a?.period || '')}" required maxlength="60" placeholder="e.g. 2026 second half, Probation review" ${ro ? 'disabled' : ''}></label><label>Review date<input type="date" name="review_date" value="${a?.d || SETTINGS.business_date}" required ${ro ? 'disabled' : ''}></label></div>
+      <div class="three">${setup.criteria.map(([k, l]) => `<label>${esc(l)}${scoreSel(k)}</label>`).join('')}</div>
+      <label>Strengths<textarea name="strengths" rows="2" ${ro ? 'disabled' : ''}>${esc(a?.strengths || '')}</textarea></label>
+      <label>To improve<textarea name="improvements" rows="2" ${ro ? 'disabled' : ''}>${esc(a?.improvements || '')}</textarea></label>
+      <label>Goals for the next period<textarea name="goals" rows="2" ${ro ? 'disabled' : ''}>${esc(a?.goals || '')}</textarea></label>
+      <label>Recommendation<select name="recommendation" ${ro ? 'disabled' : ''}>${opts([['', '–'], ...Object.entries(REC_L)], a?.recommendation || '')}</select></label>
+      ${a?.employee_comment ? `<p class="note"><b>Employee's comment:</b> ${esc(a.employee_comment)}</p>` : ''}
+      ${ro ? '' : `<label class="row"><input type="checkbox" name="share" value="1" ${a?.status === 'shared' ? 'checked' : ''}> Share with the employee (they read it in My HR and sign it off)</label>`}
+      <div class="actions">${cancelBtn}${ro ? '' : '<button class="btn btn-gold">Save</button>'}</div></form>`,
+    async (v) => { const scores = Object.fromEntries(setup.criteria.map(([k]) => [k, v['s_' + k] ? Number(v['s_' + k]) : null])); const b = { employee_id: Number(d.emp), period: v.period, review_date: v.review_date, scores, strengths: v.strengths, improvements: v.improvements, goals: v.goals, recommendation: v.recommendation || null, status: v.share ? 'shared' : 'draft' };
+      if (a) await PUT(`/hr/appraisals/${a.id}`, b); else await POST('/hr/appraisals', b); return 'Appraisal saved.'; });
+    $('#modal .modal').classList.add('wide');
+  };
+  OPS_A['my-appraisal'] = async (d) => {
+    const [me, setup] = await Promise.all([GET('/hr/me'), hrSetup()]);
+    const a = me.appraisals.find((x) => String(x.id) === d.id);
+    modal(`Appraisal · ${a.period}`, `<form class="form" data-form="ops-modal"><p class="small muted">${fdate(a.d)} · by ${esc(a.reviewer_name || '')} · overall ${a.overall ?? '–'}/5</p>
+      ${table(['', '#Score'], setup.criteria.filter(([k]) => a.scores?.[k]).map(([k, l]) => `<tr><td>${esc(l)}</td><td class="num">${a.scores[k]}/5</td></tr>`))}
+      ${a.strengths ? `<p><b>Strengths:</b> ${esc(a.strengths)}</p>` : ''}${a.improvements ? `<p><b>To improve:</b> ${esc(a.improvements)}</p>` : ''}${a.goals ? `<p><b>Goals:</b> ${esc(a.goals)}</p>` : ''}
+      ${a.status === 'shared' ? `<label>Your comment (optional)<textarea name="comment" rows="2" maxlength="2000"></textarea></label><div class="actions">${cancelBtn}<button class="btn btn-gold">I have read this</button></div>` : `${a.employee_comment ? `<p class="note"><b>Your comment:</b> ${esc(a.employee_comment)}</p>` : ''}<div class="actions"><button type="button" class="btn" data-action="close-modal">Close</button></div>`}</form>`,
+    async (v) => { await POST(`/hr/me/appraisals/${a.id}/acknowledge`, { comment: v.comment }); return 'Signed off. Thank you.'; });
+  };
+  OPS_FORMS['svc-charge'] = async (v, form) => { await PUT(`/hr/payroll/${form.dataset.run}/service-charge`, { amount: Number(v.amount || 0) }); toast('Service charge shared.'); render(); };
+  OPS_A['ot-use'] = async (d) => { await PUT(`/hr/payroll/${d.run}/lines/${d.emp}`, { overtime_hours: Number(d.h) }); toast(`Overtime set to ${d.h} h.`); render(); };
 
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 

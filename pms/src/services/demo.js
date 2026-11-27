@@ -308,7 +308,7 @@ const ACTIVITY = ['ap_allocations', 'ar_allocations', 'ar_receipts', 'ari_outbox
   'goods_received_lines', 'guests', 'invoice_lines', 'invoices', 'journal_entries', 'journal_lines', 'kitchen_tickets', 'leave_requests', 'night_audits', 'payment_intents', 'payments',
   'payroll_lines', 'payroll_runs', 'pos_check_lines', 'pos_checks', 'pos_payments', 'pos_shifts', 'purchase_order_lines', 'purchase_orders', 'report_runs', 'requisition_lines', 'requisitions', 'room_blocks', 'hk_tasks', 'wa_intents', 'ota_cards', 'pos_prints', 'club_visits', 'club_payments', 'club_members',
   'reservation_nights', 'reservations', 'room_moves', 'roster', 'staff_advances', 'stock_balances', 'stock_count_lines', 'stock_counts', 'stock_movements', 'supplier_bills',
-  'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders'];
+  'supplier_payments', 'transfers', 'wa_automation_runs', 'wa_conversations', 'wa_messages', 'work_orders', 'employee_documents', 'disciplinary_cases', 'appraisals'];
 
 /** Remove the sample data and start fresh. Only when sample data was added, and the property name is typed to confirm. */
 export async function removeDemoData(pool, user, { confirm }) {

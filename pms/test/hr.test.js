@@ -107,10 +107,11 @@ test('payroll: proration, unpaid leave, overtime, NSSF, PAYE and advances', asyn
   assert.equal(r.lines.length, 3);
   const a = r.lines.find((l) => l.employee_id === agnes.id);
   // 1,000,000 less 2 unpaid days of 31 = 935,484; housing 200,000; 10 h overtime at 1.5× = 72,115
-  assert.deepEqual([a.unpaid_days, a.basic, a.allowances, a.overtime, a.gross, a.nssf_employee, a.nssf_employer, a.paye, a.advance_recovery, a.net],
-    [2, 935484, 200000, 72115, 1207599, 60380, 120760, 264280, 100000, 782939]);
+  // October is a Local Service Tax month: a quarter of the yearly LST (100,000 above 1,000,000 a month)
+  assert.deepEqual([a.unpaid_days, a.basic, a.allowances, a.overtime, a.gross, a.nssf_employee, a.nssf_employer, a.paye, a.lst, a.advance_recovery, a.net],
+    [2, 935484, 200000, 72115, 1207599, 60380, 120760, 264280, 25000, 100000, 757939]);
   const j = r.lines.find((l) => l.employee_id === joseph.id);
-  assert.deepEqual([j.days_worked, j.basic, j.gross, j.nssf_employee, j.paye, j.net], [16, 309677, 309677, 15484, 7468, 286725]); // joined 16 Oct
+  assert.deepEqual([j.days_worked, j.basic, j.gross, j.nssf_employee, j.paye, j.lst, j.net], [16, 309677, 309677, 15484, 7468, 5000, 281725]); // joined 16 Oct; LST 20,000 a year at this pay
   const c = r.lines.find((l) => l.employee_id === charles.id);
   assert.deepEqual([c.days_worked, c.basic, c.paye], [20, 1290323, 289097]); // left 20 Oct
   // approval by someone other than the preparer; no edits after approval
@@ -123,7 +124,7 @@ test('payroll: proration, unpaid leave, overtime, NSSF, PAYE and advances', asyn
   const t = ok(await acc.post(`/api/hr/payroll/${run.id}/post`));
   assert.equal(t.gross, 1207599 + 309677 + 1290323);
   const jl = await lastJournal();
-  assert.deepEqual(jl, [['6000', t.gross, 0], ['6010', t.nssf_employer, 0], ['2400', 0, t.paye], ['2410', 0, t.nssf_employee + t.nssf_employer], ['1250', 0, 100000], ['2420', 0, t.net]]);
+  assert.deepEqual(jl, [['6000', t.gross, 0], ['6010', t.nssf_employer, 0], ['2400', 0, t.paye], ['2410', 0, t.nssf_employee + t.nssf_employer], ['2440', 0, t.lst], ['1250', 0, 100000], ['2420', 0, t.net]]);
   ok(await acc.post(`/api/hr/payroll/${run.id}/pay`, { paid_from: '1030' }));
   assert.deepEqual(await lastJournal(), [['2420', t.net, 0], ['1030', 0, t.net]]);
   const adv = ok(await hro.get('/api/hr/advances'));
@@ -137,7 +138,7 @@ test('payroll: proration, unpaid leave, overtime, NSSF, PAYE and advances', asyn
 
 test('payslips and leavers', async () => {
   const mine = ok(await staff.get(`/api/hr/payslip/${run.id}`));
-  assert.equal(mine.net, 782939); assert.equal(mine.first_name, 'Agnes');
+  assert.equal(mine.net, 757939); assert.equal(mine.first_name, 'Agnes');
   const other = ok(await staff.get(`/api/hr/payslip/${run.id}?employee_id=${joseph.id}`)); // staff only ever see their own
   assert.equal(other.first_name, 'Agnes');
   assert.equal(ok(await hro.get(`/api/hr/payslip/${run.id}?employee_id=${joseph.id}`)).first_name, 'Joseph');
