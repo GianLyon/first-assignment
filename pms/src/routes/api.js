@@ -253,6 +253,8 @@ export function apiRouter(pool) {
     await audit(db, req.user, 'room.update', 'room', room.id, { number: room.number });
     return setBuilding(db, room, b);
   }));
+  r.delete('/rooms/:id', requirePerm('settings.manage'), inTx((db, req) => ra.deleteRoom(db, req.user, id(req))));
+  r.delete('/room-types/:id', requirePerm('settings.manage'), inTx((db, req) => ra.deleteRoomType(db, req.user, id(req))));
   r.post('/rooms/import', requirePerm('settings.manage'), inTx((db, req) => ra.importLayout(db, req.user, req.body || {})));
   r.get('/rooms/presets/:name', requirePerm('settings.manage'), async (req, res) => {
     if (!/^[a-z0-9-]+$/.test(req.params.name)) throw new HttpError(404, 'No such layout.');

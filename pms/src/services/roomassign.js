@@ -154,3 +154,37 @@ export async function importLayout(db, user, { text, replace = false } = {}) {
   await audit(db, user, 'rooms.import', 'room', null, { rooms: rows.length, roomsCreated, roomsUpdated, typesCreated, roomsRetired, typesRetired, replace: !!replace });
   return { rooms: rows.length, rooms_created: roomsCreated, rooms_updated: roomsUpdated, types_created: typesCreated, rooms_retired: roomsRetired, types_retired: typesRetired };
 }
+
+/* ---------------- deleting set-up that was never used ---------------- */
+/** Delete a room that has no bookings, moves or maintenance history. Its housekeeping tasks and blocks go with it. */
+export async function deleteRoom(db, user, id) {
+  const { rows: [room] } = await db.query('SELECT * FROM rooms WHERE id=$1 FOR UPDATE', [id]);
+  if (!room) throw new HttpError(404, 'Room not found.');
+  const { rows: [use] } = await db.query(`SELECT
+      (SELECT count(*) FROM reservations WHERE room_id=$1)::int AS res,
+      (SELECT count(*) FROM room_moves WHERE from_room_id=$1 OR to_room_id=$1)::int AS moves,
+      (SELECT count(*) FROM work_orders WHERE room_id=$1)::int AS works`, [id]);
+  if (use.res || use.moves || use.works) {
+    throw new HttpError(409, `Room ${room.number} has history (${[use.res && `${use.res} booking(s)`, use.moves && `${use.moves} room move(s)`, use.works && `${use.works} maintenance job(s)`].filter(Boolean).join(', ')}), so it cannot be deleted. Untick "In service" instead: it disappears from the room board and from sale, and old bills stay correct.`);
+  }
+  await db.query('DELETE FROM hk_tasks WHERE room_id=$1', [id]);
+  await db.query('DELETE FROM room_blocks WHERE room_id=$1', [id]);
+  await db.query('UPDATE rooms SET connects_to=NULL WHERE connects_to=$1', [room.number]);
+  await db.query('DELETE FROM rooms WHERE id=$1', [id]);
+  await audit(db, user, 'room.delete', 'room', id, { number: room.number });
+  return { deleted: room.number };
+}
+/** Delete a room type with no rooms and no bookings. Its price calendar and channel mappings go with it. */
+export async function deleteRoomType(db, user, id) {
+  const { rows: [t] } = await db.query('SELECT * FROM room_types WHERE id=$1 FOR UPDATE', [id]);
+  if (!t) throw new HttpError(404, 'Room type not found.');
+  const { rows: [use] } = await db.query(`SELECT (SELECT count(*) FROM rooms WHERE room_type_id=$1)::int AS rooms, (SELECT count(*) FROM reservations WHERE room_type_id=$1)::int AS res`, [id]);
+  if (use.rooms) throw new HttpError(409, `${t.name} still has ${use.rooms} room(s). Delete those rooms or give them another type first.`);
+  if (use.res) throw new HttpError(409, `${t.name} has ${use.res} booking(s) in its history, so it cannot be deleted. Untick "On sale" instead.`);
+  await db.query('DELETE FROM rate_calendar WHERE room_type_id=$1', [id]);
+  await db.query('DELETE FROM channel_mappings WHERE room_type_id=$1', [id]);
+  await db.query('DELETE FROM ari_outbox WHERE room_type_id=$1', [id]);
+  await db.query('DELETE FROM room_types WHERE id=$1', [id]);
+  await audit(db, user, 'room_type.delete', 'room_type', id, { code: t.code, name: t.name });
+  return { deleted: t.name };
+}
