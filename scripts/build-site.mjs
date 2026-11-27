@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'dist-site');
 const SITE = 'https://azelitech.com';
-const PAGES = ['index.html', 'services.html', 'work.html', 'how-we-work.html', 'packages.html', 'contact.html', 'pms.html'];
+const PAGES = ['index.html', 'services.html', 'work.html', 'how-we-work.html', 'packages.html', 'contact.html', 'pms.html', 'privacy.html'];
 const BLOG = ['blog/index.html', 'blog/why-azeli-hotel-marketing.html', 'blog/how-to-increase-hotel-occupancy.html', 'blog/best-hotel-pms-uganda.html', 'blog/ota-management-made-easy.html'];
 // the live PMS demo (a separate Azeli PMS service running with DEMO_MODE=1). Without it the
 // website links to the small browser-only mock in pms-demo/.

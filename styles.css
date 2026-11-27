@@ -885,3 +885,10 @@ code, .mono { font-family: var(--mono); }
 .article-head h1 { font-size: clamp(1.9rem, 4vw, 2.8rem); }
 .toc { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; margin: 0 0 28px; font-size: .95rem; }
 .toc ol { margin: 6px 0 0; }
+
+/* Legal pages (privacy policy) */
+.prose h2 { font-size: 1.3rem; margin: 2em 0 .6em; }
+.prose h2:first-child { margin-top: 0; }
+.prose ul, .prose ol { padding-left: 1.3em; margin: 0 0 1em; }
+.prose li { margin-bottom: .45em; }
+.prose a { color: var(--gold); }
