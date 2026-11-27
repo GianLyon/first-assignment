@@ -104,3 +104,19 @@ test('the Amaya layout loads 36 rooms in 7 types, grouped, with buildings and fl
   ok(await admin.put(`/api/room-types/${by.TWN.id}`, { name: 'Twin', base_rate: 250000, max_occupancy: 2, category: 'Hotel rooms' }));
   assert.equal(ok(await admin.get('/api/room-types')).find((t) => t.code === 'TWN').base_rate, 250000);
 });
+
+test('rooms and room types can be deleted only when they were never used', async () => {
+  // a fresh, unused type with one room: both can go (room first)
+  const t = ok(await admin.post('/api/room-types', { code: 'TMP', name: 'Temporary', base_rate: 100000, max_occupancy: 2 }));
+  const rm = ok(await admin.post('/api/rooms', { number: 'T1', room_type_id: t.id }));
+  assert.equal((await fd.del(`/api/rooms/${rm.id}`)).status, 403); // settings only
+  const busy = await admin.del(`/api/room-types/${t.id}`);
+  assert.equal(busy.status, 409); assert.match(busy.data.error, /still has 1 room/);
+  ok(await admin.del(`/api/rooms/${rm.id}`));
+  ok(await admin.del(`/api/room-types/${t.id}`));
+  assert.ok(!ok(await admin.get('/api/room-types')).some((x) => x.code === 'TMP'));
+  // a room with bookings in its history cannot be deleted
+  const used = (await admin.get('/api/rooms')).data.find((x) => x.number === '302'); // Walker checked in there
+  const no = await admin.del(`/api/rooms/${used.id}`);
+  assert.equal(no.status, 409); assert.match(no.data.error, /history/);
+});

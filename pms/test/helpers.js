@@ -40,7 +40,7 @@ export function client() {
     return { status: res.status, data };
   };
   return {
-    get: (p) => call('GET', p), post: (p, b = {}, o) => call('POST', p, b, o), put: (p, b) => call('PUT', p, b), patch: (p, b) => call('PATCH', p, b), del: (p) => call('DELETE', p),
+    get: (p) => call('GET', p), post: (p, b = {}, o) => call('POST', p, b, o), put: (p, b) => call('PUT', p, b), patch: (p, b) => call('PATCH', p, b), del: (p) => call('DELETE', p, {}),
     raw: (p) => fetch(ctx.base + p, { headers: cookie ? { cookie } : {} }), // a non-JSON response (files)
     login: async (u, pw) => { const r = await call('POST', '/api/auth/login', { username: u, password: pw }); assert.equal(r.status, 200, JSON.stringify(r.data)); return r; },
   };
