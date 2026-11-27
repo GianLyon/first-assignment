@@ -16,6 +16,7 @@ import * as booking from '../services/booking.js';
 import * as L from '../lists.js';
 import * as blocks from '../services/blocks.js';
 import * as hk from '../services/housekeeping.js';
+import * as ra from '../services/roomassign.js';
 import { PAYMENT_METHODS, DEPARTMENTS } from '../ledger.js';
 import { checkNetwork, cleanNetworks, ipAllowed } from '../netlock.js';
 
@@ -194,7 +195,7 @@ export function apiRouter(pool) {
     return s;
   }));
 
-  r.get('/room-types', async (_req, res) => res.json((await pool.query('SELECT * FROM room_types ORDER BY id')).rows));
+  r.get('/room-types', async (_req, res) => res.json((await pool.query('SELECT * FROM room_types ORDER BY category NULLS LAST, sort, id')).rows));
   const typeVals = (b) => {
     const int = (v, l, lo, hi) => { if (v === '' || v == null) return null; const n = Number(v); if (!Number.isInteger(n) || n < lo || n > hi) throw new HttpError(400, `${l} must be between ${lo} and ${hi}.`); return n; };
     if (b.bed_type && !L.BEDS.includes(b.bed_type)) throw new HttpError(400, 'Choose a bed type from the list.');
@@ -202,6 +203,7 @@ export function apiRouter(pool) {
     if (extra != null && (!Number.isInteger(extra) || extra < 0)) throw new HttpError(400, 'Extra bed price must be whole shillings.');
     return [String(b.description || '').trim().slice(0, 1000) || null, b.bed_type || null, int(b.size_sqm, 'Size', 5, 1000), int(b.max_adults, 'Max adults', 1, 20), int(b.max_children, 'Max children', 0, 20), extra, L.pick(b.amenities, L.AMENITIES), Number(b.sort) || 0];
   };
+  const setCategory = async (db, t, b) => { if (b.category === undefined) return t; const c = String(b.category || '').trim().slice(0, 60) || null; await db.query('UPDATE room_types SET category=$2 WHERE id=$1', [t.id, c]); return { ...t, category: c }; };
   r.post('/room-types', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {};
     const code = String(b.code || '').trim().toUpperCase(), name = String(b.name || '').trim(), rate = Number(b.base_rate);
@@ -209,7 +211,7 @@ export function apiRouter(pool) {
     const { rows: [t] } = await db.query(`INSERT INTO room_types (code, name, base_rate, max_occupancy, description, bed_type, size_sqm, max_adults, max_children, extra_bed_rate, amenities, sort)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [code, name, rate, Math.max(1, Number(b.max_occupancy) || 2), ...typeVals(b)]);
     await audit(db, req.user, 'room_type.create', 'room_type', t.id, { code, name, rate });
-    return t;
+    return setCategory(db, t, b);
   }));
   r.put('/room-types/:id', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {}; const rate = Number(b.base_rate);
@@ -218,10 +220,10 @@ export function apiRouter(pool) {
       WHERE id=$1 RETURNING *`, [id(req), String(b.name).trim(), rate, Math.max(1, Number(b.max_occupancy) || 2), b.active !== false, ...typeVals(b)]);
     if (!t) throw new HttpError(404, 'Room type not found.');
     await audit(db, req.user, 'room_type.update', 'room_type', t.id, { name: t.name, rate });
-    return t;
+    return setCategory(db, t, b);
   }));
 
-  r.get('/rooms', async (_req, res) => res.json((await pool.query('SELECT r.*, t.code AS type_code, t.name AS type_name FROM rooms r JOIN room_types t ON t.id=r.room_type_id ORDER BY r.number')).rows));
+  r.get('/rooms', async (_req, res) => res.json((await pool.query('SELECT r.*, t.code AS type_code, t.name AS type_name, t.category FROM rooms r JOIN room_types t ON t.id=r.room_type_id ORDER BY r.building NULLS LAST, r.floor NULLS LAST, r.number')).rows));
   r.get('/setup-lists', async (_req, res) => res.json({ room_prefs: L.ROOM_PREFS, contact_prefs: L.CONTACT_PREFS, amenities: L.AMENITIES, room_features: L.ROOM_FEATURES, views: L.VIEWS, beds: L.BEDS, meal_plans: L.MEAL_PLANS, departments: L.DEPARTMENTS }));
   const roomVals = async (db, b, selfNumber) => {
     if (b.view && !L.VIEWS.includes(b.view)) throw new HttpError(400, 'Choose a view from the list.');
@@ -233,13 +235,14 @@ export function apiRouter(pool) {
     }
     return [String(b.floor || '').trim() || null, b.view || null, b.bed_setup || null, L.pick(b.features, L.ROOM_FEATURES), conn, String(b.notes || '').trim().slice(0, 500) || null];
   };
+  const setBuilding = async (db, room, b) => { if (b.building === undefined) return room; const v = String(b.building || '').trim().slice(0, 60) || null; await db.query('UPDATE rooms SET building=$2 WHERE id=$1', [room.id, v]); return { ...room, building: v }; };
   r.post('/rooms', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {}; const number = String(b.number || '').trim();
     if (!number) throw new HttpError(400, 'Room number is required.');
     const { rows: [room] } = await db.query('INSERT INTO rooms (number, room_type_id, floor, view, bed_setup, features, connects_to, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
       [number, Number(b.room_type_id), ...(await roomVals(db, b, number))]);
     await audit(db, req.user, 'room.create', 'room', room.id, { number });
-    return room;
+    return setBuilding(db, room, b);
   }));
   r.put('/rooms/:id', requirePerm('settings.manage'), inTx(async (db, req) => {
     const b = req.body || {};
@@ -248,8 +251,15 @@ export function apiRouter(pool) {
     const { rows: [room] } = await db.query('UPDATE rooms SET room_type_id=$2, active=$3, floor=$4, view=$5, bed_setup=$6, features=$7, connects_to=$8, notes=$9 WHERE id=$1 RETURNING *',
       [id(req), Number(b.room_type_id), b.active !== false, ...(await roomVals(db, b, cur.number))]);
     await audit(db, req.user, 'room.update', 'room', room.id, { number: room.number });
-    return room;
+    return setBuilding(db, room, b);
   }));
+  r.post('/rooms/import', requirePerm('settings.manage'), inTx((db, req) => ra.importLayout(db, req.user, req.body || {})));
+  r.get('/rooms/presets/:name', requirePerm('settings.manage'), async (req, res) => {
+    if (!/^[a-z0-9-]+$/.test(req.params.name)) throw new HttpError(404, 'No such layout.');
+    const file = new URL(`../presets/${req.params.name}-rooms.csv`, import.meta.url);
+    let text; try { text = await (await import('node:fs/promises')).readFile(file, 'utf8'); } catch { throw new HttpError(404, 'No such layout.'); }
+    res.type('text/plain').send(text);
+  });
   // out of order goes through a block (from today until fixed); leaving out of order releases today's block
   r.patch('/rooms/:id/housekeeping', requirePerm('housekeeping.update'), inTx(async (db, req) => {
     const st = req.body?.hk_status;
@@ -278,14 +288,16 @@ export function apiRouter(pool) {
   r.get('/room-board', requirePerm('reservations.view'), async (_req, res) => {
     const s = await fo.getSettings(pool);
     const { rows } = await pool.query(
-      `SELECT rm.id, rm.number, rm.floor, rm.hk_status, rm.active, t.code AS type_code, t.name AS type_name,
+      `SELECT rm.id, rm.number, rm.floor, rm.building, rm.hk_status, rm.active, t.code AS type_code, t.name AS type_name, t.category,
+              (SELECT row_to_json(h) FROM (SELECT hr.id, hr.code, to_char(hr.arrival,'YYYY-MM-DD') AS arrival, hg.first_name || ' ' || hg.last_name AS guest FROM reservations hr JOIN guests hg ON hg.id=hr.guest_id
+                 WHERE hr.room_id=rm.id AND hr.status='reserved' AND hr.departure > $1 ORDER BY hr.arrival LIMIT 1) h) AS held,
               r.id AS reservation_id, r.code, r.departure, g.first_name, g.last_name,
               (SELECT row_to_json(x) FROM (SELECT b.id, b.kind, b.reason, b.category, to_char(b.date_to,'YYYY-MM-DD') AS date_to FROM room_blocks b
                  WHERE b.room_id=rm.id AND b.released_at IS NULL AND b.date_from <= $1 AND (b.date_to IS NULL OR b.date_to > $1) ORDER BY b.kind LIMIT 1) x) AS block,
               (SELECT to_char(min(b.date_from),'YYYY-MM-DD') FROM room_blocks b WHERE b.room_id=rm.id AND b.released_at IS NULL AND b.date_from > $1) AS next_block
        FROM rooms rm JOIN room_types t ON t.id = rm.room_type_id
        LEFT JOIN reservations r ON r.room_id = rm.id AND r.status = 'in_house' LEFT JOIN guests g ON g.id = r.guest_id
-       WHERE rm.active ORDER BY rm.floor NULLS LAST, rm.number`, [s.business_date]);
+       WHERE rm.active ORDER BY rm.building NULLS LAST, rm.floor NULLS LAST, rm.number`, [s.business_date]);
     res.json({ business_date: s.business_date, rooms: rows });
   });
 
@@ -365,6 +377,10 @@ export function apiRouter(pool) {
   r.get('/reservations/:id', requirePerm('reservations.view'), async (req, res) => res.json(await fo.folio(pool, id(req))));
   r.put('/reservations/:id', requirePerm('reservations.manage'), inTx((db, req) => fo.updateReservation(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/cancel', requirePerm('reservations.manage'), inTx(async (db, req) => { await fo.cancelReservation(db, req.user, id(req), req.body?.reason); return { ok: true }; }));
+  r.get('/reservations/:id/rooms', requirePerm('reservations.view'), inTx((db, req) => ra.roomOptions(db, id(req))));
+  const canAssign = (req, _res, next) => { if (!['frontdesk.checkin', 'reservations.manage'].some((p) => can(req.user, p))) throw new HttpError(403, 'You do not have permission to do this.'); next(); };
+  r.post('/reservations/:id/assign-room', canAssign, inTx((db, req) => ra.assignRoom(db, req.user, id(req), req.body || {})));
+  r.post('/reservations/auto-assign', canAssign, inTx(async (db, req) => ra.autoAssign(db, req.user, DATE_RE.test(req.body?.date || '') ? req.body.date : (await fo.getSettings(db)).business_date)));
   r.post('/reservations/:id/check-in', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.checkIn(db, req.user, id(req), req.body || {})));
   r.put('/reservations/:id/registration', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.updateRegistration(db, req.user, id(req), req.body || {})));
   r.post('/reservations/:id/move', requirePerm('frontdesk.checkin'), inTx((db, req) => fo.moveRoom(db, req.user, id(req), req.body || {})));
@@ -380,7 +396,7 @@ export function apiRouter(pool) {
     const one = async (sql, p = []) => (await pool.query(sql, p)).rows[0];
     const rooms = await one(`SELECT count(*) FILTER (WHERE active AND hk_status<>'out_of_order')::int AS sellable, count(*) FILTER (WHERE hk_status='dirty' AND active)::int AS dirty, count(*) FILTER (WHERE hk_status='out_of_order' AND active)::int AS ooo FROM rooms`);
     const inHouse = await one("SELECT count(*)::int AS n FROM reservations WHERE status='in_house'");
-    const arrivals = (await pool.query(`SELECT r.id, r.code, g.first_name, g.last_name, t.name AS room_type_name, r.source FROM reservations r JOIN guests g ON g.id=r.guest_id JOIN room_types t ON t.id=r.room_type_id WHERE r.status='reserved' AND r.arrival <= $1 ORDER BY g.last_name`, [s.business_date])).rows;
+    const arrivals = (await pool.query(`SELECT r.id, r.code, g.first_name, g.last_name, t.name AS room_type_name, r.source, rm.number AS room_number FROM reservations r JOIN guests g ON g.id=r.guest_id JOIN room_types t ON t.id=r.room_type_id LEFT JOIN rooms rm ON rm.id=r.room_id WHERE r.status='reserved' AND r.arrival <= $1 ORDER BY g.last_name`, [s.business_date])).rows;
     const departures = (await pool.query(`SELECT r.id, r.code, g.first_name, g.last_name, rm.number AS room_number,
         COALESCE((SELECT SUM(amount) FROM folio_charges c WHERE c.reservation_id=r.id AND NOT voided),0) - COALESCE((SELECT SUM(amount) FROM payments p WHERE p.reservation_id=r.id AND NOT voided),0) AS balance
         FROM reservations r JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id WHERE r.status='in_house' AND r.departure <= $1 ORDER BY rm.number`, [s.business_date])).rows;

@@ -163,6 +163,11 @@
     $('#prop-name').textContent = SETTINGS.property_name;
     $('#prop-name').classList.toggle('has-demo', !!SETTINGS.demo_data);
     $('#biz-date').textContent = 'Business date: ' + fdateLong(SETTINGS.business_date);
+    // the business date only moves with the night audit: say so when it has fallen behind the calendar
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Kampala' });
+    const behind = Math.round((new Date(today) - new Date(SETTINGS.business_date)) / 864e5);
+    $('#biz-date').classList.toggle('err', behind > 1);
+    $('#biz-date').title = behind > 1 ? `${behind} days behind today. Bookings for today cannot be checked in until the night audit has caught up${SETTINGS.demo_data ? ', or remove the sample data (Settings → Sample data), which also moves the business date to today' : ' (Night audit, once per missed day)'}.` : '';
   }
   async function refreshSettings() { const me = await GET('/auth/me'); SETTINGS = me.settings; }
 
@@ -204,7 +209,7 @@
       </div>
       ${d.overbooked.length ? `<div class="card mt"><h2 class="sec err">Overbooked channel bookings</h2>${table(['Guest', 'Room type', 'Dates', 'Channel'], d.overbooked.map((o) => `<tr><td><a href="#res/${o.id}">${esc(guestName(o))}</a></td><td>${esc(o.room_type_name)}</td><td>${fdate(o.arrival)} → ${fdate(o.departure)}</td><td>${esc(o.source)}</td></tr>`))}</div>` : ''}
       <div class="grid g2 mt">
-        <div class="card"><h2 class="sec">Arrivals</h2>${table(['Guest', 'Room type', 'Source', ''], d.arrivals.map((a) => `<tr><td><a href="#res/${a.id}">${esc(guestName(a))}</a><br><span class="small muted">${esc(a.code)}</span></td><td>${esc(a.room_type_name)}</td><td>${esc(a.source)}</td><td class="right">${CAN['frontdesk.checkin'] ? `<button class="btn btn-sm btn-gold" data-action="check-in" data-id="${a.id}">Check in</button>` : ''}</td></tr>`), 'No arrivals waiting.')}</div>
+        <div class="card"><div class="row between"><h2 class="sec">Arrivals</h2>${d.arrivals.some((a) => !a.room_number) && (CAN['frontdesk.checkin'] || CAN['reservations.manage']) ? '<button class="btn btn-sm btn-ghost" data-action="auto-assign">Give rooms to arrivals</button>' : ''}</div>${table(['Guest', 'Room', 'Source', ''], d.arrivals.map((a) => `<tr><td><a href="#res/${a.id}">${esc(guestName(a))}</a><br><span class="small muted">${esc(a.code)}</span></td><td>${a.room_number ? `<b>${esc(a.room_number)}</b> ` : ''}<span class="small muted">${esc(a.room_type_name)}</span></td><td>${esc(a.source)}</td><td class="right">${CAN['frontdesk.checkin'] ? `<button class="btn btn-sm btn-gold" data-action="check-in" data-id="${a.id}">Check in</button>` : ''}</td></tr>`), 'No arrivals waiting.')}</div>
         <div class="card"><h2 class="sec">Departures</h2>${table(['Room', 'Guest', '#Balance', ''], d.departures.map((x) => `<tr><td>${esc(x.room_number)}</td><td><a href="#res/${x.id}">${esc(guestName(x))}</a></td><td class="num">${num(x.balance)}</td><td class="right"><a class="btn btn-sm" href="#res/${x.id}">Open bill</a></td></tr>`), 'No departures waiting.')}</div>
       </div>
       <p class="muted small mt">${d.last_audit ? `Last night audit: ${fdate(d.last_audit.business_date)} · ${d.last_audit.room_charges_posted} room charges · ${ugx(d.last_audit.room_revenue)}` : 'No night audit has been run yet.'}</p>`;
@@ -212,13 +217,15 @@
 
   VIEWS.board = async () => {
     const d = await GET('/room-board');
-    const floors = [...new Set(d.rooms.map((r) => r.floor || '–'))];
+    const key = (r) => `${r.building || ''}|${r.floor || '–'}`;
+    const floors = [...new Set(d.rooms.map(key))];
+    const fl = (k) => { const [b, f] = k.split('|'); return `${b ? esc(b) + ' · ' : ''}${/^\d+$/.test(f) ? `Floor ${esc(f)}` : esc(f)}`; };
     const cls = (r) => r.reservation_id ? (r.departure <= d.business_date ? 'dep' : 'occ') : { clean: 'vc', dirty: 'dirty', out_of_order: 'ooo' }[r.hk_status];
     return `<div class="page-head"><div><h1 class="page">Room board</h1><p class="sub">Click a room to open the guest's bill or update housekeeping.</p></div></div>
       <div class="legend"><span><i class="lg occ"></i>Occupied</span><span><i class="lg dep"></i>Due out</span><span><i class="lg vc"></i>Vacant clean</span><span><i class="lg dirty"></i>Vacant dirty</span><span><i class="lg ooo"></i>Out of order</span></div>
-      ${floors.map((f) => `<div class="card mt"><h2 class="sec">Floor ${esc(f)}</h2><div class="rack">${d.rooms.filter((r) => (r.floor || '–') === f).map((r) => `
+      ${floors.map((f) => `<div class="card mt"><h2 class="sec">${fl(f)}</h2><div class="rack">${d.rooms.filter((r) => key(r) === f).map((r) => `
         <button class="room ${cls(r)}" data-action="room" data-id="${r.id}" data-res="${r.reservation_id || ''}" data-number="${esc(r.number)}" data-hk="${r.hk_status}" data-type="${esc(r.type_code)}">
-          <b>${esc(r.number)}</b><small>${esc(r.type_name)}</small><span class="g">${r.reservation_id ? esc(guestName(r)) : r.block && r.block.kind === 'out_of_order' ? esc(r.block.reason) : HK[r.hk_status]}</span>${r.block && r.block.kind === 'out_of_order' && !r.reservation_id ? `<small>${esc(blockUntil(r.block))}</small>` : ''}${r.block?.kind === 'out_of_service' ? `<small class="oos">⚠ ${esc(r.block.reason)}</small>` : ''}${r.next_block && !r.block ? `<small>Blocked from ${fdate(r.next_block)}</small>` : ''}${r.reservation_id ? `<small>Until ${fdate(r.departure)}${r.hk_status === 'dirty' ? ' · service' : ''}</small>` : ''}</button>`).join('')}</div></div>`).join('')}`;
+          <b>${esc(r.number)}</b><small>${esc(r.type_name)}</small><span class="g">${r.reservation_id ? esc(guestName(r)) : r.block && r.block.kind === 'out_of_order' ? esc(r.block.reason) : HK[r.hk_status]}</span>${r.block && r.block.kind === 'out_of_order' && !r.reservation_id ? `<small>${esc(blockUntil(r.block))}</small>` : ''}${r.block?.kind === 'out_of_service' ? `<small class="oos">⚠ ${esc(r.block.reason)}</small>` : ''}${r.next_block && !r.block ? `<small>Blocked from ${fdate(r.next_block)}</small>` : ''}${r.reservation_id ? `<small>Until ${fdate(r.departure)}${r.hk_status === 'dirty' ? ' · service' : ''}</small>` : ''}${!r.reservation_id && r.held ? `<small class="held">${r.held.arrival <= d.business_date ? 'Arriving' : 'Held from ' + fdate(r.held.arrival)}: ${esc(r.held.guest)}</small>` : ''}</button>`).join('')}</div></div>`).join('')}`;
   };
 
   VIEWS.reservations = async () => {
@@ -241,6 +248,7 @@
     if (r.status === 'in_house' && CAN['folio.post']) acts.push(`<button class="btn btn-ghost" data-action="post-charge" data-id="${r.id}">Post charge</button>`);
     if (['reserved', 'in_house', 'checked_out'].includes(r.status) && CAN['payments.post'] && (r.status !== 'checked_out' || t.balance > 0)) acts.push(`<button class="btn btn-ghost" data-action="take-payment" data-id="${r.id}" data-bal="${t.balance}" data-company="${esc(r.company_name || '')}">Take payment</button>`);
     if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="edit-res" data-id="${r.id}">Edit stay</button>`);
+    if (r.status === 'reserved' && (CAN['frontdesk.checkin'] || CAN['reservations.manage'])) acts.push(`<button class="btn btn-ghost" data-action="assign-room" data-id="${r.id}">${r.room_number ? 'Change room' : 'Assign room'}</button>`);
     if (r.status === 'reserved' && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="cancel-res" data-id="${r.id}">Cancel booking</button>`);
     if (r.status === 'in_house' && CAN['frontdesk.checkin']) acts.push(`<button class="btn btn-ghost" data-action="move-room" data-id="${r.id}">Move room</button>`);
     if (['reserved', 'in_house'].includes(r.status) && CAN['reservations.manage']) acts.push(`<button class="btn btn-ghost" data-action="extend-stay" data-id="${r.id}">Extend stay</button>`);
@@ -253,7 +261,7 @@
       ${letterhead(t.balance > 0 ? 'Invoice' : 'Receipt', [['No.', r.code], ['Date', fdateLong(bd)], ...(r.company_name ? [['Bill to', r.company_name]] : [])])}
       <div class="card invoice"><div class="inv-head"><div>
         <dl class="kv"><dt>Guest</dt><dd><a href="#guest/${r.guest_id}">${esc(guestName(r))}</a></dd><dt>Phone</dt><dd>${esc(r.phone || '–')}</dd><dt>Email</dt><dd>${esc(r.email || '–')}</dd><dt>ID</dt><dd>${esc([r.id_type, r.id_number].filter(Boolean).join(' ') || '–')}</dd>${r.company_name ? `<dt>Company</dt><dd>${esc(r.company_name)}</dd>` : ''}</dl></div>
-        <dl class="kv"><dt>Room</dt><dd>${esc(r.room_number || 'Not assigned')} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd>${r.eta ? `<dt>Arrival time</dt><dd>${esc(r.eta)}</dd>` : ''}${r.market_segment ? `<dt>Segment</dt><dd>${esc(SEG_L[r.market_segment] || r.market_segment)}</dd>` : ''}<dt>Guarantee</dt><dd>${esc(GUAR_L[r.guarantee] || 'Not guaranteed')}${r.booker_reference ? ` · ref ${esc(r.booker_reference)}` : ''}</dd>${r.travel_agent ? `<dt>Booked by</dt><dd>${esc(r.travel_agent)}</dd>` : ''}</dl></div>
+        <dl class="kv"><dt>Room</dt><dd>${r.room_number ? `${esc(r.room_number)}${r.status === 'reserved' ? ' <span class="small muted">(held for this booking)</span>' : ''}` : 'Not assigned yet'} · ${esc(r.room_type_name)}</dd><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)} (${nights(r.arrival, r.departure)} nights)</dd><dt>Rate</dt><dd>${f.nights.length ? ugx(f.nights.reduce((a, n) => a + n.rate, 0)) + ' total' : ugx(r.rate) + ' / night'}${r.rate_plan_name ? ' · ' + esc(r.rate_plan_name) : ''}</dd><dt>Guests</dt><dd>${r.adults} adult(s)${r.children ? `, ${r.children} child(ren)` : ''}</dd><dt>Source</dt><dd>${esc(r.source)}${r.external_ref ? ` · ref ${esc(r.external_ref)}` : ''}${r.commission_pct != null ? ` · ${num(r.commission_pct)}% commission` : ''}</dd>${r.eta ? `<dt>Arrival time</dt><dd>${esc(r.eta)}</dd>` : ''}${r.market_segment ? `<dt>Segment</dt><dd>${esc(SEG_L[r.market_segment] || r.market_segment)}</dd>` : ''}<dt>Guarantee</dt><dd>${esc(GUAR_L[r.guarantee] || 'Not guaranteed')}${r.booker_reference ? ` · ref ${esc(r.booker_reference)}` : ''}</dd>${r.travel_agent ? `<dt>Booked by</dt><dd>${esc(r.travel_agent)}</dd>` : ''}</dl></div>
         ${r.allergies ? `<p class="note err no-print"><b>Allergies:</b> ${esc(r.allergies)}</p>` : ''}
         ${prefSummary(r) ? `<p class="note no-print"><b>Usually likes:</b> ${esc(prefSummary(r))}</p>` : ''}
         ${r.special_requests ? `<p class="note"><b>Guest requests:</b> ${esc(r.special_requests)}</p>` : ''}
@@ -339,10 +347,10 @@
         <div class="two"><label>Logo (PNG, JPG or WebP)<input type="file" name="logo_file" accept="image/png,image/jpeg,image/webp"></label><div>${SETTINGS.logo ? `<img class="logo-preview" src="${esc(SETTINGS.logo)}" alt="Current logo"><label class="row small"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label>` : '<p class="small muted">No logo yet.</p>'}</div></div>
         <div class="actions"><button class="btn btn-gold">Save letterhead</button></div></form></div>
       `,
-      rooms: () => `<div class="card"><div class="row between"><h2 class="sec">Room types</h2><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div>
-        ${table(['Code', 'Name', 'Bed', '#m²', '#Rate (UGX)', '#Guests', '#Extra bed', 'Rooms', 'On sale', ''], types.map((t) => `<tr><td><code>${esc(t.code)}</code></td><td><b>${esc(t.name)}</b>${t.amenities?.length ? `<br><span class="small muted">${t.amenities.map((a) => AMEN_L[a] || a).join(', ')}</span>` : ''}</td><td>${esc(BED_L[t.bed_type] || '')}</td><td class="num">${t.size_sqm ?? ''}</td><td class="num">${num(t.base_rate)}</td><td class="num">${t.max_occupancy}${t.max_adults ? `<span class="small muted"> (${t.max_adults}A${t.max_children != null ? `+${t.max_children}C` : ''})</span>` : ''}</td><td class="num">${t.extra_bed_rate != null ? num(t.extra_bed_rate) : '–'}</td><td>${rooms.filter((r) => r.room_type_id === t.id && r.active).length}</td><td>${t.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
+      rooms: () => `<div class="card"><div class="row between"><h2 class="sec">Room types</h2><div class="row"><button class="btn btn-sm btn-ghost" data-action="rooms-import">Set up many rooms at once</button><button class="btn btn-sm btn-gold" data-action="room-type">+ Room type</button></div></div>
+        ${table(['Group', 'Code', 'Name', 'Bed', '#m²', '#Rate (UGX)', '#Guests', '#Extra bed', 'Rooms', 'On sale', ''], types.map((t) => `<tr><td>${esc(t.category || '')}</td><td><code>${esc(t.code)}</code></td><td><b>${esc(t.name)}</b>${t.amenities?.length ? `<br><span class="small muted">${t.amenities.map((a) => AMEN_L[a] || a).join(', ')}</span>` : ''}</td><td>${esc(BED_L[t.bed_type] || '')}</td><td class="num">${t.size_sqm ?? ''}</td><td class="num">${t.base_rate ? num(t.base_rate) : '<span class="err">set the rate</span>'}</td><td class="num">${t.max_occupancy}${t.max_adults ? `<span class="small muted"> (${t.max_adults}A${t.max_children != null ? `+${t.max_children}C` : ''})</span>` : ''}</td><td class="num">${t.extra_bed_rate != null ? num(t.extra_bed_rate) : '–'}</td><td>${rooms.filter((r) => r.room_type_id === t.id && r.active).length}</td><td>${t.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-type" data-id="${t.id}">Edit</button></td></tr>`))}</div>
       <div class="card mt"><div class="row between"><h2 class="sec">Rooms</h2><button class="btn btn-sm btn-gold" data-action="room-edit">+ Room</button></div>
-        ${table(['Room', 'Type', 'Floor', 'View', 'Beds', 'Features', 'Housekeeping', 'In service', ''], rooms.map((r) => `<tr><td><code>${esc(r.number)}</code></td><td>${esc(r.type_name)}</td><td>${esc(r.floor || '')}</td><td>${esc(VIEW_L[r.view] || '')}</td><td>${esc(BED_L[r.bed_setup] || '')}</td><td class="small">${[...(r.features || []).map((f) => FEAT_L[f] || f), r.connects_to ? `connects to ${r.connects_to}` : ''].filter(Boolean).map(esc).join(', ')}</td><td>${HK[r.hk_status]}</td><td>${r.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-edit" data-id="${r.id}">Edit</button></td></tr>`))}</div>`,
+        ${table(['Room', 'Type', 'Building', 'Floor', 'View', 'Beds', 'Features', 'Housekeeping', 'In service', ''], rooms.map((r) => `<tr><td><code>${esc(r.number)}</code></td><td>${esc(r.type_name)}</td><td>${esc(r.building || '')}</td><td>${esc(r.floor || '')}</td><td>${esc(VIEW_L[r.view] || '')}</td><td>${esc(BED_L[r.bed_setup] || '')}</td><td class="small">${[...(r.features || []).map((f) => FEAT_L[f] || f), r.connects_to ? `connects to ${r.connects_to}` : ''].filter(Boolean).map(esc).join(', ')}</td><td>${HK[r.hk_status]}</td><td>${r.active ? pill('Yes', 'ok') : pill('No')}</td><td class="right"><button class="btn btn-sm btn-ghost" data-action="room-edit" data-id="${r.id}">Edit</button></td></tr>`))}</div>`,
       security: () => `${CAN['users.manage'] ? `<div class="card"><h2 class="sec">Security: two-step sign-in</h2><form class="form" data-form="security">
         <p class="small">Require a code from an authenticator app, as well as the password, for these roles. Each person sets it up at their next sign-in. Recommended for everyone who sees money or guest data.</p>
         <div class="chips-row">${Object.entries(ROLE).map(([k, l]) => `<label class="row small"><input type="checkbox" name="r_${k}" value="1" ${(SETTINGS.mfa_required_roles || []).includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
@@ -355,7 +363,7 @@
         : `<p>Fill a new, unused system with 45 days of realistic made-up activity (bookings, in-house guests, restaurant and bar sales, extras, expenses and closed days) so you can explore every screen with real-looking figures. It can be removed completely later.</p><p class="small muted" id="demo-progress"></p><div class="actions"><button class="btn" data-action="demo-add">Add sample data</button></div>`}</div>` : ''}
       `,
     };
-    const list = [['property', 'Property & letterhead'], ['rooms', `Room types & rooms (${rooms.length})`], ...(CAN['users.manage'] ? [['security', 'Security & backups'], ['data', 'Sample data']] : [])];
+    const list = [['property', 'Property & letterhead'], ['rooms', `Room types & rooms (${rooms.filter((x) => x.active).length})`], ...(CAN['users.manage'] ? [['security', 'Security & backups'], ['data', 'Sample data']] : [])];
     return `<div class="page-head"><div><h1 class="page">Settings</h1><p class="sub">Property details, letterhead, rooms, security and data.</p></div></div>
       ${tabs('set', list, 'property')}` + (parts[t] || parts.property)();
   };
@@ -955,12 +963,12 @@
 
   /* ---------- forms & actions ---------- */
   async function checkInForm(id) {
-    const [f, rooms] = await Promise.all([GET(`/reservations/${id}`), GET('/room-board')]);
+    const [f, ro] = await Promise.all([GET(`/reservations/${id}`), GET(`/reservations/${id}/rooms`)]);
     const r = f.reservation;
-    const free = rooms.rooms.filter((x) => !x.reservation_id && x.hk_status !== 'out_of_order');
-    const sameType = free.filter((x) => x.type_code === r.room_type_code), others = free.filter((x) => x.type_code !== r.room_type_code);
-    const label = (x) => `${x.number} · ${x.type_name}${x.hk_status === 'dirty' ? ' (not cleaned)' : ''}`;
-    const best = sameType.find((x) => x.hk_status === 'clean') || sameType[0] || free[0];
+    const free = ro.rooms.filter((x) => (x.free || x.current) && x.hk_status !== 'out_of_order');
+    const sameType = free.filter((x) => x.same_type), others = free.filter((x) => !x.same_type);
+    const label = (x) => `${x.number} · ${x.type_name}${x.current ? ' (held for this booking)' : ''}${x.hk_status === 'dirty' ? ' (not cleaned)' : ''}`;
+    const best = free.find((x) => x.current) || sameType.find((x) => x.hk_status === 'clean') || sameType[0] || free[0];
     modal(`Check in · ${guestName(r)}`, `<form class="form" data-form="check-in">
       <dl class="kv"><dt>Stay</dt><dd>${fdate(r.arrival)} → ${fdate(r.departure)}</dd><dt>Booked</dt><dd>${esc(r.room_type_name)} · ${ugx(r.rate)}/night</dd></dl>
       <label>Room<select name="room_id" required>${sameType.length ? `<optgroup label="${esc(r.room_type_name)}">${opts(sameType.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}${others.length ? `<optgroup label="Other types (upgrade/move)">${opts(others.map((x) => [x.id, label(x)]), best?.id)}</optgroup>` : ''}</select></label>
@@ -1681,9 +1689,9 @@
         async (v) => { await PUT(`/reservations/${d.id}/registration`, regBody(v)); return 'Registration saved.'; });
     },
     'move-room': async (d) => {
-      const [f, board] = await Promise.all([GET(`/reservations/${d.id}`), GET('/room-board')]);
+      const [f, ro] = await Promise.all([GET(`/reservations/${d.id}`), GET(`/reservations/${d.id}/rooms`)]);
       const r = f.reservation;
-      const free = board.rooms.filter((x) => !x.reservation_id && x.hk_status !== 'out_of_order');
+      const free = ro.rooms.filter((x) => x.free && !x.current && x.hk_status !== 'out_of_order');
       const label = (x) => `${x.number} · ${x.type_name}${x.hk_status === 'dirty' ? ' (not cleaned)' : ''}`;
       modal(`Move ${guestName(r)} from room ${r.room_number}`, `<form class="form" data-form="ops-modal">
         <label>New room<select name="room_id" required>${opts(free.map((x) => [x.id, label(x)]))}</select></label>
@@ -2178,6 +2186,7 @@
     'room-edit': async (d) => {
       const [types, rooms] = await Promise.all([GET('/room-types'), GET('/rooms')]); const r = d.id ? rooms.find((x) => String(x.id) === d.id) : null;
       modal(r ? `Edit room ${r.number}` : 'New room', `<form class="form" data-form="room"><div class="two"><label>Room number<input name="number" value="${esc(r?.number || '')}" ${r ? 'disabled' : 'required'} maxlength="10"></label><label>Floor<input name="floor" value="${esc(r?.floor || '')}" maxlength="10"></label></div>
+        <label>Building / wing<input name="building" value="${esc(r?.building || '')}" maxlength="60" list="bld-list" placeholder="e.g. Hotel, Apartments"></label><datalist id="bld-list">${[...new Set(rooms.map((x) => x.building).filter(Boolean))].map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
         <label>Room type<select name="room_type_id">${opts(types.map((t) => [t.id, t.name]), r?.room_type_id)}</select></label>${r ? `<label>Notes<input name="notes" value="${esc(r.notes || '')}"></label><label class="row"><input type="checkbox" name="active" value="1" ${r.active ? 'checked' : ''}> Active (in service)</label>` : ''}
         <div class="actions">${cancelBtn}<button class="btn btn-gold">Save</button></div></form>`,
         async (v) => { if (r) await PUT(`/rooms/${r.id}`, { room_type_id: Number(v.room_type_id), floor: v.floor, notes: v.notes, active: !!v.active }); else await POST('/rooms', { number: v.number, floor: v.floor, room_type_id: Number(v.room_type_id) }); return 'Room saved.'; });
@@ -2911,6 +2920,7 @@
       const t = d.id ? (await GET('/room-types')).find((x) => String(x.id) === d.id) : null;
       modal(t ? `Room type · ${t.name}` : 'New room type', `<form class="form" data-form="rt-form"><div class="bk"><div>
         <section class="bk-sec"><h3>Room type</h3><div class="three"><label>Code *<input name="code" value="${esc(t?.code || '')}" ${t ? 'disabled' : 'required'} maxlength="10" placeholder="DLX"></label><label>Name *<input name="name" value="${esc(t?.name || '')}" required maxlength="80"></label><label>Display order<input name="sort" type="number" value="${t?.sort ?? 0}"></label></div>
+          <label>Group<input name="category" value="${esc(t?.category || '')}" maxlength="60" list="rtgrp-list" placeholder="e.g. Hotel rooms, Serviced apartments"></label><datalist id="rtgrp-list"><option value="Hotel rooms"><option value="Serviced apartments"><option value="Suites"><option value="Villas"></datalist>
           <label>Description (website and booking confirmations)<textarea name="description" rows="3" maxlength="1000" placeholder="Spacious room with a lake view, king bed and rain shower.">${esc(t?.description || '')}</textarea></label>
           <div class="three"><label>Bed<select name="bed_type">${opts([['', '–'], ...Object.entries(BED_L)], t?.bed_type || '')}</select></label><label>Size (m²)<input name="size_sqm" type="number" min="5" max="1000" value="${t?.size_sqm ?? ''}"></label><label>Standard rate (UGX) *<input name="base_rate" type="number" min="0" step="1000" value="${t?.base_rate ?? ''}" required></label></div></section>
         <section class="bk-sec"><h3>In the room</h3>${chips('amenities', AMEN_L, t?.amenities || [])}</section></div>
@@ -2918,7 +2928,7 @@
           <label>Extra bed (UGX / night)<input name="extra_bed_rate" type="number" min="0" step="1000" value="${t?.extra_bed_rate ?? ''}" placeholder="Not offered"></label>${t ? `<label class="row mt"><input type="checkbox" name="active" value="1" ${t.active ? 'checked' : ''}> On sale</label>` : ''}</section>
         <div class="actions">${cancelBtn}<button class="btn btn-gold">Save room type</button></div></aside></div></form>`,
       async (v) => {
-        const body = { code: v.code, name: v.name, base_rate: Number(v.base_rate), max_occupancy: Number(v.max_occupancy), description: v.description, bed_type: v.bed_type, size_sqm: v.size_sqm, max_adults: v.max_adults, max_children: v.max_children, extra_bed_rate: v.extra_bed_rate, sort: v.sort, amenities: chipsFrom(v, 'amenities') };
+        const body = { category: v.category, code: v.code, name: v.name, base_rate: Number(v.base_rate), max_occupancy: Number(v.max_occupancy), description: v.description, bed_type: v.bed_type, size_sqm: v.size_sqm, max_adults: v.max_adults, max_children: v.max_children, extra_bed_rate: v.extra_bed_rate, sort: v.sort, amenities: chipsFrom(v, 'amenities') };
         if (t) { body.active = !!v.active; await PUT(`/room-types/${t.id}`, body); } else await POST('/room-types', body); return 'Room type saved.';
       });
       $('#modal .modal').classList.add('wide');
@@ -2933,7 +2943,7 @@
         ${r ? `<label class="row"><input type="checkbox" name="active" value="1" ${r.active ? 'checked' : ''}> In service</label>` : ''}
         <div class="actions">${cancelBtn}<button class="btn btn-gold">Save room</button></div></form>`,
       async (v) => {
-        const body = { room_type_id: Number(v.room_type_id), floor: v.floor, view: v.view, bed_setup: v.bed_setup, connects_to: v.connects_to, notes: v.notes, features: chipsFrom(v, 'features') };
+        const body = { room_type_id: Number(v.room_type_id), floor: v.floor, building: v.building, view: v.view, bed_setup: v.bed_setup, connects_to: v.connects_to, notes: v.notes, features: chipsFrom(v, 'features') };
         if (r) await PUT(`/rooms/${r.id}`, { ...body, active: !!v.active }); else await POST('/rooms', { ...body, number: v.number }); return 'Room saved.';
       });
     },
@@ -3722,6 +3732,39 @@
     const r = await POST('/assistant/test', {});
     if (out) out.innerHTML = r.ok ? `<p class="ok-note small">✓ Connected: ${esc(r.model)} answered “${esc(r.reply)}” in ${(r.ms / 1000).toFixed(1)} s (${r.input_tokens + r.output_tokens} tokens, a fraction of a US cent).</p>` : `<p class="err small">✗ ${esc(r.error)}</p>`;
   };
+
+  /* ================= Phase 22: rooms held for bookings, room layout import ================= */
+  OPS_A['assign-room'] = async (d) => {
+    const o = await GET(`/reservations/${d.id}/rooms`), r = o.reservation;
+    const same = o.rooms.filter((x) => x.same_type);
+    const label = (x) => `${x.number}${x.building ? ' · ' + x.building : ''}${x.floor ? ' · floor ' + x.floor : ''}${x.view ? ' · ' + (VIEW_L[x.view] || x.view) : ''}${x.current ? ' (current)' : ''}`;
+    const free = same.filter((x) => x.free || x.current), busy = same.filter((x) => !x.free && !x.current);
+    modal(`${r.room_id ? 'Change room' : 'Assign a room'} · ${r.code}`, `<form class="form" data-form="ops-modal">
+      <p class="small">${esc(r.room_type_name)} · ${fdate(r.arrival)} → ${fdate(r.departure)}. The room is held for this booking: nobody else can be given it for these nights, and it is ready at check-in.</p>
+      <label>Room<select name="room_id">${free.length ? opts(free.map((x) => [x.id, label(x)]), r.room_id || free.find((x) => x.hk_status === 'clean')?.id) : '<option value="">No free room of this type</option>'}</select></label>
+      ${busy.length ? `<details class="small"><summary>Not free for these nights (${busy.length})</summary><ul>${busy.map((x) => `<li><b>${esc(x.number)}</b>: ${esc(x.reason)}</li>`).join('')}</ul></details>` : ''}
+      <p class="small muted">To give a room of another type, change the room type with Edit stay first (that checks the price and availability).</p>
+      <div class="actions">${r.room_id ? '<button type="button" class="btn btn-ghost" data-action="release-room" data-id="' + r.id + '">Release the room</button>' : ''}${cancelBtn}<button class="btn btn-gold" ${free.length ? '' : 'disabled'}>Hold this room</button></div></form>`,
+    async (v) => { const x = await POST(`/reservations/${d.id}/assign-room`, { room_id: Number(v.room_id) }); return `Room ${esc(x.room)} is held for this booking.`; });
+  };
+  OPS_A['release-room'] = async (d) => { await POST(`/reservations/${d.id}/assign-room`, { room_id: null }); closeModal(); toast('Room released.'); refresh(); };
+  OPS_A['auto-assign'] = async () => {
+    const x = await POST('/reservations/auto-assign', {});
+    toast(`${x.assigned.length ? `Rooms given: ${x.assigned.map((a) => `${a.code} → ${a.room}`).join(', ')}.` : 'No rooms given.'}${x.without_room.length ? ` No free room of the booked type for ${x.without_room.join(', ')}.` : ''}`, !!x.without_room.length);
+    refresh();
+  };
+  OPS_A['rooms-import'] = () => {
+    const amaya = /amaya/i.test(SETTINGS.property_name || '');
+    modal('Set up many rooms at once', `<form class="form" data-form="ops-modal">
+      <p class="small">One room per line: <code>room, room type code, room type name, group, building, floor, view</code>. New room types are created; rooms already set up are updated. Set each room type's price afterwards.</p>
+      ${amaya ? '<p><button type="button" class="btn btn-sm" data-action="rooms-preset" data-name="amaya">Fill in Amaya Hotel &amp; Luxury Suites (36 rooms, 7 types)</button></p>' : ''}
+      <textarea name="text" rows="14" class="mono" required placeholder="101,SPV,Studio (Pool view),Serviced apartments,Apartments,1,pool"></textarea>
+      <label class="row"><input type="checkbox" name="replace" value="1"> This is the full list: take rooms and room types that are not in it out of service</label>
+      <div class="actions">${cancelBtn}<button class="btn btn-gold">Save rooms</button></div></form>`,
+    async (v) => { const x = await POST('/rooms/import', { text: v.text, replace: !!v.replace }); return `${x.rooms} rooms saved: ${x.rooms_created} new, ${x.rooms_updated} updated, ${x.types_created} new room type(s)${x.rooms_retired ? `, ${x.rooms_retired} room(s) and ${x.types_retired} type(s) taken out of service` : ''}. Now set each room type's price.`; });
+    $('#modal .modal').classList.add('wide');
+  };
+  OPS_A['rooms-preset'] = async (d) => { const t = await (await fetch(`/api/rooms/presets/${encodeURIComponent(d.name)}`, { credentials: 'same-origin' })).text(); const ta = $('#modal-body textarea[name=text]'); if (ta) ta.value = t; };
 
   Object.assign(A, OPS_A); Object.assign(FORMS, OPS_FORMS);
 
